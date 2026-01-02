@@ -7,6 +7,9 @@ import urllib.parse
 from datetime import datetime, date
 import pytz
 
+# --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
+from gspread_formatting import *
+
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="Phòng Nội dung số và Truyền thông", page_icon="🏢", layout="wide")
 
@@ -79,13 +82,7 @@ def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
     except: pass
 
 def check_quyen(current_user, role, row, df_da):
-    """
-    Hàm kiểm tra quyền chung cho hệ thống (Trừ Vở trực số có logic riêng).
-    Tổ chức sản xuất ở đây chỉ được coi là Nhân viên bình thường.
-    """
-    if role == 'LanhDao': return 2 # Chỉ Lãnh đạo mới có quyền Admin hệ thống
-    
-    # Logic cho Nhân viên + Tổ chức sản xuất (như nhau)
+    if role == 'LanhDao': return 2
     if str(row.get('NguoiTao','')).strip() == current_user: return 2
     try:
         leads = str(df_da[df_da['TenDuAn']==row['DuAn']].iloc[0]['TruongNhom'])
@@ -93,6 +90,63 @@ def check_quyen(current_user, role, row, df_da):
     except: pass
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
+
+# --- HÀM TRANG ĐIỂM CHO SHEET (FORMATTING) ---
+def dinh_dang_dep(wks):
+    """
+    Hàm này sẽ tô màu, kẻ bảng, chỉnh độ rộng cột cho giống ảnh mẫu.
+    """
+    # 1. Gộp ô tiêu đề chính (A1 -> L1) và căn giữa, tô màu Xanh Cyan đậm
+    wks.merge_cells('A1:L1')
+    format_cell_range(wks, 'A1:L1', CellFormat(
+        backgroundColor=Color(0, 1, 1), # Cyan
+        textFormat=TextFormat(bold=True, fontSize=14),
+        horizontalAlignment='CENTER'
+    ))
+
+    # 2. Hàng chức danh (Row 2): Màu xanh nhạt, chữ đậm
+    format_cell_range(wks, 'A2:L2', CellFormat(
+        backgroundColor=Color(0.8, 1, 1), # Light Cyan
+        textFormat=TextFormat(bold=True),
+        horizontalAlignment='CENTER',
+        borders=Borders(
+            top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID")
+        )
+    ))
+
+    # 3. Hàng nhân sự (Row 3): Chữ thường, căn giữa
+    format_cell_range(wks, 'A3:L3', CellFormat(
+        horizontalAlignment='CENTER',
+        borders=Borders(
+            top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID")
+        )
+    ))
+
+    # 4. Hàng tiêu đề cột (Row 4): MÀU VÀNG, Chữ Đậm
+    format_cell_range(wks, 'A4:L4', CellFormat(
+        backgroundColor=Color(1, 1, 0), # Yellow
+        textFormat=TextFormat(bold=True),
+        horizontalAlignment='CENTER',
+        borders=Borders(
+            top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID")
+        )
+    ))
+
+    # 5. Chỉnh độ rộng cột (Pixel)
+    set_column_width(wks, 'A', 40)  # STT (Nhỏ)
+    set_column_width(wks, 'B', 400) # NỘI DUNG (Rất rộng)
+    set_column_width(wks, 'C', 120) # Định dạng
+    set_column_width(wks, 'D', 120) # Nền tảng
+    set_column_width(wks, 'E', 100) # Status
+    set_column_width(wks, 'G', 80)  # Nguồn
+    set_column_width(wks, 'H', 150) # Nhân sự
+    set_column_width(wks, 'I', 150) # Ý kiến
+    set_column_width(wks, 'J', 150) # Link Duyệt
+    set_column_width(wks, 'L', 150) # Link SP
+
+    # 6. Bật Wrap Text (Xuống dòng tự động) cho cột Nội Dung (B)
+    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP'))
+
 
 # ================= 2. AUTH =================
 if 'dang_nhap' not in st.session_state:
@@ -131,14 +185,11 @@ else:
     
     sh_trucso = ket_noi_trucso()
     
-    # --- PHÂN QUYỀN HIỂN THỊ TAB ---
-    # Chỉ Lãnh đạo mới thấy Nhật ký. Tổ chức sản xuất cũng KHÔNG thấy.
     if role == 'LanhDao':
         tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vở Trực Số", "📧 Email", "📜 Nhật ký"])
     else:
         tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vở Trực Số", "📧 Email"])
 
-    # Load Data Chung
     df_duan = lay_du_lieu_main(sh_main.worksheet("DuAn"))
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
     df_users = lay_du_lieu_main(sh_main.worksheet("TaiKhoan"))
@@ -176,8 +227,6 @@ else:
         df_cv = lay_du_lieu_main(sh_main.worksheet("CongViec"))
         if not df_cv.empty:
             if da_filter != "All": df_cv = df_cv[df_cv['DuAn']==da_filter]
-            
-            # Phân quyền sửa việc (TC SX ở đây là Nhân viên bình thường)
             edits = {f"{r['TenViec']} ({i+2})": {"id": i, "lv": check_quyen(curr_name, role, r, df_duan)} for i, r in df_cv.iterrows() if check_quyen(curr_name, role, r, df_duan)>0}
             
             if edits:
@@ -205,7 +254,6 @@ else:
 
     # ================= TAB 2: DỰ ÁN =================
     with tabs[1]:
-        # Chỉ Lãnh đạo mới được tạo dự án. TC SX cũng KHÔNG được.
         if role == 'LanhDao':
             with st.form("new_da"):
                 d_n = st.text_input("Tên DA"); d_m = st.text_area("Mô tả"); d_l = st.multiselect("Lead", list_nv)
@@ -222,10 +270,7 @@ else:
         try: wks_today = sh_trucso.worksheet(tab_name_today); tab_exists = True
         except gspread.WorksheetNotFound: tab_exists = False
 
-        # -------------------------------------------------------------
-        # 1. QUẢN LÝ VỎ TRỰC (LÃNH ĐẠO + TỔ CHỨC SẢN XUẤT)
-        # -------------------------------------------------------------
-        # Đây là nơi duy nhất TC SX có thêm quyền
+        # --- PHÂN QUYỀN QUẢN LÝ VỎ ---
         is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat'])
         
         if is_shift_admin:
@@ -239,15 +284,22 @@ else:
                             with cols[i%3]: 
                                 val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, key=f"cr_{i}")
                                 roster_vals.append(val if val != "--" else "")
-                        if st.form_submit_button("🚀 Tạo Sổ Mới"):
+                        if st.form_submit_button("🚀 Tạo Sổ Mới (Có định dạng đẹp)"):
                             try:
+                                # Tạo Sheet
                                 w = sh_trucso.add_worksheet(title=tab_name_today, rows=100, cols=20)
+                                # Ghi dữ liệu
                                 w.update_cell(1, 1, f"VỞ TIN BÀI VIETNAM TODAY {tab_name_today}")
                                 w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                 for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
                                 w.update_cell(3, 1, "NHÂN SỰ:")
                                 for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
                                 w.append_row(CONTENT_HEADER)
+                                
+                                # --- ÁP DỤNG ĐỊNH DẠNG ---
+                                st.info("Đang tô màu và kẻ bảng...")
+                                dinh_dang_dep(w)
+                                
                                 st.success("Đã tạo!"); st.rerun()
                             except Exception as e: st.error(str(e))
                 else:
@@ -273,9 +325,7 @@ else:
                             sh_trucso.del_worksheet(wks_today)
                             st.success("Đã xóa sổ!"); st.rerun()
 
-        # -------------------------------------------------------------
-        # 2. HIỂN THỊ & NHẬP LIỆU (CHO MỌI NGƯỜI)
-        # -------------------------------------------------------------
+        # --- NHẬP LIỆU ---
         if tab_exists:
             # Hiện Ekip (View Only)
             with st.expander("ℹ️ Ekip trực hôm nay (Nhấn để xem)", expanded=True):
@@ -299,7 +349,6 @@ else:
                                     st.markdown(f"<p style='color:#31333F; font-size:16px; font-weight:bold;'>{r_names[idx]}</p>", unsafe_allow_html=True)
                 except: st.caption("Lỗi đọc ekip.")
 
-            # Form Nhập Tin
             st.markdown("### ➕ Thêm Tin Bài / Đầu Mục")
             with st.form("add_news_form"):
                 c1, c2 = st.columns([3, 1])
