@@ -21,19 +21,51 @@ SHEET_TRUCSO = "VoTrucSo"
 def get_vn_time():
     return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
 
-# --- DANH SÁCH LỰA CHỌN ---
-OPTS_DINH_DANG = ["Bài dịch", "Sản phẩm sản xuất", "Video biên tập", "Ảnh/Infographic", "Khác"]
-OPTS_NEN_TANG = ["Facebook", "TikTok", "Instagram", "Web App", "YouTube", "Zalo"]
-OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Đã lên lịch", "Đã đăng", "Hủy"]
+# --- 1. DANH SÁCH CHỨC DANH (ROLES) CHUẨN ---
+ROLES_HEADER = [
+    "Lãnh đạo Ban",
+    "Trực thư ký tòa soạn",
+    "Trực quản trị MXH + Video biên tập",
+    "Trực lịch phát sóng",
+    "Trực thư ký tòa soạn", 
+    "Trực sản xuất video clip, LPS",
+    "Trực quản trị cổng TTĐT",
+    "Trực quản trị app"
+]
+
+# --- 2. CÁC TÙY CHỌN CHUẨN ---
+OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
+OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
+
+# --- [CẬP NHẬT] TRẠNG THÁI VỚI QUYỀN TRẢ BÀI CỦA LĐP ---
+OPTS_STATUS_TRUCSO = [
+    "Chờ xử lý",          
+    "Đang biên tập",      
+    "Gửi duyệt TCSX",     
+    "Yêu cầu sửa (TCSX)", # TCSX trả bài
+    "Gửi duyệt LĐP",      
+    "Yêu cầu sửa (LĐP)",  # Lãnh đạo trả bài (MỚI)
+    "Đã duyệt/Chờ đăng",  
+    "Đã đăng",            
+    "Hủy"
+]
+
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
-# --- CẤU TRÚC VỞ TRỰC ---
-ROLES_HEADER = ["Lãnh đạo Ban", "Trực thư ký tòa soạn", "Trực quản trị MXH + Video", "Trực lịch phát sóng", "Trực thư ký (Phụ)", "Trực sản xuất video/LPS", "Trực quản trị App"]
-CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", "GIỜ ĐĂNG", "LINK SẢN PHẨM"]
+# --- 3. TIÊU ĐỀ CỘT ---
+CONTENT_HEADER = [
+    "STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", 
+    "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", 
+    "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM"
+]
 
 # --- TỪ ĐIỂN HIỂN THỊ ---
 VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
-VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "Định dạng", "NỀN TẢNG": "Nền tảng", "STATUS": "Trạng thái", "NGUỒN": "Nguồn", "NHÂN SỰ": "Nhân sự", "Ý KIẾN ĐIỀU CHỈNH": "Ý kiến", "LINK DUYỆT": "Link Duyệt", "GIỜ ĐĂNG": "Giờ đăng", "LINK SẢN PHẨM": "Link SP"}
+VN_COLS_TRUCSO = {
+    "STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "Định dạng", "NỀN TẢNG": "Nền tảng", 
+    "STATUS": "Trạng thái", "NGUỒN": "Nguồn", "NHÂN SỰ": "Nhân sự", "Ý KIẾN ĐIỀU CHỈNH": "Ý kiến", 
+    "LINK DUYỆT": "Link Duyệt", "GIỜ ĐĂNG": "Giờ đăng", "NGÀY ĐĂNG": "Ngày đăng", "LINK SẢN PHẨM": "Link SP"
+}
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
@@ -91,62 +123,18 @@ def check_quyen(current_user, role, row, df_da):
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
 
-# --- HÀM TRANG ĐIỂM CHO SHEET (FORMATTING) ---
+# --- FORMATTING ---
 def dinh_dang_dep(wks):
-    """
-    Hàm này sẽ tô màu, kẻ bảng, chỉnh độ rộng cột cho giống ảnh mẫu.
-    """
-    # 1. Gộp ô tiêu đề chính (A1 -> L1) và căn giữa, tô màu Xanh Cyan đậm
-    wks.merge_cells('A1:L1')
-    format_cell_range(wks, 'A1:L1', CellFormat(
-        backgroundColor=Color(0, 1, 1), # Cyan
-        textFormat=TextFormat(bold=True, fontSize=14),
-        horizontalAlignment='CENTER'
-    ))
-
-    # 2. Hàng chức danh (Row 2): Màu xanh nhạt, chữ đậm
-    format_cell_range(wks, 'A2:L2', CellFormat(
-        backgroundColor=Color(0.8, 1, 1), # Light Cyan
-        textFormat=TextFormat(bold=True),
-        horizontalAlignment='CENTER',
-        borders=Borders(
-            top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID")
-        )
-    ))
-
-    # 3. Hàng nhân sự (Row 3): Chữ thường, căn giữa
-    format_cell_range(wks, 'A3:L3', CellFormat(
-        horizontalAlignment='CENTER',
-        borders=Borders(
-            top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID")
-        )
-    ))
-
-    # 4. Hàng tiêu đề cột (Row 4): MÀU VÀNG, Chữ Đậm
-    format_cell_range(wks, 'A4:L4', CellFormat(
-        backgroundColor=Color(1, 1, 0), # Yellow
-        textFormat=TextFormat(bold=True),
-        horizontalAlignment='CENTER',
-        borders=Borders(
-            top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID")
-        )
-    ))
-
-    # 5. Chỉnh độ rộng cột (Pixel)
-    set_column_width(wks, 'A', 40)  # STT (Nhỏ)
-    set_column_width(wks, 'B', 400) # NỘI DUNG (Rất rộng)
-    set_column_width(wks, 'C', 120) # Định dạng
-    set_column_width(wks, 'D', 120) # Nền tảng
-    set_column_width(wks, 'E', 100) # Status
-    set_column_width(wks, 'G', 80)  # Nguồn
-    set_column_width(wks, 'H', 150) # Nhân sự
-    set_column_width(wks, 'I', 150) # Ý kiến
-    set_column_width(wks, 'J', 150) # Link Duyệt
-    set_column_width(wks, 'L', 150) # Link SP
-
-    # 6. Bật Wrap Text (Xuống dòng tự động) cho cột Nội Dung (B)
-    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP'))
-
+    wks.merge_cells('A1:M1')
+    format_cell_range(wks, 'A1:M1', CellFormat(backgroundColor=Color(0, 1, 1), textFormat=TextFormat(bold=True, fontSize=14), horizontalAlignment='CENTER', verticalAlignment='MIDDLE'))
+    format_cell_range(wks, 'A2:M3', CellFormat(textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+    format_cell_range(wks, 'A2:M2', CellFormat(backgroundColor=Color(0.8, 1, 1)))
+    format_cell_range(wks, 'A4:M4', CellFormat(backgroundColor=Color(1, 1, 0), textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+    set_column_width(wks, 'A', 40); set_column_width(wks, 'B', 300); set_column_width(wks, 'C', 100)
+    set_column_width(wks, 'D', 100); set_column_width(wks, 'E', 130); set_column_width(wks, 'F', 50)
+    set_column_width(wks, 'G', 80); set_column_width(wks, 'H', 120); set_column_width(wks, 'I', 120)
+    set_column_width(wks, 'J', 100); set_column_width(wks, 'K', 70); set_column_width(wks, 'L', 80); set_column_width(wks, 'M', 100)
+    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP'))
 
 # ================= 2. AUTH =================
 if 'dang_nhap' not in st.session_state:
@@ -228,7 +216,6 @@ else:
         if not df_cv.empty:
             if da_filter != "All": df_cv = df_cv[df_cv['DuAn']==da_filter]
             edits = {f"{r['TenViec']} ({i+2})": {"id": i, "lv": check_quyen(curr_name, role, r, df_duan)} for i, r in df_cv.iterrows() if check_quyen(curr_name, role, r, df_duan)>0}
-            
             if edits:
                 with st.expander("🛠️ Cập nhật trạng thái", expanded=True):
                     s_task = st.selectbox("Chọn việc:", list(edits.keys()))
@@ -248,7 +235,6 @@ else:
                                 w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
                                 w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
                                 st.success("Updated!"); st.rerun()
-            
             st.dataframe(df_cv.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
         else: st.info("Chưa có công việc nào.")
 
@@ -270,7 +256,6 @@ else:
         try: wks_today = sh_trucso.worksheet(tab_name_today); tab_exists = True
         except gspread.WorksheetNotFound: tab_exists = False
 
-        # --- PHÂN QUYỀN QUẢN LÝ VỎ ---
         is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat'])
         
         if is_shift_admin:
@@ -284,25 +269,50 @@ else:
                             with cols[i%3]: 
                                 val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, key=f"cr_{i}")
                                 roster_vals.append(val if val != "--" else "")
-                        if st.form_submit_button("🚀 Tạo Sổ Mới (Có định dạng đẹp)"):
+                        if st.form_submit_button("🚀 Tạo Sổ Mới"):
                             try:
-                                # Tạo Sheet
                                 w = sh_trucso.add_worksheet(title=tab_name_today, rows=100, cols=20)
-                                # Ghi dữ liệu
-                                w.update_cell(1, 1, f"VỞ TIN BÀI VIETNAM TODAY {tab_name_today}")
+                                w.update_cell(1, 1, f"VỞ TRỰC SỐ VIETNAM TODAY {tab_name_today}")
                                 w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                 for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
                                 w.update_cell(3, 1, "NHÂN SỰ:")
                                 for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
                                 w.append_row(CONTENT_HEADER)
-                                
-                                # --- ÁP DỤNG ĐỊNH DẠNG ---
-                                st.info("Đang tô màu và kẻ bảng...")
+                                st.info("Đang định dạng...")
                                 dinh_dang_dep(w)
-                                
                                 st.success("Đã tạo!"); st.rerun()
                             except Exception as e: st.error(str(e))
                 else:
+                    st.success("Đã có Vỏ trực. Quản lý Ekip bên dưới:")
+                    
+                    # --- TÍNH NĂNG MỚI: GỬI EMAIL THÔNG BÁO ---
+                    if st.button("📧 Gửi Email thông báo cho Ekip"):
+                        try:
+                            # 1. Lấy tên từ Sheet (Hàng 3)
+                            roster_names = wks_today.row_values(3)[1:] # Bỏ cột A
+                            
+                            # 2. Tìm Email
+                            emails_to_send = []
+                            for name in roster_names:
+                                if name and name != "--":
+                                    found = df_users[df_users['HoTen'] == name]['Email'].values
+                                    if len(found) > 0 and str(found[0]).strip():
+                                        emails_to_send.append(found[0])
+                            
+                            if emails_to_send:
+                                # 3. Tạo Link gửi
+                                sub = f"[THÔNG BÁO] Lịch trực số ngày {tab_name_today}"
+                                body = f"Chào các bạn,\n\nCác bạn có lịch trực số ngày {tab_name_today}.\nVui lòng truy cập hệ thống để nắm thông tin chi tiết.\n\nTrân trọng."
+                                link = f"https://mail.google.com/mail/?view=cm&fs=1&to={','.join(emails_to_send)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
+                                st.markdown(f'<a href="{link}" target="_blank" style="background:#EA4335;color:white;padding:10px 15px;text-decoration:none;border-radius:5px;font-weight:bold;">🚀 Mở Gmail gửi ngay</a>', unsafe_allow_html=True)
+                            else:
+                                st.warning("Không tìm thấy email của nhân sự nào trong kíp trực.")
+                        except Exception as e:
+                            st.error(f"Lỗi: {e}")
+
+                    st.divider()
+                    
+                    # Các Tab quản lý cũ
                     tab_edit_vo, tab_del_vo = st.tabs(["Sửa Ekip Trực", "Xóa Sổ Hôm Nay"])
                     with tab_edit_vo:
                         curr_names = wks_today.row_values(3)[1:]
@@ -312,7 +322,7 @@ else:
                             cols = st.columns(3)
                             for i, r_t in enumerate(ROLES_HEADER):
                                 with cols[i%3]:
-                                    curr_val = curr_names[i]
+                                    curr_val = curr_names[i] if i < len(curr_names) else ""
                                     idx = list_nv.index(curr_val) if curr_val in list_nv else 0
                                     val = st.selectbox(f"{r_t}", ["--"]+list_nv, index=idx+1 if curr_val in list_nv else 0, key=f"ed_{i}")
                                     new_roster_vals.append(val if val != "--" else "")
@@ -325,7 +335,6 @@ else:
                             sh_trucso.del_worksheet(wks_today)
                             st.success("Đã xóa sổ!"); st.rerun()
 
-        # --- NHẬP LIỆU ---
         if tab_exists:
             # Hiện Ekip (View Only)
             with st.expander("ℹ️ Ekip trực hôm nay (Nhấn để xem)", expanded=True):
@@ -340,8 +349,8 @@ else:
                                     st.markdown(f"<p style='color:gray; font-size:13px; margin-bottom:0px;'>{r_roles[i]}</p>", unsafe_allow_html=True)
                                     st.markdown(f"<p style='color:#31333F; font-size:16px; font-weight:bold;'>{r_names[i]}</p>", unsafe_allow_html=True)
                         st.write("---")
-                        c5, c6, c7 = st.columns(3); cols_2 = [c5, c6, c7]
-                        for i in range(3):
+                        c5, c6, c7, c8 = st.columns(4); cols_2 = [c5, c6, c7, c8]
+                        for i in range(4):
                             idx = i + 4
                             if idx < len(r_names):
                                 with cols_2[i]:
@@ -360,13 +369,14 @@ else:
                 ts_status = c4.selectbox("Trạng thái", OPTS_STATUS_TRUCSO)
                 ts_nhansu = c5.multiselect("Nhân sự", list_nv, default=[curr_name] if curr_name in list_nv else None)
                 
-                c6, c7 = st.columns(2)
+                c6, c7, c8 = st.columns(3)
                 ts_nguon = c6.text_input("Nguồn")
                 ts_giodang = c7.time_input("Giờ đăng (DK)", value=None)
+                ts_ngaydang = c8.date_input("Ngày đăng", value=today_vn.date(), format="DD/MM/YYYY")
                 
-                c8, c9 = st.columns(2)
-                ts_linkduyet = c8.text_input("Link Duyệt")
-                ts_linksp = c9.text_input("Link Sản phẩm")
+                c9, c10 = st.columns(2)
+                ts_linkduyet = c9.text_input("Link Duyệt")
+                ts_linksp = c10.text_input("Link Sản phẩm")
                 ts_ykien = st.text_input("Ý kiến / Ghi chú")
 
                 if st.form_submit_button("Lưu vào sổ", type="primary"):
@@ -375,9 +385,13 @@ else:
                         start_stt = max(0, len(all_rows) - 4) + 1
                         plats = ts_nentang if ts_nentang else [""]
                         for p in plats:
-                            row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, 
-                                   ", ".join(ts_nhansu), ts_ykien, ts_linkduyet, 
-                                   ts_giodang.strftime("%H:%M") if ts_giodang else "", ts_linksp]
+                            row = [
+                                start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, 
+                                ", ".join(ts_nhansu), ts_ykien, ts_linkduyet, 
+                                ts_giodang.strftime("%H:%M") if ts_giodang else "", 
+                                ts_ngaydang.strftime("%d/%m/%Y"), 
+                                ts_linksp
+                            ]
                             wks_today.append_row(row)
                             start_stt += 1
                         st.success("Đã lưu!"); st.rerun()
@@ -388,6 +402,18 @@ else:
             df_content = lay_du_lieu_trucso(wks_today)
             if not df_content.empty:
                 with st.expander("🛠️ Cập nhật / Chỉnh sửa dòng tin", expanded=False):
+                    
+                    # HƯỚNG DẪN QUY TRÌNH DUYỆT BÀI
+                    st.info("""
+                    **ℹ️ QUY TRÌNH KIỂM DUYỆT NỘI DUNG:**
+                    1. **Chờ xử lý** → NV nhận việc.
+                    2. **Đang biên tập** → NV đang làm.
+                    3. **Gửi duyệt TCSX** → NV gửi bài.
+                    4. **Yêu cầu sửa (TCSX/LĐP)** → Cần chỉnh sửa lại.
+                    5. **Gửi duyệt LĐP** → Chuyển lên Lãnh đạo Phòng.
+                    6. **Đã duyệt/Chờ đăng** → Sẵn sàng publish.
+                    """)
+                    
                     edit_opts = [f"{r['STT']} - {r['NỘI DUNG'][:30]}... ({r['NỀN TẢNG']})" for i, r in df_content.iterrows()]
                     sel_news = st.selectbox("Chọn dòng tin cần sửa:", edit_opts)
                     if sel_news:
@@ -398,22 +424,35 @@ else:
                             try: idx_dd = OPTS_DINH_DANG.index(r_news['ĐỊNH DẠNG'])
                             except: idx_dd = 0
                             e_dd = ec2.selectbox("Định dạng", OPTS_DINH_DANG, index=idx_dd)
+                            
                             try: idx_st = OPTS_STATUS_TRUCSO.index(r_news['STATUS'])
                             except: idx_st = 0
                             e_st = ec2.selectbox("Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st)
+                            
                             ec3, ec4 = st.columns(2)
                             e_nt = ec3.text_input("Nền tảng", value=r_news['NỀN TẢNG'])
                             e_ns = ec4.text_input("Nhân sự", value=r_news['NHÂN SỰ'])
-                            ec5, ec6 = st.columns(2)
+                            
+                            ec5, ec6, ec7 = st.columns(3)
                             e_ld = ec5.text_input("Link Duyệt", value=r_news['LINK DUYỆT'])
-                            e_lsp = ec6.text_input("Link SP", value=r_news['LINK SẢN PHẨM'])
-                            e_yk = st.text_input("Ý kiến", value=r_news['Ý KIẾN ĐIỀU CHỈNH'])
+                            
+                            curr_d_val = datetime.now().date()
+                            try: 
+                                if r_news['NGÀY ĐĂNG']: curr_d_val = datetime.strptime(r_news['NGÀY ĐĂNG'], "%d/%m/%Y").date()
+                            except: pass
+                            e_ndang = ec6.date_input("Ngày đăng", value=curr_d_val, format="DD/MM/YYYY")
+                            
+                            e_lsp = ec7.text_input("Link SP", value=r_news['LINK SẢN PHẨM'])
+                            e_yk = st.text_input("Ý kiến (Ghi chú sửa/duyệt)", value=r_news['Ý KIẾN ĐIỀU CHỈNH'])
+                            
                             if st.form_submit_button("Cập nhật dòng tin"):
                                 r_sh = idx_news + 5 
                                 wks_today.update_cell(r_sh, 2, e_nd); wks_today.update_cell(r_sh, 3, e_dd)
                                 wks_today.update_cell(r_sh, 4, e_nt); wks_today.update_cell(r_sh, 5, e_st)
                                 wks_today.update_cell(r_sh, 8, e_ns); wks_today.update_cell(r_sh, 9, e_yk)
-                                wks_today.update_cell(r_sh, 10, e_ld); wks_today.update_cell(r_sh, 12, e_lsp)
+                                wks_today.update_cell(r_sh, 10, e_ld)
+                                wks_today.update_cell(r_sh, 12, e_ndang.strftime("%d/%m/%Y"))
+                                wks_today.update_cell(r_sh, 13, e_lsp)
                                 st.success("Đã cập nhật!"); st.rerun()
                 
                 st.dataframe(df_content, use_container_width=True, hide_index=True, column_config={"LINK DUYỆT": st.column_config.LinkColumn(display_text="Xem"),"LINK SẢN PHẨM": st.column_config.LinkColumn(display_text="Link"),})
