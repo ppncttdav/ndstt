@@ -131,22 +131,45 @@ if kiem_tra_dang_nhap(sh):
                 worksheet.append_row([ten_bai, str(deadline), nguoi_lam, "Mới", "", ""])
                 st.success("Đã thêm thành công!")
 
-# --- CHỨC NĂNG 3: GỬI EMAIL (Tự động mở Gmail Web) ---
-  # --- CHỨC NĂNG 3: GỬI EMAIL (CÓ TÙY CHỌN DEAR...) ---
+# --- CHỨC NĂNG 3: GỬI EMAIL (TỐI ƯU CHO NHIỀU NGƯỜI DÙNG) ---
     elif menu == "Gửi Email Nhắc Nhở":
         st.header("📧 Trung tâm Soạn Thảo Email")
         import streamlit.components.v1 as components 
 
-        # --- HÀM HỖ TRỢ: Lấy tên ngắn (Ví dụ: Lê Gia Huy -> Huy) ---
-        def lay_ten_ngan(ho_ten_day_du):
-            if ho_ten_day_du:
-                return ho_ten_day_du.strip().split(" ")[-1]
-            return ""
+        # --- 1. CHỌN TÀI KHOẢN GỬI (QUAN TRỌNG: PHẢI CHỌN TÙY THEO MÁY) ---
+        st.info("💡 Lưu ý: Vì mỗi máy tính đăng nhập các tài khoản Gmail theo thứ tự khác nhau, hãy kiểm tra kỹ trước khi gửi.")
+        
+        col_tk1, col_tk2 = st.columns([2, 1])
+        with col_tk1:
+            # Cho chọn tài khoản 0, 1, 2, 3
+            tai_khoan_chon = st.selectbox(
+                "📤 Bạn muốn gửi từ Tài khoản số mấy trên máy này?",
+                options=[0, 1, 2, 3],
+                format_func=lambda x: f"Tài khoản Gmail số {x} (Mặc định)" if x == 0 else f"Tài khoản Gmail số {x}"
+            )
+        with col_tk2:
+            # Nút kiểm tra thần thánh: Bấm vào là biết ngay số đó là mail nào
+            st.write("Kiểm tra xem là Mail nào:")
+            link_check = f"https://mail.google.com/mail/u/{tai_khoan_chon}"
+            st.markdown(f'''
+                <a href="{link_check}" target="_blank" style="
+                    display: inline-block;
+                    padding: 8px 15px;
+                    background-color: #f0f2f6;
+                    color: #31333F;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    border: 1px solid #d6d6d8;
+                    font-weight: bold;">
+                    👁️ Mở Hộp thư số {tai_khoan_chon}
+                </a>
+            ''', unsafe_allow_html=True)
 
-        # --- 1. LẤY DỮ LIỆU TỪ SHEET ---
+        st.divider()
+
+        # --- 2. LẤY DỮ LIỆU TỪ SHEET (Giữ nguyên) ---
         try:
             users_data = sh.worksheet("TaiKhoan").get_all_records()
-            # Tạo danh bạ
             danh_ba = {u['HoTen']: u['Email'] for u in users_data if str(u['Email']).strip() != ""}
             list_ten = list(danh_ba.keys())
 
@@ -154,84 +177,66 @@ if kiem_tra_dang_nhap(sh):
             thu_vien_mau = {}
             for m in mau_data:
                 thu_vien_mau[m['TenMau']] = {"tieu_de": m['TieuDe'], "noi_dung": m['NoiDung']}
-        except Exception as e:
-            st.error(f"Lỗi đọc dữ liệu: {e}")
+        except:
+            st.error("Lỗi đọc dữ liệu Sheet.")
             st.stop()
 
-        # --- 2. GIAO DIỆN CHỌN ---
-        col1, col2 = st.columns(2)
-        with col1:
+        # --- 3. GIAO DIỆN SOẠN THẢO ---
+        col_main_1, col_main_2 = st.columns(2)
+        with col_main_1:
             nguoi_nhan_ten = st.multiselect("Đến (To):", list_ten, placeholder="Chọn người nhận...")
             email_to = [danh_ba[ten] for ten in nguoi_nhan_ten]
+            co_dear = st.checkbox("Tự động thêm 'Dear...'", value=True)
             
-            # --- TÍNH NĂNG MỚI: TÙY CHỌN DEAR ... ---
-            co_dear = st.checkbox("Tự động thêm 'Dear [Tên]...'", value=True)
-            
-        with col2:
+        with col_main_2:
             ds_ten_mau = ["-- Tự soạn thảo --"] + list(thu_vien_mau.keys())
-            ten_mau_chon = st.selectbox("Chọn mẫu có sẵn:", ds_ten_mau)
-        
+            ten_mau_chon = st.selectbox("Chọn mẫu nội dung:", ds_ten_mau)
+
         with st.expander("Mở rộng: Thêm CC / BCC"):
-            c1, c2 = st.columns(2)
-            with c1:
+            c_cc, c_bcc = st.columns(2)
+            with c_cc:
                 cc_ten = st.multiselect("CC:", list_ten)
                 email_cc = [danh_ba[ten] for ten in cc_ten]
-            with c2:
+            with c_bcc:
                 bcc_ten = st.multiselect("BCC:", list_ten)
                 email_bcc = [danh_ba[ten] for ten in bcc_ten]
 
-        # --- 3. XỬ LÝ NỘI DUNG ---
+        # Xử lý nội dung & Chữ ký (Giữ nguyên)
         val_tieu_de = ""
         val_noi_dung = ""
-
-        # Lấy nội dung từ mẫu
         if ten_mau_chon != "-- Tự soạn thảo --":
             val_tieu_de = thu_vien_mau[ten_mau_chon]["tieu_de"]
             val_noi_dung = thu_vien_mau[ten_mau_chon]["noi_dung"]
 
-        # --- LOGIC XỬ LÝ LỜI CHÀO (DEAR...) ---
-        loi_chao = ""
+        def lay_ten_ngan(full_name): return full_name.strip().split(" ")[-1] if full_name else ""
         if co_dear and nguoi_nhan_ten:
-            # Lấy danh sách tên ngắn: ['Huy', 'Lan']
             ds_ten_ngan = [lay_ten_ngan(ten) for ten in nguoi_nhan_ten]
-            # Nối lại thành chuỗi: "Huy, Lan"
-            chuoi_ten = ", ".join(ds_ten_ngan)
-            loi_chao = f"Dear {chuoi_ten},\n\n"
+            loi_chao = f"Dear {', '.join(ds_ten_ngan)},\n\n"
+            if not val_noi_dung: val_noi_dung = loi_chao
+            elif "Dear" not in val_noi_dung and "Kính gửi" not in val_noi_dung: val_noi_dung = loi_chao + val_noi_dung
 
-        # Tự động ghép Lời chào vào trước nội dung mẫu (nếu chưa có trong ô nhập)
-        if val_noi_dung and co_dear:
-             # Nếu mẫu đã có chữ "Dear" hoặc "Kính gửi" rồi thì thôi, còn chưa thì thêm vào
-             if "Dear" not in val_noi_dung and "Kính gửi" not in val_noi_dung:
-                 val_noi_dung = loi_chao + val_noi_dung
-        elif not val_noi_dung and co_dear:
-            val_noi_dung = loi_chao # Nếu soạn mới tinh thì điền sẵn lời chào
-
-        # Thêm chữ ký
         nguoi_ky = st.session_state['user_info'].get('HoTen', 'Ban Thư Ký')
         if val_noi_dung and nguoi_ky not in val_noi_dung:
             val_noi_dung += f"\n\nTrân trọng,\n{nguoi_ky}"
 
-        st.divider()
         st.markdown("### ✍️ Soạn thảo chi tiết")
-        
         final_tieu_de = st.text_input("Tiêu đề:", value=val_tieu_de)
-        # Ô nội dung sẽ hiện sẵn: "Dear Huy, Lan,..."
         final_noi_dung = st.text_area("Nội dung:", value=val_noi_dung, height=300)
 
-        # --- 4. NÚT GỬI ---
-        if st.button("🚀 Mở Gmail để gửi", type="primary"):
+        # --- 4. NÚT GỬI (Tự động cập nhật theo số đã chọn ở trên) ---
+        btn_label = f"🚀 Mở Gmail (Tài khoản số {tai_khoan_chon}) để gửi"
+        
+        if st.button(btn_label, type="primary"):
             if not email_to:
                 st.warning("Vui lòng chọn người nhận!")
             else:
-                str_to = ",".join(email_to)
-                str_cc = ",".join(email_cc)
-                str_bcc = ",".join(email_bcc)
-                
+                str_to, str_cc, str_bcc = ",".join(email_to), ",".join(email_cc), ",".join(email_bcc)
                 su_enc = urllib.parse.quote(final_tieu_de)
                 body_enc = urllib.parse.quote(final_noi_dung)
                 
-                gmail_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={str_to}&cc={str_cc}&bcc={str_bcc}&su={su_enc}&body={body_enc}"
+                # Link động theo tai_khoan_chon
+                gmail_link = f"https://mail.google.com/mail/u/{tai_khoan_chon}/?view=cm&fs=1&to={str_to}&cc={str_cc}&bcc={str_bcc}&su={su_enc}&body={body_enc}"
                 
                 js_script = f"""<script>window.open("{gmail_link}", "_blank");</script>"""
                 components.html(js_script, height=0)
-                st.success("Đang mở Gmail...")
+                st.success(f"Đang chuyển hướng sang Gmail số {tai_khoan_chon}...")
