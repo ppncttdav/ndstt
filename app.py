@@ -10,7 +10,6 @@ from datetime import datetime, date
 st.set_page_config(page_title="Phòng Nội dung số và Truyền thông", page_icon="🏢", layout="wide")
 
 # --- TỪ ĐIỂN HIỂN THỊ (VIỆT HÓA TIÊU ĐỀ CỘT) ---
-# Đây là bí quyết để giao diện đẹp mà code vẫn chạy đúng
 VN_COLS_VIEC = {
     "TenViec": "Tên công việc / Nhiệm vụ",
     "DuAn": "Thuộc Dự án",
@@ -137,9 +136,24 @@ else:
     with tabs[0]:
         st.caption("Theo dõi tiến độ và phân công nhiệm vụ.")
 
-        # --- A. FORM TẠO VIỆC ---
+        # --- A. FORM TẠO VIỆC (ĐÃ SỬA LỖI CHỌN EMAIL) ---
         with st.expander("➕ KHỞI TẠO ĐẦU VIỆC MỚI", expanded=False):
+            
+            # --- PHẦN 1: CẤU HÌNH GỬI (ĐỂ NGOÀI FORM ĐỂ CẬP NHẬT REAL-TIME) ---
+            st.markdown("#### 1. Cấu hình Người gửi & Tài khoản")
+            ct1, ct2 = st.columns([2,1])
+            with ct1:
+                # Nằm ngoài form -> Chọn phát ăn ngay
+                tk_gui = st.selectbox("Gửi từ Tài khoản Gmail số:", range(10), format_func=lambda x: f"Tài khoản số {x}")
+            with ct2:
+                st.write("Kiểm tra:")
+                st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}" target="_blank" style="background:#f0f2f6; padding: 5px 10px; border-radius: 5px; text-decoration: none;">👁️ Mở Hộp thư số {tk_gui}</a>', unsafe_allow_html=True)
+            
+            st.divider()
+
+            # --- PHẦN 2: FORM NHẬP LIỆU (ĐỂ TRONG FORM ĐỂ GOM DATA) ---
             with st.form("tao_viec"):
+                st.markdown("#### 2. Thông tin công việc")
                 c1, c2 = st.columns(2)
                 with c1:
                     tv_ten = st.text_input("Tên đầu việc / Nhiệm vụ")
@@ -154,20 +168,12 @@ else:
                     tv_nguoi = st.multiselect("Nhân sự thực hiện", list_nv)
                     tv_ghichu = st.text_area("Mô tả chi tiết / Yêu cầu")
 
-                st.divider()
-                st.markdown("### 📧 Cấu hình gửi Email thông báo")
-                
-                ct1, ct2 = st.columns([2,1])
-                with ct1:
-                    tk_gui = st.selectbox("Gửi từ Gmail số:", range(10), format_func=lambda x: f"Tài khoản {x}")
-                with ct2:
-                    st.write("Kiểm tra:")
-                    st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}" target="_blank">👁️ Hộp thư số {tk_gui}</a>', unsafe_allow_html=True)
-                
+                st.markdown("#### 3. Tùy chọn gửi thông báo")
                 co1, co2 = st.columns(2)
                 opt_nv = co1.checkbox("Gửi cho Nhân sự thực hiện", value=True)
                 opt_ld = co2.checkbox("Gửi báo cáo cho Lãnh đạo", value=False)
 
+                # Nút Submit nằm trong Form, nhưng vẫn đọc được biến tk_gui ở trên
                 if st.form_submit_button("💾 Lưu công việc & Tạo Email", type="primary"):
                     if tv_ten and tv_duan:
                         try:
@@ -181,6 +187,7 @@ else:
                             st.success("Đã tạo công việc thành công!")
 
                             msg_links = []
+                            # 1. Gửi nhân viên
                             if opt_nv and tv_nguoi:
                                 mails_nv = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].dropna().tolist()
                                 mails_nv = [m for m in mails_nv if str(m).strip()]
@@ -188,8 +195,9 @@ else:
                                     sub = f"[GIAO VIỆC] {tv_ten} - Hạn: {deadline_fmt}"
                                     body = f"Chào các bạn,\n\nBạn được phân công nhiệm vụ mới:\n- Đầu việc: {tv_ten}\n- Dự án: {tv_duan}\n- Deadline: {deadline_fmt}\n- Ghi chú: {tv_ghichu}\n\nNgười tạo: {current_name}"
                                     link = f"https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={','.join(mails_nv)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
-                                    msg_links.append(f'<a href="{link}" target="_blank" style="background:#28a745;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;margin-right:10px;">📧 Gửi NV Phụ Trách</a>')
+                                    msg_links.append(f'<a href="{link}" target="_blank" style="background:#28a745;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;margin-right:10px;">📧 Gửi NV Phụ Trách (TK {tk_gui})</a>')
                             
+                            # 2. Gửi Lãnh đạo
                             if opt_ld:
                                 mails_ld = df_users[df_users['VaiTro'] == 'LanhDao']['Email'].dropna().tolist()
                                 mails_ld = [m for m in mails_ld if str(m).strip()]
@@ -197,7 +205,7 @@ else:
                                     sub = f"[BÁO CÁO] Công việc mới: {tv_ten}"
                                     body = f"Kính gửi Lãnh đạo,\n\nTôi vừa khởi tạo đầu việc mới:\n- Việc: {tv_ten}\n- Dự án: {tv_duan}\n- Phụ trách: {nguoi_str}\n\nTrân trọng."
                                     link = f"https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={','.join(mails_ld)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
-                                    msg_links.append(f'<a href="{link}" target="_blank" style="background:#007bff;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;">📧 Báo cáo Lãnh đạo</a>')
+                                    msg_links.append(f'<a href="{link}" target="_blank" style="background:#007bff;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;">📧 Báo cáo Lãnh đạo (TK {tk_gui})</a>')
                             
                             if msg_links:
                                 st.markdown(" ".join(msg_links), unsafe_allow_html=True)
@@ -238,7 +246,6 @@ else:
                                         e_ten = st.text_input("Tên việc", value=row_data['TenViec'])
                                         e_nguoi = st.text_input("Người phụ trách", value=row_data['NguoiPhuTrach'])
                                     with ce2:
-                                        # Xử lý an toàn nếu cột Deadline trong sheet bị trống hoặc lỗi
                                         curr_deadline = row_data['Deadline'] if 'Deadline' in row_data else ""
                                         e_dl = st.text_input("Deadline", value=curr_deadline)
                                         
@@ -277,11 +284,8 @@ else:
                                         st.success("Đã xóa thành công!")
                                         st.rerun()
 
-            # --- HIỂN THỊ BẢNG (ĐÃ VIỆT HÓA HEADER) ---
-            # 1. Đổi tên cột sang tiếng Việt
+            # --- HIỂN THỊ BẢNG ---
             df_display = df_view.rename(columns=VN_COLS_VIEC)
-            
-            # 2. Hiển thị
             st.dataframe(
                 df_display, 
                 use_container_width=True, 
@@ -330,7 +334,6 @@ else:
                     st.rerun()
 
         if not df_duan.empty:
-            # Việt hóa bảng Dự án
             df_da_display = df_duan.rename(columns=VN_COLS_DUAN)
             st.dataframe(df_da_display, use_container_width=True, hide_index=True)
         else:
@@ -394,7 +397,6 @@ else:
             df_log = lay_du_lieu(sh, "NhatKy")
             if not df_log.empty:
                 df_log = df_log.iloc[::-1]
-                # Việt hóa bảng Logs
                 df_log_display = df_log.rename(columns=VN_COLS_LOG)
                 st.dataframe(df_log_display, use_container_width=True, hide_index=True)
             else:
