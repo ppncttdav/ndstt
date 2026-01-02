@@ -31,7 +31,6 @@ def get_short_name(full_name):
     if not full_name or full_name == "--" or str(full_name).strip() == "":
         return "..."
     parts = full_name.strip().split()
-    # Nếu tên có từ 2 chữ trở lên thì lấy 2 chữ cuối, ngược lại lấy hết
     return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
 # --- HÀM LẤY THỜI TIẾT ---
@@ -50,13 +49,13 @@ def get_weather_and_advice():
         return f"{temp}°C - {condition}", advice
     except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
 
-# --- 1. DANH SÁCH CHỨC DANH (ĐÃ SỬA: BỎ CHỮ PHỤ) ---
+# --- 1. DANH SÁCH CHỨC DANH ---
 ROLES_HEADER = [
     "LÃNH ĐẠO BAN",
     "TRỰC THƯ KÝ TÒA SOẠN",
     "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
     "TRỰC LỊCH PHÁT SÓNG",
-    "TRỰC THƯ KÝ TÒA SOẠN", # Đã bỏ chữ (PHỤ) theo yêu cầu
+    "TRỰC THƯ KÝ TÒA SOẠN", 
     "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
     "TRỰC QUẢN TRỊ CỔNG TTĐT",
     "TRỰC QUẢN TRỊ APP"
@@ -73,7 +72,7 @@ OPTS_STATUS_TRUCSO = [
 
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
-# --- 3. TIÊU ĐỀ CỘT (VIẾT HOA) ---
+# --- 3. TIÊU ĐỀ CỘT ---
 CONTENT_HEADER = [
     "STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", 
     "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", 
@@ -144,7 +143,7 @@ def check_quyen(current_user, role, row, df_da):
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
 
-# --- FORMATTING (VIẾT HOA TIÊU ĐỀ) ---
+# --- FORMATTING ---
 def dinh_dang_dep(wks):
     wks.merge_cells('A1:M1')
     format_cell_range(wks, 'A1:M1', CellFormat(backgroundColor=Color(0, 1, 1), textFormat=TextFormat(bold=True, fontSize=14), horizontalAlignment='CENTER', verticalAlignment='MIDDLE'))
@@ -322,16 +321,10 @@ else:
                         # 1. Lấy thông tin từ sheet (Header roles)
                         r_names = wks_today.row_values(3)[1:] # Dòng 3, bỏ cột A
                         
-                        # Lấy 3 cái tên quan trọng theo index
-                        # Lãnh đạo Ban = index 0
-                        # Trực thư ký tòa soạn = index 1
-                        # Trực lịch phát sóng = index 3
-                        
                         name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
                         name_tk = get_short_name(r_names[1] if len(r_names) > 1 else "")
                         name_lps = get_short_name(r_names[3] if len(r_names) > 3 else "")
                         
-                        # Format ngày: 02-01-2026 -> 02/01/2026
                         date_str = tab_name_today.replace("-", "/")
                         
                         # --- CỘT 1: EMAIL TRÌNH DUYỆT (MẪU MỚI) ---
@@ -341,15 +334,18 @@ else:
                             st.markdown("##### 📧 GỬI EMAIL TRÌNH DUYỆT")
                             tk_gui_vo = st.selectbox("CHỌN TÀI KHOẢN GỬI:", range(10), format_func=lambda x: f"TK {x} (Trên máy này)", key="mail_vo")
                             
-                            # Tìm email người nhận (Lãnh đạo + Thư ký)
+                            # CẬP NHẬT LOGIC: Gửi cho TOÀN BỘ EKIP (Tất cả người có tên ở dòng 3)
                             recipients = []
-                            for n in [r_names[0], r_names[1]]:
+                            for n in r_names: # Duyệt tất cả
                                 if n and n != "--":
                                     found = df_users[df_users['HoTen'] == n]['Email'].values
                                     if len(found) > 0 and str(found[0]).strip():
                                         recipients.append(found[0])
                             
-                            # Nội dung email theo mẫu
+                            # Loại bỏ email trùng lặp (nếu 1 người kiêm 2 vai)
+                            recipients = list(set(recipients))
+
+                            # Nội dung email
                             email_sub = f"Trình duyệt Vỏ tin bài NDS Vietnam Today ngày {date_str}"
                             email_body = f"""Kính gửi chị {name_ld}, chị {name_tk}
 
@@ -368,7 +364,7 @@ Em {name_lps}"""
                                 st.markdown(f'<a href="{link_mail}" target="_blank" style="background:#EA4335;color:white;padding:10px 15px;text-decoration:none;border-radius:5px;font-weight:bold;display:block;text-align:center;">🚀 SOẠN EMAIL NGAY</a>', unsafe_allow_html=True)
                                 st.caption(f"Gửi tới: {', '.join(recipients)}")
                             else:
-                                st.warning("Chưa tìm thấy email Lãnh đạo/Thư ký để gửi.")
+                                st.warning("Chưa tìm thấy email nào.")
 
                         # --- CỘT 2: ZALO (GIỮ NGUYÊN) ---
                         with c_zalo:
