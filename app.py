@@ -4,10 +4,11 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import streamlit.components.v1 as components
 import urllib.parse
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import pytz
-import requests # Thư viện lấy tin thời tiết
-import random   # Thư viện chọn lời khuyên ngẫu nhiên
+import requests
+import random
+import plotly.express as px # Thư viện vẽ biểu đồ & lịch
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -17,7 +18,7 @@ st.set_page_config(page_title="Phòng Nội dung số và Truyền thông", page
 
 # --- TÊN FILE GOOGLE SHEET ---
 SHEET_MAIN = "HeThongQuanLy" 
-SHEET_TRUCSO = "VoTrucSo" # Tên file Sheet dữ liệu
+SHEET_TRUCSO = "VoTrucSo"
 
 # --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
@@ -26,32 +27,24 @@ def get_vn_time():
 # --- HÀM LẤY THỜI TIẾT & LỜI KHUYÊN ---
 def get_weather_and_advice():
     try:
-        # Lấy thời tiết Hà Nội từ Open-Meteo (Miễn phí, không cần Key)
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=5).json()
+        res = requests.get(url, timeout=3).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         
-        # Mapping mã thời tiết
         condition = "Có mây"
         advice = "Chúc bạn một ngày làm việc năng suất!"
         
         if wcode in [0, 1]: 
-            condition = "Nắng đẹp ☀️"
-            advice = "Trời đẹp! Hãy giữ tinh thần sảng khoái nhé."
+            condition = "Nắng đẹp ☀️"; advice = "Trời đẹp! Năng lượng tích cực để sáng tạo nhé."
         elif wcode in [2, 3]: 
-            condition = "Nhiều mây ☁️"
-            advice = "Thời tiết mát mẻ, tập trung cao độ nào!"
+            condition = "Nhiều mây ☁️"; advice = "Thời tiết dịu mát, tập trung cao độ nào!"
         elif wcode in [51, 53, 55, 61, 63, 65]: 
-            condition = "Có mưa 🌧️"
-            advice = "Trời mưa, đường trơn. Các BTV đi lại cẩn thận nhé!"
+            condition = "Có mưa 🌧️"; advice = "Trời mưa, đường trơn. Các BTV đi lại cẩn thận nhé!"
         elif wcode >= 95: 
-            condition = "Giông bão ⛈️"
-            advice = "Thời tiết xấu. Hạn chế ra ngoài nếu không cần thiết."
+            condition = "Giông bão ⛈️"; advice = "Thời tiết xấu. Hạn chế ra ngoài."
         
-        # Nếu trời nóng quá
         if temp > 35: advice = "Trời nóng, nhớ uống đủ nước nhé các BTV!"
-        # Nếu trời lạnh quá
         if temp < 15: advice = "Trời lạnh, nhớ mặc ấm để giữ giọng đọc tốt nhé!"
 
         return f"{temp}°C - {condition}", advice
@@ -60,31 +53,18 @@ def get_weather_and_advice():
 
 # --- 1. DANH SÁCH CHỨC DANH (ROLES) CHUẨN ---
 ROLES_HEADER = [
-    "Lãnh đạo Ban",
-    "Trực thư ký tòa soạn",
-    "Trực quản trị MXH + Video biên tập",
-    "Trực lịch phát sóng",
-    "Trực thư ký tòa soạn", 
-    "Trực sản xuất video clip, LPS",
-    "Trực quản trị cổng TTĐT",
-    "Trực quản trị app"
+    "Lãnh đạo Ban", "Trực thư ký tòa soạn", "Trực quản trị MXH + Video biên tập",
+    "Trực lịch phát sóng", "Trực thư ký tòa soạn", "Trực sản xuất video clip, LPS",
+    "Trực quản trị cổng TTĐT", "Trực quản trị app"
 ]
 
 # --- 2. CÁC TÙY CHỌN CHUẨN ---
 OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
 OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
 
-# --- TRẠNG THÁI DUYỆT BÀI ---
 OPTS_STATUS_TRUCSO = [
-    "Chờ xử lý",          
-    "Đang biên tập",      
-    "Gửi duyệt TCSX",     
-    "Yêu cầu sửa (TCSX)", 
-    "Gửi duyệt LĐP",      
-    "Yêu cầu sửa (LĐP)",  
-    "Đã duyệt/Chờ đăng",  
-    "Đã đăng",            
-    "Hủy"
+    "Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", 
+    "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Hủy"
 ]
 
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
@@ -202,10 +182,8 @@ else:
     role = u_info.get('VaiTro', 'NhanVien')
     
     with st.sidebar:
-        # --- CẬP NHẬT LỜI CHÀO ---
         st.success(f"Xin chào: **{curr_name}**\n\nChúc bạn một ngày làm việc vui vẻ và hiệu quả nhé! ❤️")
         
-        # --- CẬP NHẬT THỜI TIẾT & LỜI KHUYÊN ---
         weather_info, advice_msg = get_weather_and_advice()
         st.markdown("---")
         st.markdown(f"**🌤️ Hà Nội:** {weather_info}")
@@ -219,11 +197,13 @@ else:
     
     sh_trucso = ket_noi_trucso()
     
-    # --- CẬP NHẬT TÊN TAB (VỎ TRỰC SỐ) ---
+    # --- CẤU HÌNH MENU TAB ---
+    # Lãnh đạo: Thấy Dashboard, Nhật ký
+    # Nhân viên: Không thấy
     if role == 'LanhDao':
-        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vỏ Trực Số", "📧 Email", "📜 Nhật ký"])
+        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vỏ Trực Số", "📅 Lịch làm việc", "📊 Dashboard", "📧 Email", "📜 Nhật ký"])
     else:
-        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vỏ Trực Số", "📧 Email"])
+        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vỏ Trực Số", "📅 Lịch làm việc", "📧 Email"])
 
     df_duan = lay_du_lieu_main(sh_main.worksheet("DuAn"))
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
@@ -293,11 +273,10 @@ else:
                 if st.form_submit_button("Tạo DA"): sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
-    # ================= TAB 3: VỎ TRỰC SỐ =================
+    # ================= TAB 3: VỞ TRỰC SỐ =================
     with tabs[2]:
         today_vn = get_vn_time()
         tab_name_today = today_vn.strftime("%d-%m-%Y")
-        # --- CẬP NHẬT TIÊU ĐỀ ---
         st.header(f"📝 Vỏ Trực Số Ngày: {tab_name_today}")
 
         tab_exists = False
@@ -320,7 +299,6 @@ else:
                         if st.form_submit_button("🚀 Tạo Vỏ Trực Mới"):
                             try:
                                 w = sh_trucso.add_worksheet(title=tab_name_today, rows=100, cols=20)
-                                # --- CẬP NHẬT: VỎ TRỰC SỐ ---
                                 w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_today}")
                                 w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                 for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
@@ -353,7 +331,6 @@ else:
                             st.error(f"Lỗi: {e}")
 
                     st.divider()
-                    
                     tab_edit_vo, tab_del_vo = st.tabs(["Sửa Ekip Trực", "Xóa Sổ Hôm Nay"])
                     with tab_edit_vo:
                         curr_names = wks_today.row_values(3)[1:]
@@ -371,7 +348,7 @@ else:
                                 for i, v in enumerate(new_roster_vals): wks_today.update_cell(3, i+2, v)
                                 st.success("Đã cập nhật!"); st.rerun()
                     with tab_del_vo:
-                        st.error("⚠️ Hành động này sẽ xóa toàn bộ dữ liệu trực số ngày hôm nay!")
+                        st.error("⚠️ Hành động này sẽ xóa dữ liệu hôm nay!")
                         if st.button("Xác nhận XÓA SỔ hôm nay"):
                             sh_trucso.del_worksheet(wks_today)
                             st.success("Đã xóa sổ!"); st.rerun()
@@ -442,7 +419,6 @@ else:
             df_content = lay_du_lieu_trucso(wks_today)
             if not df_content.empty:
                 with st.expander("🛠️ Cập nhật / Chỉnh sửa dòng tin", expanded=False):
-                    
                     st.info("""
                     **ℹ️ QUY TRÌNH KIỂM DUYỆT NỘI DUNG:**
                     1. **Chờ xử lý** → BTV nhận việc.
@@ -497,15 +473,126 @@ else:
                 st.dataframe(df_content, use_container_width=True, hide_index=True, column_config={"LINK DUYỆT": st.column_config.LinkColumn(display_text="Xem"),"LINK SẢN PHẨM": st.column_config.LinkColumn(display_text="Link"),})
             else: st.info("Chưa có tin bài nào.")
 
-    # ================= TAB 4: EMAIL =================
+    # ================= TAB 4: LỊCH LÀM VIỆC (MỚI) =================
     with tabs[3]:
+        st.header("📅 Lịch làm việc & Deadline")
+        st.caption("Theo dõi tiến độ công việc trực quan.")
+        
+        # 1. Lấy dữ liệu từ Sheet Công Việc
+        df_tasks = lay_du_lieu_main(sh_main.worksheet("CongViec"))
+        
+        if not df_tasks.empty:
+            # Xử lý ngày tháng để vẽ biểu đồ
+            task_list = []
+            for i, r in df_tasks.iterrows():
+                try:
+                    # Parse Deadline: "HH:MM DD/MM/YYYY"
+                    dl_str = r['Deadline']
+                    dl_dt = datetime.strptime(dl_str, "%H:%M %d/%m/%Y")
+                    # Start date: giả định là ngày tạo hoặc hôm nay nếu không có
+                    # Để đơn giản cho Gantt, ta lấy start = deadline - 2 ngày (hoặc ngày tạo nếu có lưu)
+                    start_dt = dl_dt - timedelta(days=2) 
+                    
+                    # Phân quyền xem
+                    if role != 'LanhDao' and curr_name not in r['NguoiPhuTrach']:
+                        continue
+                    
+                    task_list.append({
+                        "Task": r['TenViec'],
+                        "Start": start_dt,
+                        "Finish": dl_dt,
+                        "Assignee": r['NguoiPhuTrach'],
+                        "Status": r['TrangThai'],
+                        "Project": r['DuAn']
+                    })
+                except:
+                    continue # Bỏ qua lỗi format date
+            
+            if task_list:
+                df_gantt = pd.DataFrame(task_list)
+                
+                # Vẽ biểu đồ Gantt
+                fig = px.timeline(
+                    df_gantt, 
+                    x_start="Start", 
+                    x_end="Finish", 
+                    y="Assignee", 
+                    color="Status", 
+                    hover_data=["Task", "Project"],
+                    title="Timeline Công việc (Dự kiến)",
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig.update_yaxes(autorange="reversed") # Đảo ngược để việc mới nhất lên trên
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.divider()
+                st.subheader("Chi tiết Deadline sắp tới")
+                st.dataframe(df_gantt[['Task', 'Finish', 'Assignee', 'Status']], use_container_width=True)
+            else:
+                st.info("Không có dữ liệu công việc hợp lệ để hiển thị.")
+        else:
+            st.info("Chưa có công việc nào.")
+
+    # ================= TAB 5: DASHBOARD (MỚI - CHỈ LÃNH ĐẠO) =================
+    if role == 'LanhDao':
+        with tabs[4]:
+            st.header("📊 Dashboard Tổng quan")
+            
+            # 1. Thống kê từ Công việc (CongViec)
+            if not df_cv.empty:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Biểu đồ Trạng thái
+                    status_counts = df_cv['TrangThai'].value_counts().reset_index()
+                    status_counts.columns = ['Trạng thái', 'Số lượng']
+                    fig_pie = px.pie(status_counts, values='Số lượng', names='Trạng thái', title='Tỷ lệ Trạng thái Công việc', hole=0.4)
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                with col2:
+                    # Biểu đồ Năng suất (Ai làm nhiều việc nhất)
+                    # Cần tách tên người vì 1 việc có thể nhiều người làm
+                    all_staff = []
+                    for s in df_cv['NguoiPhuTrach']:
+                        names = [n.strip() for n in s.split(',')]
+                        all_staff.extend(names)
+                    
+                    staff_counts = pd.Series(all_staff).value_counts().reset_index()
+                    staff_counts.columns = ['BTV', 'Số việc']
+                    fig_bar = px.bar(staff_counts, x='BTV', y='Số việc', title='Năng suất nhân sự (Số đầu việc)', color='BTV')
+                    st.plotly_chart(fig_bar, use_container_width=True)
+
+            # 2. Thống kê từ Vỏ Trực Số Hôm nay (VoTrucSo)
+            if tab_exists and not df_content.empty:
+                st.divider()
+                st.subheader(f"Thống kê Tin bài ngày {tab_name_today}")
+                
+                c3, c4 = st.columns(2)
+                with c3:
+                    # Nền tảng
+                    plat_counts = df_content['NỀN TẢNG'].value_counts().reset_index()
+                    plat_counts.columns = ['Nền tảng', 'Số lượng']
+                    fig_plat = px.bar(plat_counts, x='Số lượng', y='Nền tảng', orientation='h', title='Phân bố Nền tảng hôm nay')
+                    st.plotly_chart(fig_plat, use_container_width=True)
+                
+                with c4:
+                    # Trạng thái tin bài
+                    st_counts = df_content['STATUS'].value_counts().reset_index()
+                    st_counts.columns = ['Status', 'Count']
+                    fig_st = px.pie(st_counts, values='Count', names='Status', title='Tiến độ Tin bài hôm nay')
+                    st.plotly_chart(fig_st, use_container_width=True)
+
+    # ================= TAB 6: EMAIL =================
+    # Xác định index tab dựa trên role
+    tab_email_idx = 5 if role == 'LanhDao' else 4
+    with tabs[tab_email_idx]:
         tk = st.selectbox("TK Gửi:", range(10), format_func=lambda x:f"TK {x}")
         to = st.multiselect("To:", df_users['Email'].tolist())
         sub = st.text_input("Tiêu đề"); bod = st.text_area("Nội dung")
         if st.button("Gửi"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
-    # ================= TAB 5: LOGS =================
+    # ================= TAB 7: LOGS =================
     if role == 'LanhDao':
-        with tabs[4]: 
+        with tabs[6]: 
             df_log = lay_du_lieu_main(sh_main.worksheet("NhatKy"))
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
