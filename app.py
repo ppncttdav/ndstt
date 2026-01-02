@@ -133,18 +133,43 @@ def check_quyen(current_user, role, row, df_da):
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
 
-# --- FORMATTING (VIẾT HOA TIÊU ĐỀ) ---
+# --- FORMATTING: KẺ BẢNG VÀ XUỐNG DÒNG ---
 def dinh_dang_dep(wks):
+    # 1. Header chính
     wks.merge_cells('A1:M1')
     format_cell_range(wks, 'A1:M1', CellFormat(backgroundColor=Color(0, 1, 1), textFormat=TextFormat(bold=True, fontSize=14), horizontalAlignment='CENTER', verticalAlignment='MIDDLE'))
+    
+    # 2. Chức danh & Nhân sự
     format_cell_range(wks, 'A2:M3', CellFormat(textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
     format_cell_range(wks, 'A2:M2', CellFormat(backgroundColor=Color(0.8, 1, 1)))
+    
+    # 3. Tiêu đề cột
     format_cell_range(wks, 'A4:M4', CellFormat(backgroundColor=Color(1, 1, 0), textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+    
+    # 4. Độ rộng cột
     set_column_width(wks, 'A', 40); set_column_width(wks, 'B', 300); set_column_width(wks, 'C', 100)
     set_column_width(wks, 'D', 100); set_column_width(wks, 'E', 130); set_column_width(wks, 'F', 50)
     set_column_width(wks, 'G', 80); set_column_width(wks, 'H', 120); set_column_width(wks, 'I', 120)
     set_column_width(wks, 'J', 100); set_column_width(wks, 'K', 70); set_column_width(wks, 'L', 80); set_column_width(wks, 'M', 100)
-    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP'))
+    
+    # 5. Kẻ sẵn khung cho 100 dòng đầu (Để nhìn đẹp ngay)
+    format_cell_range(wks, 'A5:M100', CellFormat(
+        wrapStrategy='WRAP', 
+        verticalAlignment='TOP',
+        borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))
+    ))
+
+def dinh_dang_dong_moi(wks, row_idx):
+    """Hàm này format riêng cho dòng vừa thêm vào"""
+    rng = f"A{row_idx}:M{row_idx}"
+    format_cell_range(wks, rng, CellFormat(
+        wrapStrategy='WRAP', 
+        verticalAlignment='TOP',
+        borders=Borders(
+            top=Border("SOLID"), bottom=Border("SOLID"), 
+            left=Border("SOLID"), right=Border("SOLID")
+        )
+    ))
 
 # ================= 2. AUTH =================
 if 'dang_nhap' not in st.session_state:
@@ -194,7 +219,7 @@ else:
     
     sh_trucso = ket_noi_trucso()
     
-    # --- PHÂN QUYỀN TAB (VIẾT HOA TÊN TAB) ---
+    # --- PHÂN QUYỀN TAB ---
     if role == 'LanhDao':
         tabs = st.tabs(["✅ QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📝 VỎ TRỰC SỐ", "📅 LỊCH LÀM VIỆC", "📊 DASHBOARD", "📧 EMAIL", "📜 NHẬT KÝ"])
     else:
@@ -306,12 +331,9 @@ else:
                             except Exception as e: st.error(str(e))
                 else:
                     st.success("ĐÃ CÓ VỎ TRỰC.")
-                    
-                    # --- GỬI THÔNG BÁO ---
                     st.subheader("📢 GỬI THÔNG BÁO CA TRỰC")
                     try:
                         r_names = wks_today.row_values(3)[1:]
-                        # Zalo Message
                         zalo_msg = f"🔔 *THÔNG BÁO LỊCH TRỰC SỐ*\n📅 NGÀY: {tab_name_today}\n------------------\n"
                         for i, name in enumerate(r_names):
                             if i < len(ROLES_HEADER) and name != "--":
@@ -335,7 +357,6 @@ else:
                     except: st.error("Lỗi tải thông tin ekip.")
 
                     st.divider()
-                    
                     tab_edit_vo, tab_del_vo = st.tabs(["SỬA EKIP TRỰC", "XÓA SỔ"])
                     with tab_edit_vo:
                         curr_names = wks_today.row_values(3)[1:]
@@ -415,6 +436,11 @@ else:
                                 ts_linksp
                             ]
                             wks_today.append_row(row)
+                            
+                            # --- TỰ ĐỘNG KẺ BẢNG CHO DÒNG VỪA THÊM ---
+                            last_row_idx = len(wks_today.get_all_values()) 
+                            dinh_dang_dong_moi(wks_today, last_row_idx)
+                            
                             start_stt += 1
                         st.success("ĐÃ LƯU!"); st.rerun()
                     except Exception as e: st.error(f"Lỗi: {e}")
@@ -537,7 +563,7 @@ else:
     with tabs[tab_email_idx]:
         tk = st.selectbox("TK GỬI:", range(10), format_func=lambda x:f"TK {x}")
         to = st.multiselect("ĐẾN:", df_users['Email'].tolist())
-        sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("NỘI DUNG")
+        sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
         if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
     # ================= TAB 7: LOGS =================
