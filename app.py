@@ -4,20 +4,33 @@ from oauth2client.service_account import ServiceAccountCredentials
 import gspread
 
 # --- HÀM KẾT NỐI MỚI (Copy đè lên hàm cũ) ---
+# --- XÓA HÀM CŨ, DÁN ĐÈ HÀM NÀY VÀO ---
 def ket_noi_sheet():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Logic: Nếu tìm thấy Secrets (trên mạng) thì dùng Secrets, ngược lại dùng file key.json (máy tính)
-    if "gcp_service_account" in st.secrets:
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    else:
-        # Fallback cho máy tính cá nhân
-        creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
+    try:
+        # Cách 1: Thử lấy từ Secrets trên mạng
+        if "gcp_service_account" in st.secrets:
+            creds_dict = st.secrets["gcp_service_account"]
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            # st.toast("Đang dùng Secrets trên Cloud", icon="☁️") # Bỏ comment để debug
+        # Cách 2: Nếu không có Secrets, tìm file key.json (máy tính)
+        else:
+            creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
+            # st.toast("Đang dùng file key.json", icon="💻") # Bỏ comment để debug
+            
+        client = gspread.authorize(creds)
+        sheet = client.open("HeThongQuanLy") 
+        return sheet
         
-    client = gspread.authorize(creds)
-    sheet = client.open("HeThongQuanLy") 
-    return sheet
+    except Exception as e:
+        st.error(f"⚠️ LỖI KẾT NỐI CHI TIẾT: {e}")
+        st.info("GỢI Ý SỬA LỖI:")
+        st.markdown("""
+        1. Nếu đang ở trên mạng: Bạn đã dán Key vào mục **Secrets** chưa? Tiêu đề có đúng là `[gcp_service_account]` không?
+        2. Nếu lỗi là 'File not found': Code đang không tìm thấy Secrets nên quay sang tìm file key.json mà không thấy.
+        """)
+        st.stop()
 
 # Tìm đoạn try-except cũ và thay bằng đoạn này:
 try:
