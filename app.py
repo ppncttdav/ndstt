@@ -77,16 +77,15 @@ else:
     # ================= 3. GIAO DIỆN CHÍNH =================
     st.title("📰 TÒA SOẠN SỐ THÔNG MINH")
     
-    # Cấu trúc Tabs: Ai cũng được tạo việc, nhưng Dashboard chỉ Lãnh đạo xem
+    # Cấu trúc Tabs
     if role == 'LanhDao':
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "✅ Việc Cần Làm", "🗂️ Quản lý Dự Án", "📧 Soạn Email"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "✅ Việc Cần Làm", "🗂️ Quản lý Dự Án", "📧 Trung Tâm Email"])
     else:
-        # Nhân viên không có Dashboard thống kê
-        tab1, tab2, tab3 = st.tabs(["✅ Việc Cần Làm", "🗂️ Quản lý Dự Án", "📧 Soạn Email"])
+        tab1, tab2, tab3 = st.tabs(["✅ Việc Cần Làm", "🗂️ Quản lý Dự Án", "📧 Trung Tâm Email"])
         tab4 = None 
 
     # ---------------------------------------------------------
-    # TAB: DASHBOARD (CHỈ LÃNH ĐẠO)
+    # TAB 1: DASHBOARD (CHỈ LÃNH ĐẠO)
     # ---------------------------------------------------------
     if role == 'LanhDao':
         with tab1:
@@ -94,12 +93,10 @@ else:
             df_cv = lay_du_lieu(sh, "CongViec")
             
             if not df_cv.empty:
-                # Logic thống kê cơ bản
                 total = len(df_cv)
                 completed = len(df_cv[df_cv['TrangThai'] == 'Xong'])
                 in_progress = len(df_cv[df_cv['TrangThai'] == 'Đang làm'])
                 
-                # Thống kê nhanh
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Tổng đầu việc", total)
                 c2.metric("Hoàn thành", completed)
@@ -116,13 +113,11 @@ else:
                 st.info("Chưa có dữ liệu.")
 
     # ---------------------------------------------------------
-    # TAB: VIỆC CẦN LÀM (QUAN TRỌNG NHẤT - CẢ 2 ĐỀU DÙNG ĐƯỢC)
+    # TAB 2: VIỆC CẦN LÀM (QUAN TRỌNG NHẤT)
     # ---------------------------------------------------------
-    # Xác định đúng tab để hiển thị tùy theo vai trò
     target_tab_viec = tab2 if role == 'LanhDao' else tab1
     
     with target_tab_viec:
-        # Lấy dữ liệu cần thiết
         df_da = lay_du_lieu(sh, "DuAn")
         list_du_an = df_da['TenDuAn'].tolist() if not df_da.empty else ["Việc chung"]
         
@@ -131,7 +126,6 @@ else:
 
         st.subheader("📝 Quản lý & Giao việc")
         
-        # --- FORM TẠO VIỆC MỚI (AI CŨNG THẤY) ---
         with st.expander("➕ TẠO VIỆC MỚI (Click để mở)", expanded=False):
             with st.form("tao_viec_form"):
                 c1, c2 = st.columns(2)
@@ -139,14 +133,12 @@ else:
                     tv_ten = st.text_input("Tên đầu việc", placeholder="Vd: Duyệt maket trang 1")
                     tv_duan = st.selectbox("Thuộc Cụm dự án", list_du_an)
                     
-                    # CHỌN THỜI GIAN CHI TIẾT
                     st.write("⏱️ **Hạn chót (Deadline):**")
                     col_gio, col_ngay = st.columns(2)
                     tv_time = col_gio.time_input("Giờ", value=datetime.now().time())
                     tv_date = col_ngay.date_input("Ngày", value=datetime.now())
                     
                 with c2:
-                    # CHỌN NHIỀU NGƯỜI
                     tv_nguoi = st.multiselect("Người thực hiện (Chọn nhiều)", list_nv, placeholder="Chọn danh sách nhân sự...")
                     tv_ghichu = st.text_area("Ghi chú / Yêu cầu chi tiết", height=100)
                 
@@ -159,24 +151,17 @@ else:
                 btn_luu = st.form_submit_button("💾 Lưu Công Việc & Tạo Email", type="primary")
                 
             if btn_luu and tv_ten:
-                # 1. Xử lý dữ liệu
-                # Gộp Giờ và Ngày thành chuỗi: HH:MM DD/MM/YYYY
                 deadline_str = f"{tv_time.strftime('%H:%M')} {tv_date.strftime('%d/%m/%Y')}"
-                # Gộp danh sách người thành chuỗi: "Huy, Lan, Tùng"
                 nguoi_str = ", ".join(tv_nguoi)
                 
                 try:
-                    # 2. Lưu vào Sheet
                     wks_cv = sh.worksheet("CongViec")
                     wks_cv.append_row([tv_ten, tv_duan, deadline_str, nguoi_str, "Mới", "", tv_ghichu])
                     st.success("✅ Đã lưu công việc thành công!")
                     
-                    # 3. Xử lý Logic Email
                     msg_links = []
                     
-                    # -> Logic A: Gửi cho Người thực hiện
                     if opt_gui_nv and tv_nguoi:
-                        # Tìm email của những người được chọn
                         ds_email_nv = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].dropna().tolist()
                         ds_email_nv = [e for e in ds_email_nv if str(e).strip() != ""]
                         
@@ -184,25 +169,19 @@ else:
                             str_to_nv = ",".join(ds_email_nv)
                             sub_nv = f"[GIAO VIỆC] {tv_ten} - Deadline: {deadline_str}"
                             body_nv = f"Chào các bạn,\n\nBạn được phân công tham gia công việc:\n- Đầu việc: {tv_ten}\n- Dự án: {tv_duan}\n- Hạn chót: {deadline_str}\n- Yêu cầu: {tv_ghichu}\n\nVui lòng kiểm tra và thực hiện đúng hạn.\n\nNgười tạo việc:\n{user_info['HoTen']}"
-                            
                             link_nv = f"https://mail.google.com/mail/?view=cm&fs=1&to={str_to_nv}&su={urllib.parse.quote(sub_nv)}&body={urllib.parse.quote(body_nv)}"
                             msg_links.append(f'<a href="{link_nv}" target="_blank" style="background:#00C853;color:white;padding:10px;border-radius:5px;text-decoration:none;font-weight:bold">📧 Gửi NV Phụ Trách</a>')
                     
-                    # -> Logic B: Gửi cho Lãnh đạo
                     if opt_gui_ld:
-                        # Lấy danh sách email Lãnh đạo
                         ds_email_ld = df_users[df_users['VaiTro'] == 'LanhDao']['Email'].dropna().tolist()
                         ds_email_ld = [e for e in ds_email_ld if str(e).strip() != ""]
-                        
                         if ds_email_ld:
                             str_to_ld = ",".join(ds_email_ld)
                             sub_ld = f"[BÁO CÁO] Tạo việc mới: {tv_ten}"
                             body_ld = f"Kính gửi Lãnh đạo,\n\nTôi vừa khởi tạo đầu việc mới trên hệ thống:\n- Việc: {tv_ten}\n- Dự án: {tv_duan}\n- Phụ trách: {nguoi_str}\n- Deadline: {deadline_str}\n\nTrân trọng báo cáo."
-                            
                             link_ld = f"https://mail.google.com/mail/?view=cm&fs=1&to={str_to_ld}&su={urllib.parse.quote(sub_ld)}&body={urllib.parse.quote(body_ld)}"
                             msg_links.append(f'<a href="{link_ld}" target="_blank" style="background:#2962FF;color:white;padding:10px;border-radius:5px;text-decoration:none;font-weight:bold;margin-left:10px">📧 Gửi Báo Cáo Lãnh Đạo</a>')
 
-                    # Hiển thị nút bấm Email nếu có
                     if msg_links:
                         st.info("👇 Bấm vào nút bên dưới để gửi email thông báo:")
                         st.markdown(" ".join(msg_links), unsafe_allow_html=True)
@@ -211,7 +190,6 @@ else:
                     st.error(f"Lỗi khi lưu: {e}")
 
         st.divider()
-        # HIỂN THỊ DANH SÁCH CÔNG VIỆC
         filter_duan = st.selectbox("🔍 Lọc theo Dự án", ["Tất cả"] + list_du_an)
         
         df_view = lay_du_lieu(sh, "CongViec")
@@ -219,7 +197,6 @@ else:
             if filter_duan != "Tất cả":
                 df_view = df_view[df_view['DuAn'] == filter_duan]
             
-            # Cấu hình hiển thị bảng
             st.dataframe(
                 df_view, 
                 use_container_width=True, 
@@ -234,7 +211,7 @@ else:
             st.info("Chưa có công việc nào.")
 
     # ---------------------------------------------------------
-    # TAB: QUẢN LÝ DỰ ÁN (CHỈ CẦN THÊM DỰ ÁN LÀ ĐƯỢC)
+    # TAB 3: QUẢN LÝ DỰ ÁN
     # ---------------------------------------------------------
     target_tab_da = tab3 if role == 'LanhDao' else tab2
     with target_tab_da:
@@ -259,61 +236,45 @@ else:
                 st.dataframe(df_da_view, use_container_width=True, hide_index=True)
 
     # ---------------------------------------------------------
-    # TAB: EMAIL (GIỮ NGUYÊN)
+    # TAB 4: TRUNG TÂM EMAIL (ĐÃ NÂNG CẤP LÊN 10 TÀI KHOẢN)
     # ---------------------------------------------------------
     target_tab_email = tab4 if role == 'LanhDao' else tab3
     with target_tab_email:
-        st.info("💡 Đây là khu vực soạn thảo email tự do. Để gửi email thông báo công việc, vui lòng dùng Tab 'Việc Cần Làm'.")
-        # (Tại đây bạn có thể dán lại code phần gửi email tự do của bài trước nếu cần)
-
-# --- CHỨC NĂNG 3: GỬI EMAIL (TỐI ƯU CHO NHIỀU NGƯỜI DÙNG) ---
-    elif menu == "Gửi email nhanh":
         st.header("📧 Trung tâm Soạn Thảo Email")
-        import streamlit.components.v1 as components 
-
-        # --- 1. CHỌN TÀI KHOẢN GỬI (QUAN TRỌNG: PHẢI CHỌN TÙY THEO MÁY) ---
-        st.info("💡 Lưu ý: Vì mỗi máy tính đăng nhập các tài khoản Gmail theo thứ tự khác nhau, hãy kiểm tra kỹ trước khi gửi.")
         
+        # --- 1. CHỌN TÀI KHOẢN GỬI (ĐÃ SỬA: CHỌN ĐẾN 10 TK) ---
+        st.info("💡 Lưu ý: Hãy chọn số tài khoản Gmail tương ứng trên máy tính này.")
         col_tk1, col_tk2 = st.columns([2, 1])
         with col_tk1:
-            # Cho chọn tài khoản 0, 1, 2, 3
             tai_khoan_chon = st.selectbox(
-                "📤 Bạn muốn gửi từ Tài khoản số mấy trên máy này?",
-                options=[0, 1, 2, 3,4,5,6,7,8],
+                "📤 Bạn muốn gửi từ Tài khoản số mấy?",
+                options=list(range(10)), # <--- ĐÃ SỬA: Cho phép chọn từ 0 đến 9
                 format_func=lambda x: f"Tài khoản Gmail số {x} (Mặc định)" if x == 0 else f"Tài khoản Gmail số {x}"
             )
         with col_tk2:
-            # Nút kiểm tra thần thánh: Bấm vào là biết ngay số đó là mail nào
-            st.write("Kiểm tra xem là Mail nào:")
+            st.write("Kiểm tra:")
             link_check = f"https://mail.google.com/mail/u/{tai_khoan_chon}"
-            st.markdown(f'''
-                <a href="{link_check}" target="_blank" style="
-                    display: inline-block;
-                    padding: 8px 15px;
-                    background-color: #f0f2f6;
-                    color: #31333F;
-                    text-decoration: none;
-                    border-radius: 5px;
-                    border: 1px solid #d6d6d8;
-                    font-weight: bold;">
-                    👁️ Mở Hộp thư số {tai_khoan_chon}
-                </a>
-            ''', unsafe_allow_html=True)
+            st.markdown(f'<a href="{link_check}" target="_blank" style="padding: 5px 10px; background:#eee; text-decoration:none; border-radius:5px;">👁️ Mở Hộp thư số {tai_khoan_chon}</a>', unsafe_allow_html=True)
 
         st.divider()
 
-        # --- 2. LẤY DỮ LIỆU TỪ SHEET (Giữ nguyên) ---
+        # --- 2. LẤY DỮ LIỆU ---
         try:
-            users_data = sh.worksheet("TaiKhoan").get_all_records()
-            danh_ba = {u['HoTen']: u['Email'] for u in users_data if str(u['Email']).strip() != ""}
-            list_ten = list(danh_ba.keys())
+            users_data = lay_du_lieu(sh, "TaiKhoan")
+            if not users_data.empty:
+                danh_ba = {row['HoTen']: row['Email'] for index, row in users_data.iterrows() if str(row['Email']).strip() != ""}
+                list_ten = list(danh_ba.keys())
+            else:
+                list_ten = []
+                danh_ba = {}
 
-            mau_data = sh.worksheet("MauEmail").get_all_records()
+            mau_data = lay_du_lieu(sh, "MauEmail")
             thu_vien_mau = {}
-            for m in mau_data:
-                thu_vien_mau[m['TenMau']] = {"tieu_de": m['TieuDe'], "noi_dung": m['NoiDung']}
+            if not mau_data.empty:
+                for index, row in mau_data.iterrows():
+                    thu_vien_mau[row['TenMau']] = {"tieu_de": row['TieuDe'], "noi_dung": row['NoiDung']}
         except:
-            st.error("Lỗi đọc dữ liệu Sheet.")
+            st.error("Lỗi đọc dữ liệu người dùng/mẫu email.")
             st.stop()
 
         # --- 3. GIAO DIỆN SOẠN THẢO ---
@@ -336,7 +297,7 @@ else:
                 bcc_ten = st.multiselect("BCC:", list_ten)
                 email_bcc = [danh_ba[ten] for ten in bcc_ten]
 
-        # Xử lý nội dung & Chữ ký (Giữ nguyên)
+        # Xử lý nội dung
         val_tieu_de = ""
         val_noi_dung = ""
         if ten_mau_chon != "-- Tự soạn thảo --":
@@ -358,10 +319,8 @@ else:
         final_tieu_de = st.text_input("Tiêu đề:", value=val_tieu_de)
         final_noi_dung = st.text_area("Nội dung:", value=val_noi_dung, height=300)
 
-        # --- 4. NÚT GỬI (Tự động cập nhật theo số đã chọn ở trên) ---
-        btn_label = f"🚀 Mở Gmail (Tài khoản số {tai_khoan_chon}) để gửi"
-        
-        if st.button(btn_label, type="primary"):
+        # --- 4. NÚT GỬI ---
+        if st.button(f"🚀 Mở Gmail (TK số {tai_khoan_chon}) để gửi", type="primary"):
             if not email_to:
                 st.warning("Vui lòng chọn người nhận!")
             else:
@@ -369,7 +328,6 @@ else:
                 su_enc = urllib.parse.quote(final_tieu_de)
                 body_enc = urllib.parse.quote(final_noi_dung)
                 
-                # Link động theo tai_khoan_chon
                 gmail_link = f"https://mail.google.com/mail/u/{tai_khoan_chon}/?view=cm&fs=1&to={str_to}&cc={str_cc}&bcc={str_bcc}&su={su_enc}&body={body_enc}"
                 
                 js_script = f"""<script>window.open("{gmail_link}", "_blank");</script>"""
