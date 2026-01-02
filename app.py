@@ -1,7 +1,8 @@
 # Đảm bảo 2 dòng này nằm trên cùng file app.py
 import streamlit as st
-from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd  # <--- BẠN ĐANG THIẾU DÒNG NÀY
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # --- HÀM KẾT NỐI MỚI (Copy đè lên hàm cũ) ---
 # --- XÓA HÀM CŨ, DÁN ĐÈ HÀM NÀY VÀO ---
