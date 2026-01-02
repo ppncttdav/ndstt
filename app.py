@@ -9,35 +9,36 @@ from datetime import datetime, date
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="Phòng Nội dung số và Truyền thông", page_icon="🏢", layout="wide")
 
-# --- DANH SÁCH TRẠNG THÁI MỚI (QUY TRÌNH CHUẨN) ---
+# --- DANH SÁCH TRẠNG THÁI ---
 OPTS_TRANG_THAI = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
 # --- TỪ ĐIỂN HIỂN THỊ ---
+# (Đã bỏ NguoiTao ra khỏi danh sách hiển thị)
 VN_COLS_VIEC = {
-    "TenViec": "Tên công việc / Nhiệm vụ",
-    "DuAn": "Thuộc Dự án",
+    "TenViec": "Tên công việc",
+    "DuAn": "Dự án",
     "Deadline": "Hạn chót",
-    "NguoiPhuTrach": "Người phụ trách",
+    "NguoiPhuTrach": "Người thực hiện",
     "TrangThai": "Trạng thái",
     "LinkBai": "Link sản phẩm",
-    "GhiChu": "Ghi chú / Yêu cầu"
+    "GhiChu": "Ghi chú"
 }
 
 VN_COLS_DUAN = {
     "TenDuAn": "Tên Dự án",
-    "MoTa": "Mô tả chi tiết",
+    "MoTa": "Mô tả",
     "TrangThai": "Trạng thái",
-    "TruongNhom": "Điều phối viên (Lead)"
+    "TruongNhom": "Điều phối (Lead)"
 }
 
 VN_COLS_LOG = {
     "ThoiGian": "Thời gian",
-    "NguoiDung": "Người thực hiện",
+    "NguoiDung": "Người dùng",
     "HanhDong": "Hành động",
-    "ChiTiet": "Nội dung chi tiết"
+    "ChiTiet": "Chi tiết"
 }
 
-# ================= 1. CÁC HÀM XỬ LÝ (BACKEND) =================
+# ================= 1. BACKEND =================
 def ket_noi_sheet():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -50,7 +51,7 @@ def ket_noi_sheet():
         sheet = client.open("HeThongQuanLy") 
         return sheet
     except Exception as e:
-        st.error(f"🔴 Lỗi kết nối máy chủ: {e}")
+        st.error(f"🔴 Lỗi kết nối: {e}")
         st.stop()
 
 def lay_du_lieu(sh, ten_tab):
@@ -69,21 +70,42 @@ def ghi_nhat_ky(sh, nguoi_dung, hanh_dong, chi_tiet):
     except:
         pass
 
-def kiem_tra_quyen_du_an(current_user, role_he_thong, ten_du_an, df_projects):
-    if role_he_thong == 'LanhDao':
-        return True
+# --- HÀM KIỂM TRA QUYỀN SỬA ĐỔI ---
+def check_quyen_truy_cap(current_user, role_system, row_data, df_duan):
+    """
+    0: Xem
+    1: Nhân viên (Sửa Trạng thái, Link, Ghi chú)
+    2: Admin/Chủ sở hữu (Full quyền)
+    """
+    # 1. Admin hệ thống
+    if role_system == 'LanhDao':
+        return 2
+    
+    # 2. Người tạo ra việc này (Dữ liệu vẫn lấy từ Sheet gốc nên vẫn check được)
+    nguoi_tao = str(row_data.get('NguoiTao', '')).strip()
+    if nguoi_tao == current_user:
+        return 2
+        
+    # 3. Trưởng nhóm dự án
     try:
-        if not df_projects.empty:
-            row = df_projects[df_projects['TenDuAn'] == ten_du_an]
-            if not row.empty:
-                ds_truong_nhom = str(row.iloc[0]['TruongNhom'])
-                if current_user in ds_truong_nhom:
-                    return True
+        ten_du_an = row_data['DuAn']
+        if not df_duan.empty:
+            duan_row = df_duan[df_duan['TenDuAn'] == ten_du_an]
+            if not duan_row.empty:
+                leads = str(duan_row.iloc[0]['TruongNhom'])
+                if current_user in leads:
+                    return 2
     except:
-        return False
-    return False
+        pass
 
-# ================= 2. QUẢN LÝ ĐĂNG NHẬP =================
+    # 4. Người được giao việc
+    nguoi_phu_trach = str(row_data.get('NguoiPhuTrach', ''))
+    if current_user in nguoi_phu_trach:
+        return 1
+        
+    return 0
+
+# ================= 2. AUTH =================
 if 'dang_nhap' not in st.session_state:
     st.session_state['dang_nhap'] = False
     st.session_state['user_info'] = {}
@@ -96,21 +118,20 @@ if not st.session_state['dang_nhap']:
     with st.form("login"):
         user = st.text_input("Tên đăng nhập")
         pwd = st.text_input("Mật khẩu", type="password")
-        if st.form_submit_button("Đăng nhập hệ thống"):
+        if st.form_submit_button("Đăng nhập"):
             users = lay_du_lieu(sh, "TaiKhoan")
             if not users.empty:
                 user_row = users[(users['TenDangNhap'].astype(str) == user) & (users['MatKhau'].astype(str) == pwd)]
                 if not user_row.empty:
                     st.session_state['dang_nhap'] = True
                     st.session_state['user_info'] = user_row.iloc[0].to_dict()
-                    ghi_nhat_ky(sh, user_row.iloc[0]['HoTen'], "Đăng nhập", "Truy cập hệ thống")
+                    ghi_nhat_ky(sh, user_row.iloc[0]['HoTen'], "Đăng nhập", "Success")
                     st.rerun()
                 else:
-                    st.error("Sai tên đăng nhập hoặc mật khẩu!")
+                    st.error("Sai thông tin!")
             else:
-                st.error("Lỗi: Không kết nối được dữ liệu tài khoản.")
+                st.error("Lỗi dữ liệu.")
 else:
-    # --- SIDEBAR ---
     user_info = st.session_state['user_info']
     current_name = user_info['HoTen']
     role_system = user_info.get('VaiTro', 'NhanVien')
@@ -123,10 +144,9 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ VÀ TRUYỀN THÔNG")
 
-    # --- TABS ---
-    tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📧 Soạn thảo & Gửi Email", "📜 Nhật ký Hệ thống"])
+    tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📧 Soạn Email", "📜 Nhật ký"])
 
-    # Load dữ liệu nền
+    # Load Data
     df_duan = lay_du_lieu(sh, "DuAn")
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
     
@@ -134,285 +154,253 @@ else:
     list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
 
     # =========================================================
-    # TAB 1: QUẢN LÝ CÔNG VIỆC
+    # TAB 1: CÔNG VIỆC
     # =========================================================
     with tabs[0]:
-        st.caption("Theo dõi tiến độ, phân công và cập nhật trạng thái.")
+        st.caption("Quản lý tiến độ, phân công và cập nhật trạng thái.")
 
-        # --- A. FORM TẠO VIỆC (ĐÃ BỎ st.form ĐỂ REAL-TIME) ---
+        # --- A. TẠO VIỆC ---
         with st.expander("➕ KHỞI TẠO ĐẦU VIỆC MỚI", expanded=False):
-            st.info("💡 Điền thông tin công việc, sau đó cấu hình email và bấm Lưu.")
+            st.info("💡 Bạn có toàn quyền sửa/xóa với công việc do chính mình tạo ra.")
             
-            # 1. THÔNG TIN CÔNG VIỆC
             st.markdown("#### 1. Thông tin công việc")
             c1, c2 = st.columns(2)
             with c1:
                 tv_ten = st.text_input("Tên đầu việc / Nhiệm vụ")
-                tv_duan = st.selectbox("Thuộc Dự án / Nhóm việc", list_duan)
+                tv_duan = st.selectbox("Thuộc Dự án", list_duan)
                 
-                st.write("⏱️ **Thời hạn hoàn thành (Deadline):**")
+                st.write("⏱️ **Hạn chót (Deadline):**")
                 col_h, col_d = st.columns(2)
                 tv_time = col_h.time_input("Giờ", value=datetime.now().time())
                 tv_date = col_d.date_input("Ngày", value=datetime.now())
                 
             with c2:
                 tv_nguoi = st.multiselect("Nhân sự thực hiện", list_nv)
-                tv_ghichu = st.text_area("Mô tả chi tiết / Yêu cầu", height=135)
+                tv_ghichu = st.text_area("Mô tả / Yêu cầu", height=135)
 
             st.divider()
-
-            # 2. CẤU HÌNH GỬI EMAIL (REAL-TIME)
-            st.markdown("#### 2. Cấu hình gửi Email thông báo")
-            
+            st.markdown("#### 2. Cấu hình Email thông báo")
             ct1, ct2 = st.columns([2,1])
             with ct1:
-                # Selectbox này giờ sẽ cập nhật link ngay lập tức khi chọn
-                tk_gui = st.selectbox("Gửi từ Tài khoản Gmail số:", range(10), format_func=lambda x: f"Tài khoản số {x} (trên máy này)")
+                tk_gui = st.selectbox("Gửi từ Tài khoản số:", range(10), format_func=lambda x: f"Tài khoản {x} (trên máy này)")
             with ct2:
                 st.write("Kiểm tra:")
-                # Link này sẽ nhảy số ngay khi tk_gui thay đổi
-                st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}" target="_blank" style="background:#f0f2f6; padding: 6px 12px; border-radius: 5px; text-decoration: none; border: 1px solid #ccc; display: inline-block;">👁️ Mở Hộp thư số {tk_gui}</a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}" target="_blank" style="background:#f0f2f6; padding: 6px 12px; border-radius: 5px; text-decoration: none; border: 1px solid #ccc; display: inline-block;">👁️ Hộp thư số {tk_gui}</a>', unsafe_allow_html=True)
             
             co1, co2 = st.columns(2)
-            opt_nv = co1.checkbox("Gửi cho Nhân sự thực hiện", value=True)
-            opt_ld = co2.checkbox("Gửi báo cáo cho Lãnh đạo", value=False)
+            opt_nv = co1.checkbox("Gửi cho Nhân sự", value=True)
+            opt_ld = co2.checkbox("Gửi báo cáo Lãnh đạo", value=False)
 
             st.markdown("---")
             
-            # 3. NÚT LƯU (DÙNG BUTTON THƯỜNG VÌ ĐÃ BỎ FORM)
             if st.button("💾 Lưu công việc & Tạo Email", type="primary"):
                 if tv_ten and tv_duan:
                     try:
                         deadline_fmt = f"{tv_time.strftime('%H:%M')} {tv_date.strftime('%d/%m/%Y')}"
                         nguoi_str = ", ".join(tv_nguoi)
                         
-                        # Mặc định trạng thái ban đầu là "Đã giao"
-                        trang_thai_bd = "Đã giao"
-                        
                         wks_cv = sh.worksheet("CongViec")
-                        wks_cv.append_row([tv_ten, tv_duan, deadline_fmt, nguoi_str, trang_thai_bd, "", tv_ghichu])
+                        # Lưu NguoiTao vào cột H nhưng không cần hiển thị
+                        wks_cv.append_row([tv_ten, tv_duan, deadline_fmt, nguoi_str, "Đã giao", "", tv_ghichu, current_name])
                         
                         ghi_nhat_ky(sh, current_name, "Tạo việc", f"{tv_ten} ({tv_duan})")
                         st.success("✅ Đã tạo công việc thành công!")
 
-                        # Tạo link Email
                         msg_links = []
-                        # Gửi nhân viên
                         if opt_nv and tv_nguoi:
                             mails_nv = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].dropna().tolist()
                             mails_nv = [m for m in mails_nv if str(m).strip()]
                             if mails_nv:
                                 sub = f"[GIAO VIỆC] {tv_ten} - Hạn: {deadline_fmt}"
-                                body = f"Chào các bạn,\n\nBạn được phân công nhiệm vụ mới:\n- Đầu việc: {tv_ten}\n- Dự án: {tv_duan}\n- Deadline: {deadline_fmt}\n- Ghi chú: {tv_ghichu}\n\nNgười tạo: {current_name}"
+                                body = f"Chào các bạn,\n\nBạn có việc mới:\n- Việc: {tv_ten}\n- Dự án: {tv_duan}\n- Deadline: {deadline_fmt}\n- Ghi chú: {tv_ghichu}\n\nNgười tạo: {current_name}"
                                 link = f"https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={','.join(mails_nv)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
-                                msg_links.append(f'<a href="{link}" target="_blank" style="background:#28a745;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;margin-right:10px;">📧 Gửi NV Phụ Trách (TK {tk_gui})</a>')
+                                msg_links.append(f'<a href="{link}" target="_blank" style="background:#28a745;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;margin-right:10px;">📧 Gửi NV (TK {tk_gui})</a>')
                         
-                        # Gửi Lãnh đạo
                         if opt_ld:
                             mails_ld = df_users[df_users['VaiTro'] == 'LanhDao']['Email'].dropna().tolist()
                             mails_ld = [m for m in mails_ld if str(m).strip()]
                             if mails_ld:
-                                sub = f"[BÁO CÁO] Công việc mới: {tv_ten}"
-                                body = f"Kính gửi Lãnh đạo,\n\nTôi vừa khởi tạo đầu việc mới:\n- Việc: {tv_ten}\n- Dự án: {tv_duan}\n- Phụ trách: {nguoi_str}\n\nTrân trọng."
+                                sub = f"[BÁO CÁO] Việc mới: {tv_ten}"
+                                body = f"Kính gửi Lãnh đạo,\n\nTôi vừa tạo việc mới:\n- Việc: {tv_ten}\n- Dự án: {tv_duan}\n- Phụ trách: {nguoi_str}\n\nTrân trọng."
                                 link = f"https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={','.join(mails_ld)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
                                 msg_links.append(f'<a href="{link}" target="_blank" style="background:#007bff;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;">📧 Báo cáo Lãnh đạo (TK {tk_gui})</a>')
                         
                         if msg_links:
-                            st.info("👇 Bấm vào nút dưới đây để gửi email:")
+                            st.info("👇 Bấm nút dưới để gửi email:")
                             st.markdown(" ".join(msg_links), unsafe_allow_html=True)
                             
                     except Exception as e:
-                        st.error(f"Lỗi hệ thống: {e}")
+                        st.error(f"Lỗi: {e}")
                 else:
-                    st.warning("Vui lòng nhập đầy đủ Tên việc và Dự án.")
+                    st.warning("Thiếu tên việc hoặc dự án.")
 
-        # --- B. DANH SÁCH & CÔNG CỤ ĐIỀU PHỐI ---
+        # --- B. DANH SÁCH & CÔNG CỤ SỬA ---
         st.divider()
-        st.subheader("📋 Danh sách Công việc hiện tại")
+        st.subheader("📋 Danh sách Công việc")
         
-        filter_da = st.selectbox("Lọc theo Dự án:", ["-- Tất cả dự án --"] + list_duan)
+        filter_da = st.selectbox("Lọc Dự án:", ["-- Tất cả --"] + list_duan)
         
         df_cv = lay_du_lieu(sh, "CongViec")
         if not df_cv.empty:
             df_view = df_cv.copy()
-            
-            if filter_da != "-- Tất cả dự án --":
+            if filter_da != "-- Tất cả --":
                 df_view = df_view[df_view['DuAn'] == filter_da]
-                
-                is_admin_duan = kiem_tra_quyen_du_an(current_name, role_system, filter_da, df_duan)
-                if is_admin_duan:
-                    st.success(f"🌟 Bạn có quyền ĐIỀU PHỐI (Sửa/Xóa) trong dự án: {filter_da}")
-                    with st.expander("🛠️ CÔNG CỤ ĐIỀU CHỈNH (Sửa/Xóa)", expanded=True):
-                        tab_sua, tab_xoa = st.tabs(["✏️ Chỉnh sửa đầu việc", "🗑️ Xóa đầu việc"])
-                        
-                        with tab_sua:
-                            opts_sua = [f"{row['TenViec']} (ID: {i+2})" for i, row in df_view.iterrows()]
-                            if opts_sua:
-                                chon_sua = st.selectbox("Chọn việc cần sửa:", opts_sua)
-                                original_idx = df_cv.index[df_cv['TenViec'] == chon_sua.split(" (ID:")[0]].tolist()[0]
-                                row_data = df_cv.iloc[original_idx]
+            
+            # --- CÔNG CỤ SỬA ---
+            editable_tasks = {}
+            for idx, row in df_view.iterrows():
+                level = check_quyen_truy_cap(current_name, role_system, row, df_duan)
+                if level > 0:
+                    label = f"{row['TenViec']} (ID: {idx+2})"
+                    editable_tasks[label] = {"index": idx, "level": level}
+            
+            if editable_tasks:
+                with st.expander("🛠️ CẬP NHẬT / CHỈNH SỬA", expanded=True):
+                    tab_sua, tab_xoa = st.tabs(["✏️ Cập nhật", "🗑️ Xóa việc"])
+                    
+                    with tab_sua:
+                        chon_sua = st.selectbox("Chọn việc:", list(editable_tasks.keys()))
+                        if chon_sua:
+                            task_info = editable_tasks[chon_sua]
+                            original_idx = task_info["index"]
+                            permission_level = task_info["level"]
+                            row_data = df_cv.iloc[original_idx]
 
-                                with st.form("form_sua"):
-                                    ce1, ce2 = st.columns(2)
-                                    with ce1:
-                                        e_ten = st.text_input("Tên việc", value=row_data['TenViec'])
-                                        e_nguoi = st.text_input("Người phụ trách", value=row_data['NguoiPhuTrach'])
-                                    with ce2:
-                                        curr_deadline = row_data['Deadline'] if 'Deadline' in row_data else ""
-                                        e_dl = st.text_input("Deadline", value=curr_deadline)
-                                        
-                                        # CẬP NHẬT TRẠNG THÁI MỚI
-                                        trang_thai_hien_tai = row_data['TrangThai']
-                                        index_tt = OPTS_TRANG_THAI.index(trang_thai_hien_tai) if trang_thai_hien_tai in OPTS_TRANG_THAI else 0
-                                        e_tt = st.selectbox("Trạng thái", OPTS_TRANG_THAI, index=index_tt)
+                            if permission_level == 2:
+                                st.caption("🌟 Admin Mode: Sửa toàn bộ.")
+                                disable_core = False
+                            else:
+                                st.caption("👤 User Mode: Chỉ cập nhật Tiến độ & Ghi chú.")
+                                disable_core = True
+
+                            with st.form("form_sua"):
+                                ce1, ce2 = st.columns(2)
+                                with ce1:
+                                    e_ten = st.text_input("Tên việc", value=row_data['TenViec'], disabled=disable_core)
+                                    e_nguoi = st.text_input("Người phụ trách", value=row_data['NguoiPhuTrach'], disabled=disable_core)
+                                    e_link = st.text_input("Link sản phẩm", value=row_data.get('LinkBai', ''))
+                                with ce2:
+                                    e_dl = st.text_input("Deadline", value=row_data.get('Deadline', ''), disabled=disable_core)
                                     
-                                    if st.form_submit_button("Cập nhật thay đổi"):
-                                        wks_cv = sh.worksheet("CongViec")
-                                        row_num = original_idx + 2
-                                        wks_cv.update_cell(row_num, 1, e_ten)
-                                        wks_cv.update_cell(row_num, 3, e_dl)
-                                        wks_cv.update_cell(row_num, 4, e_nguoi)
-                                        wks_cv.update_cell(row_num, 5, e_tt)
-                                        ghi_nhat_ky(sh, current_name, "Sửa việc", f"{e_ten} -> {e_tt}")
-                                        st.success("Đã cập nhật dữ liệu!")
-                                        st.rerun()
+                                    curr_stt = row_data.get('TrangThai', 'Đã giao')
+                                    idx_stt = OPTS_TRANG_THAI.index(curr_stt) if curr_stt in OPTS_TRANG_THAI else 0
+                                    e_tt = st.selectbox("Trạng thái", OPTS_TRANG_THAI, index=idx_stt)
+                                    
+                                    e_note = st.text_area("Ghi chú / Báo cáo", value=row_data.get('GhiChu', ''), height=100)
+                                
+                                if st.form_submit_button("Cập nhật ngay"):
+                                    wks_cv = sh.worksheet("CongViec")
+                                    r_num = original_idx + 2
+                                    wks_cv.update_cell(r_num, 1, e_ten)
+                                    wks_cv.update_cell(r_num, 3, e_dl)
+                                    wks_cv.update_cell(r_num, 4, e_nguoi)
+                                    wks_cv.update_cell(r_num, 5, e_tt)
+                                    wks_cv.update_cell(r_num, 6, e_link)
+                                    wks_cv.update_cell(r_num, 7, e_note)
+                                    ghi_nhat_ky(sh, current_name, "Cập nhật", f"{e_ten} -> {e_tt}")
+                                    st.success("Đã cập nhật!")
+                                    st.rerun()
 
-                        with tab_xoa:
-                            if opts_sua:
-                                chon_xoa = st.multiselect("Chọn các việc muốn xóa:", opts_sua)
-                                if st.button("Xác nhận Xóa vĩnh viễn"):
-                                    if chon_xoa:
-                                        wks_cv = sh.worksheet("CongViec")
-                                        all_vals = wks_cv.get_all_values()
-                                        names_to_del = [x.split(" (ID:")[0] for x in chon_xoa]
-                                        new_data = [all_vals[0]]
-                                        for row in all_vals[1:]:
-                                            if row[1] == filter_da and row[0] in names_to_del:
-                                                continue
-                                            new_data.append(row)
-                                        wks_cv.clear()
-                                        wks_cv.update(new_data)
-                                        ghi_nhat_ky(sh, current_name, "Xóa việc", str(names_to_del))
-                                        st.success("Đã xóa thành công!")
-                                        st.rerun()
+                    with tab_xoa:
+                        tasks_can_delete = [k for k, v in editable_tasks.items() if v["level"] == 2]
+                        if tasks_can_delete:
+                            chon_xoa = st.multiselect("Chọn việc xóa (Chỉ Admin/Người tạo được xóa):", tasks_can_delete)
+                            if st.button("Xác nhận Xóa"):
+                                if chon_xoa:
+                                    wks_cv = sh.worksheet("CongViec")
+                                    all_vals = wks_cv.get_all_values()
+                                    names_del = [x.split(" (ID:")[0] for x in chon_xoa]
+                                    
+                                    new_data = [all_vals[0]]
+                                    for row in all_vals[1:]:
+                                        if row[0] in names_del: continue
+                                        new_data.append(row)
+                                    
+                                    wks_cv.clear()
+                                    wks_cv.update(new_data)
+                                    ghi_nhat_ky(sh, current_name, "Xóa việc", str(names_del))
+                                    st.success("Đã xóa!")
+                                    st.rerun()
+                        else:
+                            st.info("Bạn không có quyền xóa.")
 
-            # --- HIỂN THỊ BẢNG ---
-            df_display = df_view.rename(columns=VN_COLS_VIEC)
+            # --- HIỂN THỊ BẢNG (ẨN CỘT NGUOITAO) ---
+            # 1. Ẩn cột NguoiTao khỏi DataFrame hiển thị
+            df_display = df_view.drop(columns=['NguoiTao'], errors='ignore')
+            
+            # 2. Đổi tên cột
+            df_display = df_display.rename(columns=VN_COLS_VIEC)
+            
             st.dataframe(
                 df_display, 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
-                    "Link sản phẩm": st.column_config.LinkColumn("Link sản phẩm", display_text="🔗 Mở Link"),
-                    "Trạng thái": st.column_config.SelectboxColumn("Trạng thái", options=OPTS_TRANG_THAI, width="medium")
+                    "Link sản phẩm": st.column_config.LinkColumn(display_text="🔗 Link"),
+                    "Trạng thái": st.column_config.SelectboxColumn(options=OPTS_TRANG_THAI, width="medium")
                 }
             )
         else:
-            st.info("Hiện chưa có dữ liệu công việc.")
+            st.info("Chưa có công việc nào.")
 
     # =========================================================
-    # TAB 2: QUẢN LÝ DỰ ÁN
+    # TAB 2: DỰ ÁN
     # =========================================================
     with tabs[1]:
-        st.header("🗂️ Hồ sơ & Quản lý Dự án")
-        
+        st.header("🗂️ Quản lý Dự án")
         if role_system == 'LanhDao':
-            with st.expander("➕ THIẾT LẬP DỰ ÁN MỚI (Admin)", expanded=False):
+            with st.expander("➕ TẠO DỰ ÁN MỚI (Admin)", expanded=False):
                 with st.form("tao_duan"):
-                    n_da = st.text_input("Tên Dự án / Nhóm việc")
-                    n_mt = st.text_area("Mô tả / Ghi chú")
-                    n_lead = st.multiselect("Chỉ định Điều phối viên (Trưởng nhóm):", list_nv)
-                    
+                    n_da = st.text_input("Tên Dự án")
+                    n_mt = st.text_area("Mô tả")
+                    n_lead = st.multiselect("Điều phối viên (Lead):", list_nv)
                     if st.form_submit_button("Tạo Dự án"):
-                        try:
-                            wks_da = sh.worksheet("DuAn")
-                            lead_str = ", ".join(n_lead)
-                            wks_da.append_row([n_da, n_mt, "Đang chạy", lead_str])
-                            ghi_nhat_ky(sh, current_name, "Tạo Dự án", f"{n_da} (Leads: {lead_str})")
-                            st.success("Đã khởi tạo dự án thành công!")
-                            st.rerun()
-                        except:
-                            st.error("Lỗi khi lưu vào Google Sheet.")
-            
-            with st.expander("🗑️ Xóa Dự án (Admin)", expanded=False):
-                del_da = st.selectbox("Chọn dự án muốn xóa:", list_duan)
-                if st.button("Xác nhận Xóa Dự án"):
-                    wks_da = sh.worksheet("DuAn")
-                    rows = wks_da.get_all_values()
-                    new = [rows[0]] + [r for r in rows[1:] if r[0] != del_da]
-                    wks_da.clear()
-                    wks_da.update(new)
-                    st.success("Đã xóa dự án khỏi hệ thống.")
+                        wks_da = sh.worksheet("DuAn")
+                        wks_da.append_row([n_da, n_mt, "Đang chạy", ", ".join(n_lead)])
+                        st.success("Xong!")
+                        st.rerun()
+            with st.expander("🗑️ Xóa Dự án"):
+                d_del = st.selectbox("Chọn xóa:", list_duan)
+                if st.button("Xóa ngay"):
+                    wks = sh.worksheet("DuAn")
+                    rows = wks.get_all_values()
+                    new = [rows[0]] + [r for r in rows[1:] if r[0] != d_del]
+                    wks.clear()
+                    wks.update(new)
+                    st.success("Đã xóa!")
                     st.rerun()
-
-        if not df_duan.empty:
-            df_da_display = df_duan.rename(columns=VN_COLS_DUAN)
-            st.dataframe(df_da_display, use_container_width=True, hide_index=True)
-        else:
-            st.info("Chưa có dự án nào đang chạy.")
+        st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
     # =========================================================
-    # TAB 3: SOẠN THẢO EMAIL
+    # TAB 3: EMAIL
     # =========================================================
     with tabs[2]:
-        st.header("📧 Soạn thảo & Gửi Email")
-        
-        c_acc1, c_acc2 = st.columns([2,1])
-        with c_acc1:
-            tk_mail = st.selectbox("Gửi từ Tài khoản Gmail số:", range(10), format_func=lambda x: f"Tài khoản {x}", key="mail_center")
-        with c_acc2:
-            st.markdown(f'<br><a href="https://mail.google.com/mail/u/{tk_mail}" target="_blank">👁️ Kiểm tra Hộp thư</a>', unsafe_allow_html=True)
-            
+        st.header("📧 Soạn Email")
+        c1, c2 = st.columns([2,1])
+        with c1: tk = st.selectbox("Gửi từ TK:", range(10), format_func=lambda x: f"Gmail {x}", key="mail_tab")
+        with c2: st.markdown(f'<br><a href="https://mail.google.com/mail/u/{tk}" target="_blank">👁️ Check Mail</a>', unsafe_allow_html=True)
         try:
-            mau_data = lay_du_lieu(sh, "MauEmail")
             danh_ba = {r['HoTen']: r['Email'] for i,r in df_users.iterrows() if str(r['Email']).strip()}
-            mau_dict = {r['TenMau']: r for i,r in mau_data.iterrows()} if not mau_data.empty else {}
-        except:
-            danh_ba = {}
-            mau_dict = {}
-
-        c_to, c_mau = st.columns(2)
-        with c_to:
-            send_to = st.multiselect("Người nhận (To):", list(danh_ba.keys()))
-            emails_to = [danh_ba[x] for x in send_to]
-        with c_mau:
-            pick_mau = st.selectbox("Chọn Mẫu Email:", ["-- Tự soạn thảo --"] + list(mau_dict.keys()))
-        
-        val_td, val_nd = "", ""
-        if pick_mau != "-- Tự soạn thảo --":
-            val_td = mau_dict[pick_mau]['TieuDe']
-            val_nd = mau_dict[pick_mau]['NoiDung']
-        
-        if send_to:
-            names = [n.split()[-1] for n in send_to]
-            greeting = f"Dear {', '.join(names)},\n\n"
-            if "Dear" not in val_nd: val_nd = greeting + val_nd
-            
-        final_td = st.text_input("Tiêu đề:", value=val_td)
-        final_nd = st.text_area("Nội dung:", value=val_nd, height=250)
-        
-        if st.button("🚀 Gửi Email ngay", type="primary"):
-            if emails_to:
-                link = f"https://mail.google.com/mail/u/{tk_mail}/?view=cm&fs=1&to={','.join(emails_to)}&su={urllib.parse.quote(final_td)}&body={urllib.parse.quote(final_nd)}"
-                ghi_nhat_ky(sh, current_name, "Gửi Email", f"Tiêu đề: {final_td}")
-                st.markdown(f'<script>window.open("{link}", "_blank");</script>', unsafe_allow_html=True)
-                st.success("Đang mở trình soạn thảo Gmail...")
-            else:
-                st.error("Vui lòng chọn ít nhất một người nhận.")
+            c_to, c_m = st.columns(2)
+            with c_to: to = st.multiselect("To:", list(danh_ba.keys()))
+            emails = [danh_ba[x] for x in to]
+            sub = st.text_input("Tiêu đề")
+            body = st.text_area("Nội dung", height=200)
+            if st.button("🚀 Gửi ngay"):
+                if emails:
+                    lnk = f"https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={','.join(emails)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
+                    st.markdown(f'<script>window.open("{lnk}", "_blank");</script>', unsafe_allow_html=True)
+                    st.success("Đang mở...")
+        except: st.error("Lỗi data.")
 
     # =========================================================
-    # TAB 4: NHẬT KÝ HỆ THỐNG
+    # TAB 4: LOGS
     # =========================================================
     if role_system == 'LanhDao':
         with tabs[3]:
-            st.header("📜 Nhật ký Hệ thống (Logs)")
+            st.header("📜 Nhật ký")
             df_log = lay_du_lieu(sh, "NhatKy")
             if not df_log.empty:
-                df_log = df_log.iloc[::-1]
-                df_log_display = df_log.rename(columns=VN_COLS_LOG)
-                st.dataframe(df_log_display, use_container_width=True, hide_index=True)
-            else:
-                st.info("Chưa có dữ liệu nhật ký.")
+                st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
     else:
-        with tabs[3]:
-            st.warning("🔒 Khu vực này chỉ dành cho Lãnh đạo hệ thống.")
+        with tabs[3]: st.warning("🔒 Chỉ dành cho Lãnh đạo.")
