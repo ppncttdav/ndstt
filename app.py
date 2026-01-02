@@ -5,15 +5,19 @@ from oauth2client.service_account import ServiceAccountCredentials
 import streamlit.components.v1 as components
 import urllib.parse
 from datetime import datetime, date
+import pytz # Thư viện xử lý múi giờ
 
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="Phòng Nội dung số và Truyền thông", page_icon="🏢", layout="wide")
+
+# --- CẤU HÌNH THỜI GIAN VN ---
+def get_vn_time():
+    return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
 
 # --- DANH SÁCH TRẠNG THÁI ---
 OPTS_TRANG_THAI = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
 # --- TỪ ĐIỂN HIỂN THỊ ---
-# (Đã bỏ NguoiTao ra khỏi danh sách hiển thị)
 VN_COLS_VIEC = {
     "TenViec": "Tên công việc",
     "DuAn": "Dự án",
@@ -65,43 +69,31 @@ def lay_du_lieu(sh, ten_tab):
 def ghi_nhat_ky(sh, nguoi_dung, hanh_dong, chi_tiet):
     try:
         wks = sh.worksheet("NhatKy")
-        thoi_gian = datetime.now().strftime("%H:%M %d/%m/%Y")
+        # Dùng giờ VN để ghi log
+        thoi_gian = get_vn_time().strftime("%H:%M %d/%m/%Y")
         wks.append_row([thoi_gian, nguoi_dung, hanh_dong, chi_tiet])
     except:
         pass
 
-# --- HÀM KIỂM TRA QUYỀN SỬA ĐỔI ---
+# --- CHECK QUYỀN ---
 def check_quyen_truy_cap(current_user, role_system, row_data, df_duan):
-    """
-    0: Xem
-    1: Nhân viên (Sửa Trạng thái, Link, Ghi chú)
-    2: Admin/Chủ sở hữu (Full quyền)
-    """
-    # 1. Admin hệ thống
-    if role_system == 'LanhDao':
-        return 2
+    # 2: Admin/Owner, 1: Member, 0: View
+    if role_system == 'LanhDao': return 2
     
-    # 2. Người tạo ra việc này (Dữ liệu vẫn lấy từ Sheet gốc nên vẫn check được)
     nguoi_tao = str(row_data.get('NguoiTao', '')).strip()
-    if nguoi_tao == current_user:
-        return 2
+    if nguoi_tao == current_user: return 2
         
-    # 3. Trưởng nhóm dự án
     try:
         ten_du_an = row_data['DuAn']
         if not df_duan.empty:
             duan_row = df_duan[df_duan['TenDuAn'] == ten_du_an]
             if not duan_row.empty:
                 leads = str(duan_row.iloc[0]['TruongNhom'])
-                if current_user in leads:
-                    return 2
-    except:
-        pass
+                if current_user in leads: return 2
+    except: pass
 
-    # 4. Người được giao việc
     nguoi_phu_trach = str(row_data.get('NguoiPhuTrach', ''))
-    if current_user in nguoi_phu_trach:
-        return 1
+    if current_user in nguoi_phu_trach: return 1
         
     return 0
 
@@ -145,21 +137,16 @@ else:
     st.title("🏢 PHÒNG NỘI DUNG SỐ VÀ TRUYỀN THÔNG")
 
     tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📧 Soạn Email", "📜 Nhật ký"])
-
-    # Load Data
+    
     df_duan = lay_du_lieu(sh, "DuAn")
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
-    
     df_users = lay_du_lieu(sh, "TaiKhoan")
     list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
 
-    # =========================================================
-    # TAB 1: CÔNG VIỆC
-    # =========================================================
+    # ================= TAB 1 =================
     with tabs[0]:
         st.caption("Quản lý tiến độ, phân công và cập nhật trạng thái.")
 
-        # --- A. TẠO VIỆC ---
         with st.expander("➕ KHỞI TẠO ĐẦU VIỆC MỚI", expanded=False):
             st.info("💡 Bạn có toàn quyền sửa/xóa với công việc do chính mình tạo ra.")
             
@@ -171,8 +158,13 @@ else:
                 
                 st.write("⏱️ **Hạn chót (Deadline):**")
                 col_h, col_d = st.columns(2)
-                tv_time = col_h.time_input("Giờ", value=datetime.now().time())
-                tv_date = col_d.date_input("Ngày", value=datetime.now())
+                
+                # SỬA LỖI TIME: Dùng get_vn_time()
+                now_vn = get_vn_time()
+                tv_time = col_h.time_input("Giờ", value=now_vn.time())
+                
+                # SỬA LỖI FORMAT NGÀY: Thêm format="DD/MM/YYYY"
+                tv_date = col_d.date_input("Ngày", value=now_vn.date(), format="DD/MM/YYYY")
                 
             with c2:
                 tv_nguoi = st.multiselect("Nhân sự thực hiện", list_nv)
@@ -196,11 +188,11 @@ else:
             if st.button("💾 Lưu công việc & Tạo Email", type="primary"):
                 if tv_ten and tv_duan:
                     try:
+                        # Format chuẩn DD/MM/YYYY để lưu vào Sheet
                         deadline_fmt = f"{tv_time.strftime('%H:%M')} {tv_date.strftime('%d/%m/%Y')}"
                         nguoi_str = ", ".join(tv_nguoi)
                         
                         wks_cv = sh.worksheet("CongViec")
-                        # Lưu NguoiTao vào cột H nhưng không cần hiển thị
                         wks_cv.append_row([tv_ten, tv_duan, deadline_fmt, nguoi_str, "Đã giao", "", tv_ghichu, current_name])
                         
                         ghi_nhat_ky(sh, current_name, "Tạo việc", f"{tv_ten} ({tv_duan})")
@@ -234,7 +226,6 @@ else:
                 else:
                     st.warning("Thiếu tên việc hoặc dự án.")
 
-        # --- B. DANH SÁCH & CÔNG CỤ SỬA ---
         st.divider()
         st.subheader("📋 Danh sách Công việc")
         
@@ -246,7 +237,6 @@ else:
             if filter_da != "-- Tất cả --":
                 df_view = df_view[df_view['DuAn'] == filter_da]
             
-            # --- CÔNG CỤ SỬA ---
             editable_tasks = {}
             for idx, row in df_view.iterrows():
                 level = check_quyen_truy_cap(current_name, role_system, row, df_duan)
@@ -324,11 +314,8 @@ else:
                         else:
                             st.info("Bạn không có quyền xóa.")
 
-            # --- HIỂN THỊ BẢNG (ẨN CỘT NGUOITAO) ---
-            # 1. Ẩn cột NguoiTao khỏi DataFrame hiển thị
+            # Ẩn cột NguoiTao
             df_display = df_view.drop(columns=['NguoiTao'], errors='ignore')
-            
-            # 2. Đổi tên cột
             df_display = df_display.rename(columns=VN_COLS_VIEC)
             
             st.dataframe(
@@ -343,9 +330,7 @@ else:
         else:
             st.info("Chưa có công việc nào.")
 
-    # =========================================================
-    # TAB 2: DỰ ÁN
-    # =========================================================
+    # ================= TAB 2 =================
     with tabs[1]:
         st.header("🗂️ Quản lý Dự án")
         if role_system == 'LanhDao':
@@ -371,9 +356,7 @@ else:
                     st.rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
-    # =========================================================
-    # TAB 3: EMAIL
-    # =========================================================
+    # ================= TAB 3 =================
     with tabs[2]:
         st.header("📧 Soạn Email")
         c1, c2 = st.columns([2,1])
@@ -393,9 +376,7 @@ else:
                     st.success("Đang mở...")
         except: st.error("Lỗi data.")
 
-    # =========================================================
-    # TAB 4: LOGS
-    # =========================================================
+    # ================= TAB 4 =================
     if role_system == 'LanhDao':
         with tabs[3]:
             st.header("📜 Nhật ký")
