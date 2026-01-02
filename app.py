@@ -19,9 +19,20 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 
+# --- LINK FILE TRỰC SỐ CỐ ĐỊNH ---
+LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1lsm4FxTPMTmDbc50xq5ldbtCb7PIc-gbk5PMLHdzu7Y/edit?usp=sharing"
+
 # --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
     return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+
+# --- HÀM XỬ LÝ TÊN (LẤY 2 CHỮ CUỐI) ---
+def get_short_name(full_name):
+    if not full_name or full_name == "--" or str(full_name).strip() == "":
+        return "..."
+    parts = full_name.strip().split()
+    # Nếu tên có từ 2 chữ trở lên thì lấy 2 chữ cuối, ngược lại lấy hết
+    return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
 # --- HÀM LẤY THỜI TIẾT ---
 def get_weather_and_advice():
@@ -39,13 +50,13 @@ def get_weather_and_advice():
         return f"{temp}°C - {condition}", advice
     except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
 
-# --- 1. DANH SÁCH CHỨC DANH (VIẾT HOA TOÀN BỘ) ---
+# --- 1. DANH SÁCH CHỨC DANH (ĐÃ SỬA: BỎ CHỮ PHỤ) ---
 ROLES_HEADER = [
     "LÃNH ĐẠO BAN",
     "TRỰC THƯ KÝ TÒA SOẠN",
     "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
     "TRỰC LỊCH PHÁT SÓNG",
-    "TRỰC THƯ KÝ TÒA SOẠN (PHỤ)", 
+    "TRỰC THƯ KÝ TÒA SOẠN", # Đã bỏ chữ (PHỤ) theo yêu cầu
     "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
     "TRỰC QUẢN TRỊ CỔNG TTĐT",
     "TRỰC QUẢN TRỊ APP"
@@ -133,43 +144,22 @@ def check_quyen(current_user, role, row, df_da):
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
 
-# --- FORMATTING: KẺ BẢNG VÀ XUỐNG DÒNG ---
+# --- FORMATTING (VIẾT HOA TIÊU ĐỀ) ---
 def dinh_dang_dep(wks):
-    # 1. Header chính
     wks.merge_cells('A1:M1')
     format_cell_range(wks, 'A1:M1', CellFormat(backgroundColor=Color(0, 1, 1), textFormat=TextFormat(bold=True, fontSize=14), horizontalAlignment='CENTER', verticalAlignment='MIDDLE'))
-    
-    # 2. Chức danh & Nhân sự
     format_cell_range(wks, 'A2:M3', CellFormat(textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
     format_cell_range(wks, 'A2:M2', CellFormat(backgroundColor=Color(0.8, 1, 1)))
-    
-    # 3. Tiêu đề cột
     format_cell_range(wks, 'A4:M4', CellFormat(backgroundColor=Color(1, 1, 0), textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
-    
-    # 4. Độ rộng cột
     set_column_width(wks, 'A', 40); set_column_width(wks, 'B', 300); set_column_width(wks, 'C', 100)
     set_column_width(wks, 'D', 100); set_column_width(wks, 'E', 130); set_column_width(wks, 'F', 50)
     set_column_width(wks, 'G', 80); set_column_width(wks, 'H', 120); set_column_width(wks, 'I', 120)
     set_column_width(wks, 'J', 100); set_column_width(wks, 'K', 70); set_column_width(wks, 'L', 80); set_column_width(wks, 'M', 100)
-    
-    # 5. Kẻ sẵn khung cho 100 dòng đầu (Để nhìn đẹp ngay)
-    format_cell_range(wks, 'A5:M100', CellFormat(
-        wrapStrategy='WRAP', 
-        verticalAlignment='TOP',
-        borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))
-    ))
+    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP'))
 
 def dinh_dang_dong_moi(wks, row_idx):
-    """Hàm này format riêng cho dòng vừa thêm vào"""
     rng = f"A{row_idx}:M{row_idx}"
-    format_cell_range(wks, rng, CellFormat(
-        wrapStrategy='WRAP', 
-        verticalAlignment='TOP',
-        borders=Borders(
-            top=Border("SOLID"), bottom=Border("SOLID"), 
-            left=Border("SOLID"), right=Border("SOLID")
-        )
-    ))
+    format_cell_range(wks, rng, CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
 
 # ================= 2. AUTH =================
 if 'dang_nhap' not in st.session_state:
@@ -206,14 +196,9 @@ else:
         st.markdown(f"**🌤️ HÀ NỘI:** {weather_info}")
         st.info(f"💡 **LỜI KHUYÊN:** {advice_msg}")
         st.markdown("---")
-        
-        # --- NÚT REFRESH DỮ LIỆU ---
-        if st.button("🔄 LÀM MỚI DỮ LIỆU"):
-            st.rerun()
-        
+        if st.button("🔄 LÀM MỚI DỮ LIỆU"): st.rerun()
         st.markdown("")
-        if st.button("ĐĂNG XUẤT"):
-            st.session_state['dang_nhap'] = False; st.rerun()
+        if st.button("ĐĂNG XUẤT"): st.session_state['dang_nhap'] = False; st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
@@ -332,31 +317,75 @@ else:
                 else:
                     st.success("ĐÃ CÓ VỎ TRỰC.")
                     st.subheader("📢 GỬI THÔNG BÁO CA TRỰC")
+                    
                     try:
-                        r_names = wks_today.row_values(3)[1:]
-                        zalo_msg = f"🔔 *THÔNG BÁO LỊCH TRỰC SỐ*\n📅 NGÀY: {tab_name_today}\n------------------\n"
-                        for i, name in enumerate(r_names):
-                            if i < len(ROLES_HEADER) and name != "--":
-                                zalo_msg += f"🔹 {ROLES_HEADER[i]}: {name}\n"
-                        zalo_msg += "------------------\n👉 Mời các anh/chị truy cập hệ thống để nhận nhiệm vụ."
+                        # 1. Lấy thông tin từ sheet (Header roles)
+                        r_names = wks_today.row_values(3)[1:] # Dòng 3, bỏ cột A
                         
-                        c_z, c_e = st.columns(2)
-                        with c_z:
+                        # Lấy 3 cái tên quan trọng theo index
+                        # Lãnh đạo Ban = index 0
+                        # Trực thư ký tòa soạn = index 1
+                        # Trực lịch phát sóng = index 3
+                        
+                        name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
+                        name_tk = get_short_name(r_names[1] if len(r_names) > 1 else "")
+                        name_lps = get_short_name(r_names[3] if len(r_names) > 3 else "")
+                        
+                        # Format ngày: 02-01-2026 -> 02/01/2026
+                        date_str = tab_name_today.replace("-", "/")
+                        
+                        # --- CỘT 1: EMAIL TRÌNH DUYỆT (MẪU MỚI) ---
+                        c_mail, c_zalo = st.columns(2)
+                        
+                        with c_mail:
+                            st.markdown("##### 📧 GỬI EMAIL TRÌNH DUYỆT")
+                            tk_gui_vo = st.selectbox("CHỌN TÀI KHOẢN GỬI:", range(10), format_func=lambda x: f"TK {x} (Trên máy này)", key="mail_vo")
+                            
+                            # Tìm email người nhận (Lãnh đạo + Thư ký)
+                            recipients = []
+                            for n in [r_names[0], r_names[1]]:
+                                if n and n != "--":
+                                    found = df_users[df_users['HoTen'] == n]['Email'].values
+                                    if len(found) > 0 and str(found[0]).strip():
+                                        recipients.append(found[0])
+                            
+                            # Nội dung email theo mẫu
+                            email_sub = f"Trình duyệt Vỏ tin bài NDS Vietnam Today ngày {date_str}"
+                            email_body = f"""Kính gửi chị {name_ld}, chị {name_tk}
+
+Nhóm xin gửi các chị vỏ tin bài NDS ngày {date_str} trên các nền tảng.
+
+Link: {LINK_VO_TRUC_SO}
+
+Các chị xem giúp nhóm ạ.
+
+Em xin cảm ơn các chị ạ!
+
+Em {name_lps}"""
+                            
+                            if recipients:
+                                link_mail = f"https://mail.google.com/mail/u/{tk_gui_vo}/?view=cm&fs=1&to={','.join(recipients)}&su={urllib.parse.quote(email_sub)}&body={urllib.parse.quote(email_body)}"
+                                st.markdown(f'<a href="{link_mail}" target="_blank" style="background:#EA4335;color:white;padding:10px 15px;text-decoration:none;border-radius:5px;font-weight:bold;display:block;text-align:center;">🚀 SOẠN EMAIL NGAY</a>', unsafe_allow_html=True)
+                                st.caption(f"Gửi tới: {', '.join(recipients)}")
+                            else:
+                                st.warning("Chưa tìm thấy email Lãnh đạo/Thư ký để gửi.")
+
+                        # --- CỘT 2: ZALO (GIỮ NGUYÊN) ---
+                        with c_zalo:
                             st.markdown("##### 💬 GỬI QUA ZALO")
-                            st.text_area("NỘI DUNG TIN NHẮN (SAO CHÉP Ở ĐÂY):", value=zalo_msg, height=150)
-                            st.link_button("🚀 MỞ ZALO WEB (DÁN TIN NHẮN)", "https://chat.zalo.me/")
-                        
-                        with c_e:
-                            st.markdown("##### 📧 GỬI QUA EMAIL")
-                            emails_found = [df_users[df_users['HoTen']==n]['Email'].values[0] for n in r_names if n!="--" and len(df_users[df_users['HoTen']==n]['Email'].values)>0]
-                            if emails_found:
-                                sub = f"[THÔNG BÁO] LỊCH TRỰC SỐ NGÀY {tab_name_today}"
-                                link = f"https://mail.google.com/mail/?view=cm&fs=1&to={','.join(emails_found)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(zalo_msg)}"
-                                st.markdown(f'<a href="{link}" target="_blank" style="background:#EA4335;color:white;padding:8px 12px;text-decoration:none;border-radius:5px;display:inline-block;margin-top:25px;">🚀 SOẠN EMAIL NGAY</a>', unsafe_allow_html=True)
-                            else: st.warning("Không tìm thấy email.")
-                    except: st.error("Lỗi tải thông tin ekip.")
+                            zalo_msg = f"🔔 *THÔNG BÁO LỊCH TRỰC SỐ*\n📅 NGÀY: {tab_name_today}\n------------------\n"
+                            for i, name in enumerate(r_names):
+                                if i < len(ROLES_HEADER) and name != "--":
+                                    zalo_msg += f"🔹 {ROLES_HEADER[i]}: {name}\n"
+                            zalo_msg += "------------------\n👉 Mời các anh/chị truy cập hệ thống để nhận nhiệm vụ."
+                            
+                            st.text_area("NỘI DUNG (COPY):", value=zalo_msg, height=150)
+                            st.link_button("🚀 MỞ ZALO WEB", "https://chat.zalo.me/")
+
+                    except Exception as e: st.error(f"Lỗi tạo thông báo: {e}")
 
                     st.divider()
+                    
                     tab_edit_vo, tab_del_vo = st.tabs(["SỬA EKIP TRỰC", "XÓA SỔ"])
                     with tab_edit_vo:
                         curr_names = wks_today.row_values(3)[1:]
