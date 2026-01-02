@@ -6,6 +6,8 @@ import streamlit.components.v1 as components
 import urllib.parse
 from datetime import datetime, date
 import pytz
+import requests # Thư viện lấy tin thời tiết
+import random   # Thư viện chọn lời khuyên ngẫu nhiên
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -15,11 +17,46 @@ st.set_page_config(page_title="Phòng Nội dung số và Truyền thông", page
 
 # --- TÊN FILE GOOGLE SHEET ---
 SHEET_MAIN = "HeThongQuanLy" 
-SHEET_TRUCSO = "VoTrucSo"
+SHEET_TRUCSO = "VoTrucSo" # Tên file Sheet dữ liệu
 
 # --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
     return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+
+# --- HÀM LẤY THỜI TIẾT & LỜI KHUYÊN ---
+def get_weather_and_advice():
+    try:
+        # Lấy thời tiết Hà Nội từ Open-Meteo (Miễn phí, không cần Key)
+        url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
+        res = requests.get(url, timeout=5).json()
+        temp = res['current_weather']['temperature']
+        wcode = res['current_weather']['weathercode']
+        
+        # Mapping mã thời tiết
+        condition = "Có mây"
+        advice = "Chúc bạn một ngày làm việc năng suất!"
+        
+        if wcode in [0, 1]: 
+            condition = "Nắng đẹp ☀️"
+            advice = "Trời đẹp! Hãy giữ tinh thần sảng khoái nhé."
+        elif wcode in [2, 3]: 
+            condition = "Nhiều mây ☁️"
+            advice = "Thời tiết mát mẻ, tập trung cao độ nào!"
+        elif wcode in [51, 53, 55, 61, 63, 65]: 
+            condition = "Có mưa 🌧️"
+            advice = "Trời mưa, đường trơn. Các BTV đi lại cẩn thận nhé!"
+        elif wcode >= 95: 
+            condition = "Giông bão ⛈️"
+            advice = "Thời tiết xấu. Hạn chế ra ngoài nếu không cần thiết."
+        
+        # Nếu trời nóng quá
+        if temp > 35: advice = "Trời nóng, nhớ uống đủ nước nhé các BTV!"
+        # Nếu trời lạnh quá
+        if temp < 15: advice = "Trời lạnh, nhớ mặc ấm để giữ giọng đọc tốt nhé!"
+
+        return f"{temp}°C - {condition}", advice
+    except:
+        return "--°C", "Luôn giữ vững đam mê nghề báo nhé!"
 
 # --- 1. DANH SÁCH CHỨC DANH (ROLES) CHUẨN ---
 ROLES_HEADER = [
@@ -37,14 +74,14 @@ ROLES_HEADER = [
 OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
 OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
 
-# --- [CẬP NHẬT] TRẠNG THÁI VỚI QUYỀN TRẢ BÀI CỦA LĐP ---
+# --- TRẠNG THÁI DUYỆT BÀI ---
 OPTS_STATUS_TRUCSO = [
     "Chờ xử lý",          
     "Đang biên tập",      
     "Gửi duyệt TCSX",     
-    "Yêu cầu sửa (TCSX)", # TCSX trả bài
+    "Yêu cầu sửa (TCSX)", 
     "Gửi duyệt LĐP",      
-    "Yêu cầu sửa (LĐP)",  # Lãnh đạo trả bài (MỚI)
+    "Yêu cầu sửa (LĐP)",  
     "Đã duyệt/Chờ đăng",  
     "Đã đăng",            
     "Hủy"
@@ -165,7 +202,16 @@ else:
     role = u_info.get('VaiTro', 'NhanVien')
     
     with st.sidebar:
-        st.success(f"Chào: **{curr_name}**")
+        # --- CẬP NHẬT LỜI CHÀO ---
+        st.success(f"Xin chào: **{curr_name}**\n\nChúc bạn một ngày làm việc vui vẻ và hiệu quả nhé! ❤️")
+        
+        # --- CẬP NHẬT THỜI TIẾT & LỜI KHUYÊN ---
+        weather_info, advice_msg = get_weather_and_advice()
+        st.markdown("---")
+        st.markdown(f"**🌤️ Hà Nội:** {weather_info}")
+        st.info(f"💡 **Lời khuyên:** {advice_msg}")
+        st.markdown("---")
+
         if st.button("Đăng xuất"):
             st.session_state['dang_nhap'] = False; st.rerun()
 
@@ -173,10 +219,11 @@ else:
     
     sh_trucso = ket_noi_trucso()
     
+    # --- CẬP NHẬT TÊN TAB (VỎ TRỰC SỐ) ---
     if role == 'LanhDao':
-        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vở Trực Số", "📧 Email", "📜 Nhật ký"])
+        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vỏ Trực Số", "📧 Email", "📜 Nhật ký"])
     else:
-        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vở Trực Số", "📧 Email"])
+        tabs = st.tabs(["✅ Quản lý Công việc", "🗂️ Quản lý Dự án", "📝 Vỏ Trực Số", "📧 Email"])
 
     df_duan = lay_du_lieu_main(sh_main.worksheet("DuAn"))
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
@@ -191,12 +238,12 @@ else:
             tv_ten = c1.text_input("Tên việc"); tv_duan = c1.selectbox("Dự án", list_duan)
             now_vn = get_vn_time()
             tv_time = c1.time_input("Giờ DL", value=now_vn.time()); tv_date = c1.date_input("Ngày DL", value=now_vn.date(), format="DD/MM/YYYY")
-            tv_nguoi = c2.multiselect("Người làm", list_nv); tv_ghichu = c2.text_area("Yêu cầu", height=100)
+            tv_nguoi = c2.multiselect("Biên tập viên thực hiện", list_nv); tv_ghichu = c2.text_area("Yêu cầu", height=100)
             
             ct1, ct2 = st.columns([2,1])
             tk_gui = ct1.selectbox("Gửi Gmail:", range(10), format_func=lambda x: f"TK {x}")
             ct2.markdown(f'<br><a href="https://mail.google.com/mail/u/{tk_gui}" target="_blank">Check Mail</a>', unsafe_allow_html=True)
-            opt_nv = st.checkbox("Gửi NV", True)
+            opt_nv = st.checkbox("Gửi BTV", True)
             
             if st.button("💾 Lưu & Gửi"):
                 try:
@@ -207,7 +254,7 @@ else:
                     if opt_nv and tv_nguoi:
                         mails = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].tolist()
                         mails = [m for m in mails if str(m).strip()]
-                        if mails: st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={",".join(mails)}&su={urllib.parse.quote(tv_ten)}&body={urllib.parse.quote(tv_ghichu)}" target="_blank">📧 Gửi NV</a>', unsafe_allow_html=True)
+                        if mails: st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={",".join(mails)}&su={urllib.parse.quote(tv_ten)}&body={urllib.parse.quote(tv_ghichu)}" target="_blank">📧 Gửi BTV</a>', unsafe_allow_html=True)
                 except Exception as e: st.error(str(e))
 
         st.divider()
@@ -225,7 +272,7 @@ else:
                         with st.form("f_edit"):
                             ce1, ce2 = st.columns(2)
                             e_ten = ce1.text_input("Tên", r_dat['TenViec'], disabled=dis)
-                            e_ng = ce1.text_input("Người làm", r_dat['NguoiPhuTrach'], disabled=dis)
+                            e_ng = ce1.text_input("Biên tập viên", r_dat['NguoiPhuTrach'], disabled=dis)
                             e_lk = ce1.text_input("Link", r_dat.get('LinkBai',''))
                             e_dl = ce2.text_input("Deadline", r_dat.get('Deadline',''), disabled=dis)
                             e_st = ce2.selectbox("Trạng thái", OPTS_TRANG_THAI_VIEC, index=OPTS_TRANG_THAI_VIEC.index(r_dat.get('TrangThai','Đã giao')) if r_dat.get('TrangThai') in OPTS_TRANG_THAI_VIEC else 0)
@@ -246,11 +293,12 @@ else:
                 if st.form_submit_button("Tạo DA"): sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
-    # ================= TAB 3: VỞ TRỰC SỐ =================
+    # ================= TAB 3: VỎ TRỰC SỐ =================
     with tabs[2]:
         today_vn = get_vn_time()
         tab_name_today = today_vn.strftime("%d-%m-%Y")
-        st.header(f"📝 Vở Trực Số Ngày: {tab_name_today}")
+        # --- CẬP NHẬT TIÊU ĐỀ ---
+        st.header(f"📝 Vỏ Trực Số Ngày: {tab_name_today}")
 
         tab_exists = False
         try: wks_today = sh_trucso.worksheet(tab_name_today); tab_exists = True
@@ -269,40 +317,34 @@ else:
                             with cols[i%3]: 
                                 val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, key=f"cr_{i}")
                                 roster_vals.append(val if val != "--" else "")
-                        if st.form_submit_button("🚀 Tạo Sổ Mới"):
+                        if st.form_submit_button("🚀 Tạo Vỏ Trực Mới"):
                             try:
                                 w = sh_trucso.add_worksheet(title=tab_name_today, rows=100, cols=20)
-                                w.update_cell(1, 1, f"VỞ TRỰC SỐ VIETNAM TODAY {tab_name_today}")
+                                # --- CẬP NHẬT: VỎ TRỰC SỐ ---
+                                w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_today}")
                                 w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                 for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
                                 w.update_cell(3, 1, "NHÂN SỰ:")
                                 for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
                                 w.append_row(CONTENT_HEADER)
-                                st.info("Đang định dạng...")
+                                st.info("Đang tô màu và kẻ bảng...")
                                 dinh_dang_dep(w)
                                 st.success("Đã tạo!"); st.rerun()
                             except Exception as e: st.error(str(e))
                 else:
                     st.success("Đã có Vỏ trực. Quản lý Ekip bên dưới:")
-                    
-                    # --- TÍNH NĂNG MỚI: GỬI EMAIL THÔNG BÁO ---
                     if st.button("📧 Gửi Email thông báo cho Ekip"):
                         try:
-                            # 1. Lấy tên từ Sheet (Hàng 3)
-                            roster_names = wks_today.row_values(3)[1:] # Bỏ cột A
-                            
-                            # 2. Tìm Email
+                            roster_names = wks_today.row_values(3)[1:]
                             emails_to_send = []
                             for name in roster_names:
                                 if name and name != "--":
                                     found = df_users[df_users['HoTen'] == name]['Email'].values
                                     if len(found) > 0 and str(found[0]).strip():
                                         emails_to_send.append(found[0])
-                            
                             if emails_to_send:
-                                # 3. Tạo Link gửi
                                 sub = f"[THÔNG BÁO] Lịch trực số ngày {tab_name_today}"
-                                body = f"Chào các bạn,\n\nCác bạn có lịch trực số ngày {tab_name_today}.\nVui lòng truy cập hệ thống để nắm thông tin chi tiết.\n\nTrân trọng."
+                                body = f"Chào các BTV,\n\nCác bạn có lịch trực số ngày {tab_name_today}.\nVui lòng truy cập hệ thống để nắm thông tin chi tiết.\n\nTrân trọng."
                                 link = f"https://mail.google.com/mail/?view=cm&fs=1&to={','.join(emails_to_send)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
                                 st.markdown(f'<a href="{link}" target="_blank" style="background:#EA4335;color:white;padding:10px 15px;text-decoration:none;border-radius:5px;font-weight:bold;">🚀 Mở Gmail gửi ngay</a>', unsafe_allow_html=True)
                             else:
@@ -312,7 +354,6 @@ else:
 
                     st.divider()
                     
-                    # Các Tab quản lý cũ
                     tab_edit_vo, tab_del_vo = st.tabs(["Sửa Ekip Trực", "Xóa Sổ Hôm Nay"])
                     with tab_edit_vo:
                         curr_names = wks_today.row_values(3)[1:]
@@ -336,7 +377,6 @@ else:
                             st.success("Đã xóa sổ!"); st.rerun()
 
         if tab_exists:
-            # Hiện Ekip (View Only)
             with st.expander("ℹ️ Ekip trực hôm nay (Nhấn để xem)", expanded=True):
                 try:
                     r_names = wks_today.row_values(3)[1:]
@@ -367,7 +407,7 @@ else:
                 c3, c4, c5 = st.columns(3)
                 ts_nentang = c3.multiselect("Nền tảng (Tách dòng)", OPTS_NEN_TANG)
                 ts_status = c4.selectbox("Trạng thái", OPTS_STATUS_TRUCSO)
-                ts_nhansu = c5.multiselect("Nhân sự", list_nv, default=[curr_name] if curr_name in list_nv else None)
+                ts_nhansu = c5.multiselect("Biên tập viên", list_nv, default=[curr_name] if curr_name in list_nv else None)
                 
                 c6, c7, c8 = st.columns(3)
                 ts_nguon = c6.text_input("Nguồn")
@@ -403,12 +443,11 @@ else:
             if not df_content.empty:
                 with st.expander("🛠️ Cập nhật / Chỉnh sửa dòng tin", expanded=False):
                     
-                    # HƯỚNG DẪN QUY TRÌNH DUYỆT BÀI
                     st.info("""
                     **ℹ️ QUY TRÌNH KIỂM DUYỆT NỘI DUNG:**
-                    1. **Chờ xử lý** → NV nhận việc.
-                    2. **Đang biên tập** → NV đang làm.
-                    3. **Gửi duyệt TCSX** → NV gửi bài.
+                    1. **Chờ xử lý** → BTV nhận việc.
+                    2. **Đang biên tập** → BTV đang làm.
+                    3. **Gửi duyệt TCSX** → BTV gửi bài.
                     4. **Yêu cầu sửa (TCSX/LĐP)** → Cần chỉnh sửa lại.
                     5. **Gửi duyệt LĐP** → Chuyển lên Lãnh đạo Phòng.
                     6. **Đã duyệt/Chờ đăng** → Sẵn sàng publish.
@@ -431,7 +470,7 @@ else:
                             
                             ec3, ec4 = st.columns(2)
                             e_nt = ec3.text_input("Nền tảng", value=r_news['NỀN TẢNG'])
-                            e_ns = ec4.text_input("Nhân sự", value=r_news['NHÂN SỰ'])
+                            e_ns = ec4.text_input("Biên tập viên", value=r_news['NHÂN SỰ'])
                             
                             ec5, ec6, ec7 = st.columns(3)
                             e_ld = ec5.text_input("Link Duyệt", value=r_news['LINK DUYỆT'])
