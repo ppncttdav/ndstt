@@ -1,26 +1,18 @@
-# app.py
+# Đảm bảo 2 dòng này nằm trên cùng file app.py
 import streamlit as st
-import pandas as pd
-import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import gspread
 
-# --- 1. KẾT NỐI GOOGLE SHEETS ---
-# --- TÌM ĐOẠN CODE KẾT NỐI CŨ TRONG FILE APP.PY VÀ XÓA ĐI ---
-# (Đoạn cũ dùng .from_json_keyfile_name)
-
-# --- DÁN ĐOẠN CODE MỚI NÀY VÀO THAY THẾ ---
-# --- XÓA HÀM CŨ ĐI VÀ DÁN ĐÈ ĐOẠN NÀY VÀO ---
-
+# --- HÀM KẾT NỐI MỚI (Copy đè lên hàm cũ) ---
 def ket_noi_sheet():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # KẾT NỐI THÔNG MINH:
-    # Nếu tìm thấy Secrets trên mạng -> Dùng Secrets
+    # Logic: Nếu tìm thấy Secrets (trên mạng) thì dùng Secrets, ngược lại dùng file key.json (máy tính)
     if "gcp_service_account" in st.secrets:
         creds_dict = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    # Nếu không thấy (tức là đang chạy trên máy tính) -> Dùng file key.json
     else:
+        # Fallback cho máy tính cá nhân
         creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
         
     client = gspread.authorize(creds)
