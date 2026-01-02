@@ -9,20 +9,22 @@ from oauth2client.service_account import ServiceAccountCredentials
 # (Đoạn cũ dùng .from_json_keyfile_name)
 
 # --- DÁN ĐOẠN CODE MỚI NÀY VÀO THAY THẾ ---
+# --- XÓA HÀM CŨ ĐI VÀ DÁN ĐÈ ĐOẠN NÀY VÀO ---
+
 def ket_noi_sheet():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Kiểm tra xem đang chạy trên Mây hay dưới Máy tính
+    # KẾT NỐI THÔNG MINH:
+    # Nếu tìm thấy Secrets trên mạng -> Dùng Secrets
     if "gcp_service_account" in st.secrets:
-        # Nếu đang ở trên Streamlit Cloud -> Lấy chìa khóa từ Két sắt (Secrets)
         creds_dict = st.secrets["gcp_service_account"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    # Nếu không thấy (tức là đang chạy trên máy tính) -> Dùng file key.json
     else:
-        # Nếu đang chạy trên máy tính cá nhân -> Lấy từ file key.json như cũ
         creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
         
     client = gspread.authorize(creds)
-    sheet = client.open("HeThongQuanLy") # Đảm bảo tên này đúng y hệt tên file Sheet của bạn
+    sheet = client.open("HeThongQuanLy") 
     return sheet
 
 # Tìm đoạn try-except cũ và thay bằng đoạn này:
