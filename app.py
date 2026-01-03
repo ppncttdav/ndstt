@@ -18,15 +18,16 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
 
-# --- CSS TÙY CHỈNH: GIAO DIỆN COMPACT & ĐẸP ---
+# --- CSS TÙY CHỈNH: FONT CHUẨN HỆ THỐNG & GIAO DIỆN ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"]  { font-family: 'Inter', sans-serif !important; }
+    /* Sử dụng Font hệ thống để đảm bảo không lỗi tiếng Việt */
+    html, body, [class*="css"]  {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !important;
+    }
     
-    /* Tinh chỉnh Sidebar cho gọn */
+    /* Chỉnh sửa Sidebar */
     [data-testid="stSidebar"] { padding-top: 1rem; background-color: #f8f9fa; }
-    [data-testid="stSidebar"] .block-container { padding-top: 1rem; padding-bottom: 1rem; }
     
     /* Card User Gọn gàng */
     .user-compact {
@@ -38,8 +39,6 @@ st.markdown("""
         color: #1b5e20;
         font-weight: 700;
         font-size: 15px;
-        display: flex;
-        align-items: center;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
@@ -53,8 +52,12 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
     }
     
-    /* Nút bấm gọn */
-    .stButton>button { border-radius: 6px; height: auto; padding: 0.4rem 1rem; }
+    /* Sửa lỗi ngắt dòng nút Radio chọn ngày */
+    div[role="radiogroup"] label > div:first-child {
+        display: flex;
+        align-items: center;
+        white-space: nowrap !important; /* Bắt buộc không xuống dòng */
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,19 +76,32 @@ def get_short_name(full_name):
     parts = full_name.strip().split()
     return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
-# --- HÀM LẤY THỜI TIẾT ---
+# --- HÀM LẤY THỜI TIẾT & LỜI KHUYÊN (ĐẦY ĐỦ) ---
 @st.cache_data(ttl=3600)
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
         res = requests.get(url, timeout=2).json()
         temp = res['current_weather']['temperature']; wcode = res['current_weather']['weathercode']
-        condition = "Mây"; advice = "Làm việc hiệu quả nhé!"
-        if wcode in [0, 1]: condition = "Nắng ☀️"; advice = "Năng lượng tích cực!"
-        elif wcode in [2, 3]: condition = "Mây ☁️"; advice = "Tập trung cao độ."
-        elif wcode in [51, 53, 55, 61, 63, 65]: condition = "Mưa 🌧️"; advice = "Đi lại cẩn thận."
-        return f"{temp}°C {condition}", advice
-    except: return "Hà Nội", "Giữ đam mê nhé!"
+        
+        condition = "Có mây"
+        advice = "Chúc bạn một ngày làm việc thật năng suất và hiệu quả!" # Mặc định
+        
+        if wcode in [0, 1]: 
+            condition = "Nắng đẹp ☀️"
+            advice = "Trời đẹp quá! Hãy giữ năng lượng tích cực để làm việc nhé."
+        elif wcode in [2, 3]: 
+            condition = "Nhiều mây ☁️"
+            advice = "Thời tiết dịu mát, rất thích hợp để tập trung cao độ giải quyết công việc."
+        elif wcode in [51, 53, 55, 61, 63, 65]: 
+            condition = "Có mưa 🌧️"
+            advice = "Trời mưa, đường trơn. Các biên tập viên nhớ đi lại cẩn thận nhé!"
+        elif wcode >= 95: 
+            condition = "Giông bão ⛈️"
+            advice = "Thời tiết đang xấu, hạn chế ra ngoài nếu không thực sự cần thiết."
+            
+        return f"{temp}°C - {condition}", advice
+    except: return "Hà Nội", "Luôn giữ vững đam mê nghề báo bạn nhé!"
 
 # --- CẤU HÌNH ---
 ROLES_HEADER = ["LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP", "TRỰC LỊCH PHÁT SÓNG", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC SẢN XUẤT VIDEO CLIP, LPS", "TRỰC QUẢN TRỊ CỔNG TTĐT", "TRỰC QUẢN TRỊ APP"]
@@ -229,11 +245,9 @@ else:
     
     # --- SIDEBAR COMPACT ---
     with st.sidebar:
-        # 1. User & Refresh
         st.markdown(f'<div class="user-compact">👤 {curr_name.upper()}</div>', unsafe_allow_html=True)
         if st.button("🔄 LÀM MỚI DỮ LIỆU", type="primary", use_container_width=True): clear_cache_and_rerun()
         
-        # 2. Menu (No Title)
         selected_menu = option_menu(
             None,
             ["Checklist Cá Nhân", "Quản Lý Công Việc", "Quản Lý Dự Án", "Trực Số", "Lịch Làm Việc", "Email", "Dashboard", "Nhật Ký"] if role == 'LanhDao' else ["Checklist Cá Nhân", "Quản Lý Công Việc", "Quản Lý Dự Án", "Trực Số", "Lịch Làm Việc", "Email"],
@@ -246,12 +260,11 @@ else:
             }
         )
         
-        # 3. Weather & Advice (Compact)
         st.markdown("---")
         w_info, advice = get_weather_and_advice()
-        st.caption(f"**{w_info}** | {advice}")
+        st.caption(f"**{w_info}**")
+        st.info(f"💡 {advice}")
         
-        # 4. Settings
         with st.expander("🔐 Đổi Mật Khẩu"):
             with st.form("change_pass"):
                 old_p = st.text_input("Mật khẩu cũ", type="password"); new_p = st.text_input("Mật khẩu mới", type="password")
@@ -388,13 +401,15 @@ else:
     elif selected_menu == "Trực Số":
         today = get_vn_time().date(); yest = today - timedelta(days=1); tom = today + timedelta(days=1)
         c1, c2 = st.columns([1, 4])
-        with c1: mode = st.radio("NGÀY:", [f"HÔM QUA ({yest.strftime('%d/%m')})", f"HÔM NAY ({today.strftime('%d/%m')})", f"NGÀY MAI ({tom.strftime('%d/%m')})"], index=1, key="ts_nav")
-        if "HÔM QUA" in mode: td = yest
-        elif "NGÀY MAI" in mode: td = tom
+        with c1: 
+            # Dùng label ngắn và chữ thường
+            mode = st.radio("CHỌN NGÀY:", [f"Hôm qua ({yest.strftime('%d/%m')})", f"Hôm nay ({today.strftime('%d/%m')})", f"Ngày mai ({tom.strftime('%d/%m')})"], index=1, key="ts_nav")
+        if "Hôm qua" in mode: td = yest
+        elif "Ngày mai" in mode: td = tom
         else: td = today
         tab_name = td.strftime("%d-%m-%Y"); d_str = td.strftime("%d/%m/%Y")
         
-        with c2: st.subheader(f"📝 TRỰC SỐ: {tab_name}")
+        with c2: st.subheader(f"📝 TRỰC SỐ NGÀY: {tab_name}")
         
         is_admin = (role in ['LanhDao', 'ToChucSanXuat']); use_arc = False
         if is_admin:
@@ -436,10 +451,57 @@ else:
                     else: st.error("Không tìm thấy dữ liệu quá khứ.")
                 else:
                     st.success("Đã có vỏ.")
-                    # Gửi mail/Zalo (Giản lược để code gọn)
-                    r_n = wks_t.row_values(3)[1:]; mail_t = [df_users[df_users['HoTen']==n]['Email'].values[0] for n in r_n if n and n!="--" and len(df_users[df_users['HoTen']==n]['Email'].values)>0]
-                    if mail_t: st.markdown(f'<a href="https://mail.google.com/mail/?view=cm&fs=1&to={",".join(set(mail_t))}&su=Trực số {d_str}" target="_blank">📧 Gửi Mail Ekip</a>', unsafe_allow_html=True)
+                    # KHÔI PHỤC PHẦN GỬI MAIL ĐẦY ĐỦ
+                    try:
+                        r_names = wks_t.row_values(3)[1:]
+                        # Lọc tên hợp lệ
+                        clean_names = [n for n in r_names if n and n != "--" and n in list_nv]
+                        
+                        c_mail, c_zalo = st.columns(2)
+                        with c_mail:
+                            st.markdown("##### 📧 GỬI EMAIL TRÌNH DUYỆT")
+                            tk_gui_vo = st.selectbox("CHỌN TÀI KHOẢN GỬI:", range(10), format_func=lambda x: f"TK {x} (Trên máy này)", key="mail_vo")
+                            # Tìm email của những người trong ekip
+                            recipients = list(set([df_users[df_users['HoTen'] == n]['Email'].values[0] for n in clean_names if len(df_users[df_users['HoTen'] == n]['Email'].values) > 0]))
+                            
+                            # Xác định tên lãnh đạo và thư ký để chào
+                            # Index 0: Lãnh đạo, Index 1: TKTS
+                            name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
+                            name_tk = get_short_name(r_names[1] if len(r_names) > 1 else "")
+                            name_sender = get_short_name(curr_name) # Người đang đăng nhập gửi
+
+                            email_sub = f"Trình duyệt Vỏ tin bài NDS Vietnam Today ngày {d_str}"
+                            email_body = f"""Kính gửi chị {name_ld}, chị {name_tk}
+
+Nhóm xin gửi các chị vỏ tin bài NDS ngày {d_str} trên các nền tảng.
+
+Link: {LINK_VO_TRUC_SO}
+
+Các chị xem giúp nhóm ạ.
+
+Em xin cảm ơn các chị ạ!
+
+Em {name_sender}"""
+                            
+                            if recipients:
+                                link_mail = f"https://mail.google.com/mail/u/{tk_gui_vo}/?view=cm&fs=1&to={','.join(recipients)}&su={urllib.parse.quote(email_sub)}&body={urllib.parse.quote(email_body)}"
+                                st.markdown(f'<a href="{link_mail}" target="_blank" style="background:#EA4335;color:white;padding:10px 15px;text-decoration:none;border-radius:5px;font-weight:bold;display:block;text-align:center;">🚀 SOẠN EMAIL NGAY</a>', unsafe_allow_html=True)
+                                st.caption(f"Gửi tới: {', '.join(recipients)}")
+                                st.markdown(f'<br><a href="https://mail.google.com/mail/u/{tk_gui_vo}" target="_blank">👉 Kiểm tra hộp thư gửi đi (Check Mail)</a>', unsafe_allow_html=True)
+                            else: st.warning("Chưa tìm thấy email của ekip.")
+
+                        with c_zalo:
+                            st.markdown("##### 💬 GỬI QUA ZALO")
+                            zalo_msg = f"🔔 *THÔNG BÁO LỊCH TRỰC SỐ*\n📅 NGÀY: {tab_name}\n------------------\n"
+                            for i, name in enumerate(r_names):
+                                if i < len(ROLES_HEADER) and name != "--": zalo_msg += f"🔹 {ROLES_HEADER[i]}: {name}\n"
+                            zalo_msg += "------------------\n👉 Mời các anh/chị truy cập hệ thống để nhận nhiệm vụ."
+                            st.text_area("NỘI DUNG (COPY):", value=zalo_msg, height=150)
+                            st.link_button("🚀 MỞ ZALO WEB", "https://chat.zalo.me/")
+
+                    except Exception as e: st.error(f"Lỗi tạo thông báo: {e}")
                     
+                    st.divider()
                     with st.form("ed_vo"):
                         c = st.columns(3); nv = []
                         for i, rt in enumerate(ROLES_HEADER):
@@ -447,7 +509,7 @@ else:
                                 curr = r_n[i] if i < len(r_n) else ""
                                 idx = list_nv.index(curr)+1 if curr in list_nv else 0
                                 nv.append(st.selectbox(f"{rt}", ["--"]+list_nv, index=idx, key=f"e_{i}"))
-                        if st.form_submit_button("CẬP NHẬT"):
+                        if st.form_submit_button("CẬP NHẬT EKIP"):
                             for i, v in enumerate(nv): wks_t.update_cell(3, i+2, v if v!="--" else "")
                             st.success("Xong!"); st.rerun()
 
@@ -467,7 +529,9 @@ else:
                 c3, c4, c5 = st.columns(3); nt = c3.multiselect("NỀN TẢNG", OPTS_NEN_TANG); stt = c4.selectbox("TRẠNG THÁI", OPTS_STATUS_TRUCSO); ns = c5.multiselect("NHÂN SỰ", list_nv, default=[curr_name] if curr_name in list_nv else None)
                 c6, c7, c8 = st.columns(3); ng = c6.text_input("NGUỒN"); gd = c7.time_input("GIỜ", value=None); nda = c8.date_input("NGÀY ĐĂNG", value=datetime.strptime(tab_name, "%d-%m-%Y").date(), format="DD/MM/YYYY")
                 c9, c10 = st.columns(2); ld = c9.text_input("LINK DUYỆT"); lsp = c10.text_input("LINK SP"); yk = st.text_input("Ý KIẾN")
-                if st.form_submit_button("LƯU"):
+                
+                # Sửa tên nút thành THÊM VÀO VỎ
+                if st.form_submit_button("THÊM VÀO VỎ", type="primary"):
                     with st.spinner("Lưu..."):
                         start = len(wks_t.get_all_values()) - 4 + 1
                         for p in (nt if nt else [""]):
@@ -508,9 +572,11 @@ else:
 
     # 6. EMAIL
     elif selected_menu == "Email":
-        st.subheader("📧 EMAIL"); tk = st.selectbox("TK:", range(10), format_func=lambda x:f"TK {x}")
-        to = st.multiselect("ĐẾN:", df_users['Email'].tolist()); sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("ND")
-        if st.button("GỬI"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
+        st.subheader("📧 GỬI EMAIL NỘI BỘ")
+        tk = st.selectbox("TK GỬI:", range(10), format_func=lambda x:f"TK {x}")
+        to = st.multiselect("ĐẾN:", df_users['Email'].tolist())
+        sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
+        if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
     # 7. DASHBOARD
     elif role == 'LanhDao' and selected_menu == "Dashboard":
