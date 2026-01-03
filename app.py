@@ -18,42 +18,47 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
 
-# --- CSS TÙY CHỈNH: GIAO DIỆN GỌN & FIX LỖI FONT/ICON ---
+# --- CSS TÙY CHỈNH: FIX LỖI ICON & FONT ---
 st.markdown("""
 <style>
-    /* 1. Áp dụng font hệ thống cho các thẻ văn bản cụ thể (TRÁNH DÙNG * ĐỂ KHÔNG LỖI ICON) */
+    /* CHỈ đổi font cho các thẻ văn bản, KHÔNG dùng * để tránh lỗi Icon */
     html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, button, input, textarea, select, option {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !important;
     }
     
-    /* 2. Chỉnh Sidebar gọn gàng */
+    /* Sidebar gọn gàng */
     [data-testid="stSidebar"] { padding-top: 1rem; background-color: #f8f9fa; }
     [data-testid="stSidebar"] .block-container { padding-top: 0rem; }
     
-    /* 3. Card User Gọn */
+    /* Card User */
     .user-compact {
         background-color: #e8f5e9;
-        padding: 8px 12px;
-        border-radius: 6px;
+        padding: 10px 15px;
+        border-radius: 8px;
         border-left: 4px solid #2e7d32;
-        margin-bottom: 5px;
+        margin-bottom: 10px;
         color: #1b5e20;
         font-weight: 700;
-        font-size: 14px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        font-size: 15px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
-    /* 4. Tiêu đề chính */
+    /* Tiêu đề chính */
     .main-header {
-        font-size: 2rem;
+        font-size: 2.2rem;
         font-weight: 800;
         margin-bottom: 0.5rem;
-        color: #005bea;
+        background: -webkit-linear-gradient(left, #005bea, #00c6fb);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     
-    /* 5. Radio button ngày tháng: Không ngắt dòng */
+    /* Radio button ngày tháng: Ép hiển thị 1 dòng */
     div[role="radiogroup"] label > div:first-child {
-        display: flex; align-items: center; white-space: nowrap !important;
+        display: flex; 
+        align-items: center; 
+        white-space: nowrap !important;
+        width: auto !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -107,7 +112,7 @@ OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM"]
 
-# --- TỪ ĐIỂN HIỂN THỊ (QUAN TRỌNG: ĐÃ BỔ SUNG ĐẦY ĐỦ) ---
+# --- TỪ ĐIỂN HIỂN THỊ ---
 VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
 VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "Định dạng", "NỀN TẢNG": "Nền tảng", "STATUS": "Trạng thái", "NGUỒN": "Nguồn", "NHÂN SỰ": "Nhân sự", "Ý KIẾN ĐIỀU CHỈNH": "Ý kiến", "LINK DUYỆT": "Link Duyệt", "GIỜ ĐĂNG": "Giờ đăng", "NGÀY ĐĂNG": "Ngày đăng", "LINK SẢN PHẨM": "Link SP"}
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
@@ -445,23 +450,24 @@ else:
                                 with st.spinner("Đang tạo vỏ..."):
                                     try:
                                         w = sh_trucso.add_worksheet(title=tab_name, rows=100, cols=20)
-                                        w.update_cell(1,1,f"TRỰC SỐ {tab_name}"); w.update_cell(2,1,"DANH SÁCH:"); [w.update_cell(2,i+2,v) for i,v in enumerate(ROLES_HEADER)]
-                                        w.update_cell(3,1,"NHÂN SỰ:"); [w.update_cell(3,i+2,v if v!="--" else "") for i,v in enumerate(rv)]
+                                        w.update_cell(1,1,f"TRỰC SỐ {tab_name}")
+                                        w.update_cell(2,1,"DANH SÁCH:")
+                                        for i,v in enumerate(ROLES_HEADER): w.update_cell(2,i+2,v)
+                                        w.update_cell(3,1,"NHÂN SỰ:")
+                                        for i,v in enumerate(rv): w.update_cell(3,i+2,v)
                                         w.append_row(CONTENT_HEADER); dinh_dang_dep(w); st.success("ĐÃ TẠO XONG!"); st.rerun()
                                     except Exception as e: st.error(str(e))
                     else: st.error("Không tìm thấy dữ liệu quá khứ.")
                 else:
                     st.success("Đã có vỏ.")
                     try:
-                        # --- KHÔI PHỤC LOGIC GỬI EMAIL ĐẦY ĐỦ ---
-                        r_names = wks_t.row_values(3)[1:] # Lấy danh sách tên
+                        r_names = wks_t.row_values(3)[1:]
                         clean_names = [n for n in r_names if n and n != "--" and n in list_nv]
                         
                         c_mail, c_zalo = st.columns(2)
                         with c_mail:
                             st.markdown("##### 📧 GỬI EMAIL TRÌNH DUYỆT")
                             tk_gui_vo = st.selectbox("CHỌN TÀI KHOẢN GỬI:", range(10), format_func=lambda x: f"TK {x} (Trên máy này)", key="mail_vo")
-                            # Tìm email của những người trong ekip
                             recipients = list(set([df_users[df_users['HoTen'] == n]['Email'].values[0] for n in clean_names if len(df_users[df_users['HoTen'] == n]['Email'].values) > 0]))
                             
                             name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
@@ -514,15 +520,17 @@ Em {name_sender}"""
         if exists:
             with st.expander("ℹ️ EKIP TRỰC", expanded=True):
                 try:
-                    rn = wks_t.row_values(3)[1:] # Load lại tên mới nhất
+                    r_names = wks_t.row_values(3)[1:] # Load lại tên mới nhất
                     rr = wks_t.row_values(2)[1:]
                     c = st.columns(4)
                     for i in range(4):
-                        if i < len(rn): c[i].markdown(f"<small style='color:gray'>{rr[i]}</small><br><b>{rn[i]}</b>", unsafe_allow_html=True)
+                        if i < len(r_names):
+                            with c[i]: st.markdown(f"<small style='color:gray'>{rr[i]}</small><br><b>{r_names[i]}</b>", unsafe_allow_html=True)
                     st.write("---"); c2 = st.columns(4)
                     for i in range(4):
                         idx = i+4
-                        if idx < len(rn): c2[i].markdown(f"<small style='color:gray'>{rr[idx]}</small><br><b>{rn[idx]}</b>", unsafe_allow_html=True)
+                        if idx < len(r_names):
+                            with c2[i]: st.markdown(f"<small style='color:gray'>{rr[idx]}</small><br><b>{r_names[idx]}</b>", unsafe_allow_html=True)
                 except: st.caption("Lỗi đọc ekip.")
 
             with st.form("add_n"):
