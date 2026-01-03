@@ -8,6 +8,7 @@ from datetime import datetime, date, timedelta
 import pytz
 import requests
 import plotly.express as px
+import time
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -30,12 +31,12 @@ def get_short_name(full_name):
     parts = full_name.strip().split()
     return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
-# --- HÀM LẤY THỜI TIẾT ---
-@st.cache_data(ttl=1800)
+# --- HÀM LẤY THỜI TIẾT (CACHE 1 GIỜ) ---
+@st.cache_data(ttl=3600)
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=3).json()
+        res = requests.get(url, timeout=2).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         condition = "CÓ MÂY"
@@ -69,8 +70,8 @@ VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "�
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
-# ================= 1. BACKEND =================
-@st.cache_resource(ttl=600)
+# ================= 1. BACKEND TỐI ƯU =================
+@st.cache_resource(ttl=3600) # Cache kết nối 1 tiếng
 def get_gspread_client_cached():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -85,16 +86,34 @@ def ket_noi_sheet(sheet_name):
     try: return client.open(sheet_name)
     except Exception as e: st.error(f"🔴 Lỗi kết nối '{sheet_name}': {e}"); st.stop()
 
-def lay_du_lieu_trucso(wks):
-    try:
-        data = wks.get_all_values()
-        if len(data) > 4: return pd.DataFrame(data[4:], columns=data[3])
-        return pd.DataFrame(columns=CONTENT_HEADER)
-    except: return pd.DataFrame()
+# --- HÀM ĐỌC DỮ LIỆU AN TOÀN (RETRY LOGIC) ---
+def safe_read_records(wks):
+    for i in range(3):
+        try: return pd.DataFrame(wks.get_all_records())
+        except: time.sleep(1)
+    return pd.DataFrame()
 
-def lay_du_lieu_main(wks):
-    try: return pd.DataFrame(wks.get_all_records())
-    except: return pd.DataFrame()
+# --- HÀM TẢI DỮ LIỆU CHUNG (QUAN TRỌNG: CACHED) ---
+@st.cache_data(ttl=600) # Cache dữ liệu 10 phút, chỉ tải lại khi cần
+def load_all_data():
+    try:
+        sh = ket_noi_sheet(SHEET_MAIN)
+        df_u = safe_read_records(sh.worksheet("TaiKhoan"))
+        df_d = safe_read_records(sh.worksheet("DuAn"))
+        df_c = safe_read_records(sh.worksheet("CongViec"))
+        # Sheet ViecCaNhan
+        try: wks_cn = sh.worksheet("ViecCaNhan"); df_cn = safe_read_records(wks_cn)
+        except: df_cn = pd.DataFrame()
+        # Sheet NhatKy
+        try: wks_nk = sh.worksheet("NhatKy"); df_nk = safe_read_records(wks_nk)
+        except: df_nk = pd.DataFrame()
+        
+        return df_u, df_d, df_c, df_cn, df_nk
+    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+def clear_cache_and_rerun():
+    st.cache_data.clear()
+    st.rerun()
 
 def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
     try: sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
@@ -130,17 +149,23 @@ def dinh_dang_dong_moi(wks, row_idx):
 if 'dang_nhap' not in st.session_state: st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
 sh_main = ket_noi_sheet(SHEET_MAIN)
 
+# --- LOAD DATA (TỐI ƯU HÓA) ---
+# Tải tất cả dữ liệu cần thiết một lần
+df_users, df_duan, df_cv, df_cn, df_log = load_all_data()
+
+list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
+list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
+
 if not st.session_state['dang_nhap']:
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
     with st.form("login"):
         user = st.text_input("Tên đăng nhập"); pwd = st.text_input("Mật khẩu", type="password")
         if st.form_submit_button("ĐĂNG NHẬP"):
-            users = lay_du_lieu_main(sh_main.worksheet("TaiKhoan"))
-            if not users.empty:
-                u_row = users[(users['TenDangNhap'].astype(str)==user) & (users['MatKhau'].astype(str)==pwd)]
+            if not df_users.empty:
+                u_row = df_users[(df_users['TenDangNhap'].astype(str)==user) & (df_users['MatKhau'].astype(str)==pwd)]
                 if not u_row.empty:
                     st.session_state['dang_nhap'] = True; st.session_state['user_info'] = u_row.iloc[0].to_dict()
-                    ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success"); st.rerun()
+                    ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success"); clear_cache_and_rerun()
                 else: st.error("Sai thông tin!")
             else: st.error("Lỗi dữ liệu Tài khoản.")
 else:
@@ -159,8 +184,10 @@ else:
                     elif not new_p: st.error("Không để trống!")
                     else:
                         wks_acc = sh_main.worksheet("TaiKhoan"); cell = wks_acc.find(curr_username)
-                        if cell: wks_acc.update_cell(cell.row, 2, new_p); st.session_state['user_info']['MatKhau'] = new_p; st.success("Xong!")
-        if st.button("🔄 LÀM MỚI"): st.rerun()
+                        if cell: 
+                            wks_acc.update_cell(cell.row, 2, new_p); st.session_state['user_info']['MatKhau'] = new_p; 
+                            st.success("Xong!"); clear_cache_and_rerun()
+        if st.button("🔄 LÀM MỚI DỮ LIỆU"): clear_cache_and_rerun()
         if st.button("ĐĂNG XUẤT"): st.session_state['dang_nhap'] = False; st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
@@ -170,28 +197,15 @@ else:
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
     tabs = st.tabs(list_tabs)
 
-    df_duan = lay_du_lieu_main(sh_main.worksheet("DuAn"))
-    list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
-    df_users = lay_du_lieu_main(sh_main.worksheet("TaiKhoan"))
-    list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
-
     # ================= TAB 1: VIỆC CÁ NHÂN =================
     with tabs[0]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
-        
-        # 1. Đảm bảo sheet (Cấu trúc 5 cột: User, TenViec, Ngay, TrangThai, GhiChu)
-        try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-        except: 
-            wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
-            wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
         
         col_view, col_date = st.columns([1, 2])
         view_mode = col_view.radio("Xem theo:", ["Hôm nay", "Tuần này", "Tháng này"], horizontal=True)
         today = date.today()
         
-        # 3. Lấy dữ liệu
-        all_tasks = wks_canhan.get_all_records()
-        my_tasks = [t for t in all_tasks if str(t.get('User')) == curr_name]
+        my_tasks = [t for t in df_cn.to_dict('records') if str(t.get('User')) == curr_name] # Dùng df_cn từ cache
         
         filtered_tasks = []
         for t in my_tasks:
@@ -205,7 +219,6 @@ else:
         if filtered_tasks:
             df_my_view = pd.DataFrame(filtered_tasks)
             df_my_view['Xong'] = df_my_view['TrangThai'].apply(lambda x: True if str(x).upper() == "TRUE" else False)
-            
             edited_df = st.data_editor(
                 df_my_view[['TenViec', 'Ngay', 'GhiChu', 'Xong']],
                 column_config={
@@ -213,64 +226,57 @@ else:
                     "TenViec": st.column_config.TextColumn("Nội dung công việc", width="medium"),
                     "Ngay": st.column_config.TextColumn("Ngày", disabled=True),
                     "GhiChu": st.column_config.TextColumn("Ghi chú"),
-                },
-                hide_index=True,
-                key="editor_checklist"
+                }, hide_index=True, key="editor_checklist"
             )
             
-            if st.button("💾 CẬP NHẬT TRẠNG THÁI CHECKLIST"):
-                try:
-                    all_values = wks_canhan.get_all_values()
-                    for i, row in edited_df.iterrows():
-                        for idx, sheet_row in enumerate(all_values):
-                            if idx == 0: continue
-                            if sheet_row[0] == curr_name and sheet_row[1] == row['TenViec'] and sheet_row[2] == row['Ngay']:
-                                status_val = "TRUE" if row['Xong'] else "FALSE"
-                                wks_canhan.update_cell(idx + 1, 4, status_val) # Cột 4: Status
-                                wks_canhan.update_cell(idx + 1, 5, row['GhiChu']) # Cột 5: Ghi chú
-                                break
-                    st.success("Đã cập nhật checklist!")
-                    st.rerun()
-                except Exception as e: st.error(f"Lỗi cập nhật: {e}")
+            if st.button("💾 CẬP NHẬT CHECKLIST"):
+                with st.spinner("Đang lưu..."):
+                    try:
+                        wks_canhan = sh_main.worksheet("ViecCaNhan")
+                        all_values = wks_canhan.get_all_values()
+                        for i, row in edited_df.iterrows():
+                            for idx, sheet_row in enumerate(all_values):
+                                if idx == 0: continue
+                                if sheet_row[0] == curr_name and sheet_row[1] == row['TenViec'] and sheet_row[2] == row['Ngay']:
+                                    wks_canhan.update_cell(idx + 1, 4, "TRUE" if row['Xong'] else "FALSE")
+                                    wks_canhan.update_cell(idx + 1, 5, row['GhiChu'])
+                                    break
+                        st.success("Đã cập nhật!"); clear_cache_and_rerun()
+                    except Exception as e: st.error(f"Lỗi: {e}")
         else: st.info(f"Bạn chưa có việc cá nhân nào trong {view_mode.lower()}.")
 
         st.divider()
         c_add1, c_add2 = st.columns(2)
-        
         with c_add1:
-            st.markdown("#### ➕ TỰ TẠO VIỆC MỚI")
+            st.markdown("#### ➕ TỰ TẠO VIỆC")
             with st.form("new_personal_task"):
-                n_ten = st.text_input("Nội dung công việc")
-                n_ngay = st.date_input("Ngày thực hiện", value=today, format="DD/MM/YYYY")
-                n_ghichu = st.text_input("Ghi chú")
-                if st.form_submit_button("THÊM VÀO CHECKLIST"):
+                n_ten = st.text_input("Nội dung"); n_ngay = st.date_input("Ngày", value=today, format="DD/MM/YYYY"); n_ghichu = st.text_input("Ghi chú")
+                if st.form_submit_button("THÊM"):
                     if n_ten:
-                        wks_canhan.append_row([curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
-                        st.success("Đã thêm!")
-                        st.rerun()
-                    else: st.error("Chưa nhập tên việc.")
-
+                        with st.spinner("Đang thêm..."):
+                            try:
+                                wks_canhan = sh_main.worksheet("ViecCaNhan")
+                            except:
+                                wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+                                wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+                            wks_canhan.append_row([curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
+                            st.success("Xong!"); clear_cache_and_rerun()
         with c_add2:
-            st.markdown("#### 📥 LẤY TỪ QUẢN LÝ CÔNG VIỆC")
-            try:
-                df_congviec = lay_du_lieu_main(sh_main.worksheet("CongViec"))
-                if not df_congviec.empty:
-                    my_assigned_tasks = df_congviec[df_congviec['NguoiPhuTrach'].astype(str).str.contains(curr_name, case=False, na=False)]
-                    if not my_assigned_tasks.empty:
-                        task_options = [f"{r['TenViec']} (Deadline: {r['Deadline']})" for i, r in my_assigned_tasks.iterrows()]
-                        selected_task_str = st.selectbox("Chọn việc được giao:", task_options)
-                        
-                        if st.button("CHUYỂN SANG CHECKLIST CÁ NHÂN"):
-                            sel_task_name = selected_task_str.split(" (Deadline:")[0]
-                            row_data = my_assigned_tasks[my_assigned_tasks['TenViec'] == sel_task_name].iloc[0]
-                            try: deadline_str = row_data['Deadline'].split(" ")[1]
-                            except: deadline_str = today.strftime("%d/%m/%Y")
-                            wks_canhan.append_row([curr_name, sel_task_name, deadline_str, "FALSE", "Từ hệ thống chung"])
-                            st.success(f"Đã chuyển '{sel_task_name}' sang checklist!")
-                            st.rerun()
-                    else: st.info("Bạn chưa được giao việc nào trong hệ thống chung.")
-                else: st.info("Chưa có dữ liệu công việc chung.")
-            except Exception as e: st.error(f"Lỗi tải việc chung: {e}")
+            st.markdown("#### 📥 LẤY TỪ VIỆC CHUNG")
+            if not df_cv.empty:
+                my_tasks_cv = df_cv[df_cv['NguoiPhuTrach'].astype(str).str.contains(curr_name, case=False, na=False)]
+                if not my_tasks_cv.empty:
+                    opts = [f"{r['TenViec']} ({r['Deadline']})" for i, r in my_tasks_cv.iterrows()]
+                    sel = st.selectbox("Chọn việc:", opts)
+                    if st.button("CHUYỂN SANG CHECKLIST"):
+                        with st.spinner("Đang chuyển..."):
+                            t_name = sel.split(" (")[0]
+                            row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
+                            try: dl = row['Deadline'].split(" ")[1]
+                            except: dl = today.strftime("%d/%m/%Y")
+                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+                            wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     # ================= TAB 2: CÔNG VIỆC CHUNG =================
     with tabs[1]:
@@ -288,27 +294,29 @@ else:
             opt_nv = st.checkbox("Gửi Email cho BTV", True)
             
             if st.button("💾 LƯU & GỬI EMAIL"):
-                try:
-                    dl_fmt = f"{tv_time.strftime('%H:%M')} {tv_date.strftime('%d/%m/%Y')}"
-                    sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
-                    ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
-                    if opt_nv and tv_nguoi:
-                        mails = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].tolist()
-                        mails = [m for m in mails if str(m).strip()]
-                        if mails: st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={",".join(mails)}&su={urllib.parse.quote(tv_ten)}&body={urllib.parse.quote(tv_ghichu)}" target="_blank">📧 Gửi BTV</a>', unsafe_allow_html=True)
-                except Exception as e: st.error(str(e))
+                with st.spinner("Đang lưu..."):
+                    try:
+                        dl_fmt = f"{tv_time.strftime('%H:%M')} {tv_date.strftime('%d/%m/%Y')}"
+                        sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
+                        ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
+                        if opt_nv and tv_nguoi:
+                            mails = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].tolist()
+                            mails = [m for m in mails if str(m).strip()]
+                            if mails: st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={",".join(mails)}&su={urllib.parse.quote(tv_ten)}&body={urllib.parse.quote(tv_ghichu)}" target="_blank">📧 Gửi BTV</a>', unsafe_allow_html=True)
+                        clear_cache_and_rerun()
+                    except Exception as e: st.error(str(e))
 
         st.divider()
         da_filter = st.selectbox("LỌC DỰ ÁN:", ["-- TẤT CẢ --"]+list_duan)
-        df_cv = lay_du_lieu_main(sh_main.worksheet("CongViec"))
         if not df_cv.empty:
-            if da_filter != "-- TẤT CẢ --": df_cv = df_cv[df_cv['DuAn']==da_filter]
-            edits = {f"{r['TenViec']} ({i+2})": {"id": i, "lv": check_quyen(curr_name, role, r, df_duan)} for i, r in df_cv.iterrows() if check_quyen(curr_name, role, r, df_duan)>0}
+            df_display = df_cv.copy()
+            if da_filter != "-- TẤT CẢ --": df_display = df_display[df_display['DuAn']==da_filter]
+            edits = {f"{r['TenViec']} ({i+2})": {"id": i, "lv": check_quyen(curr_name, role, r, df_duan)} for i, r in df_display.iterrows() if check_quyen(curr_name, role, r, df_duan)>0}
             if edits:
                 with st.expander("🛠️ CẬP NHẬT TRẠNG THÁI", expanded=True):
                     s_task = st.selectbox("CHỌN ĐẦU VIỆC:", list(edits.keys()))
                     if s_task:
-                        row_idx = edits[s_task]['id']; lv = edits[s_task]['lv']; r_dat = df_cv.iloc[row_idx]
+                        row_idx = edits[s_task]['id']; lv = edits[s_task]['lv']; r_dat = df_display.iloc[row_idx]
                         dis = (lv == 1)
                         with st.form("f_edit"):
                             ce1, ce2 = st.columns(2)
@@ -319,11 +327,16 @@ else:
                             e_st = ce2.selectbox("TRẠNG THÁI", OPTS_TRANG_THAI_VIEC, index=OPTS_TRANG_THAI_VIEC.index(r_dat.get('TrangThai','Đã giao')) if r_dat.get('TrangThai') in OPTS_TRANG_THAI_VIEC else 0)
                             e_nt = ce2.text_area("GHI CHÚ", r_dat.get('GhiChu',''))
                             if st.form_submit_button("CẬP NHẬT"):
-                                w = sh_main.worksheet("CongViec"); rn = row_idx + 2
-                                w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
-                                w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
-                                st.success("ĐÃ CẬP NHẬT!"); st.rerun()
-            st.dataframe(df_cv.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
+                                with st.spinner("Đang cập nhật..."):
+                                    # Tìm đúng dòng trong sheet gốc dựa trên tên việc và dự án (vì index có thể lệch do filter)
+                                    w = sh_main.worksheet("CongViec")
+                                    cell = w.find(r_dat['TenViec']) # Tìm ô chứa tên việc
+                                    if cell:
+                                        rn = cell.row
+                                        w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
+                                        w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
+                                        st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
+            st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
         else: st.info("CHƯA CÓ CÔNG VIỆC NÀO.")
 
     # ================= TAB 3: DỰ ÁN =================
@@ -331,7 +344,9 @@ else:
         if role == 'LanhDao':
             with st.form("new_da"):
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
-                if st.form_submit_button("TẠO DỰ ÁN"): sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.rerun()
+                if st.form_submit_button("TẠO DỰ ÁN"): 
+                    with st.spinner("Đang tạo..."):
+                        sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
     # ================= TAB 4: VỞ TRỰC SỐ =================
@@ -374,16 +389,15 @@ else:
                             for i, r_t in enumerate(ROLES_HEADER):
                                 with cols[i%3]: val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, key=f"cr_{i}"); roster_vals.append(val if val != "--" else "")
                             if st.form_submit_button("🚀 TẠO VỎ TRỰC MỚI"):
-                                try:
-                                    w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
-                                    w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_current}")
-                                    w.update_cell(2, 1, "DANH SÁCH TRỰC:")
-                                    for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
-                                    w.update_cell(3, 1, "NHÂN SỰ:")
-                                    for i, v in enumerate(roster_vals): 
-                                        w.update_cell(3, i+2, v)
-                                    w.append_row(CONTENT_HEADER); st.info("ĐANG ĐỊNH DẠNG..."); dinh_dang_dep(w); st.success("ĐÃ TẠO XONG!"); st.rerun()
-                                except Exception as e: st.error(str(e))
+                                with st.spinner("Đang tạo vỏ..."):
+                                    try:
+                                        w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
+                                        w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_current}")
+                                        w.update_cell(2, 1, "DANH SÁCH TRỰC:")
+                                        for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
+                                        w.update_cell(3, 1, "NHÂN SỰ:"); for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
+                                        w.append_row(CONTENT_HEADER); dinh_dang_dep(w); st.success("ĐÃ TẠO XONG!"); st.rerun()
+                                    except Exception as e: st.error(str(e))
                     else: st.error("KHÔNG TÌM THẤY DỮ LIỆU CỦA NGÀY HÔM QUA (CHƯA ĐƯỢC TẠO).")
                 else:
                     st.success("ĐÃ CÓ VỎ TRỰC."); st.subheader("📢 GỬI THÔNG BÁO CA TRỰC")
@@ -422,14 +436,14 @@ else:
                             for i, r_t in enumerate(ROLES_HEADER):
                                 with cols[i%3]: val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, index=list_nv.index(curr_names[i]) if curr_names[i] in list_nv else 0, key=f"ed_{i}"); new_roster_vals.append(val if val != "--" else "")
                             if st.form_submit_button("CẬP NHẬT EKIP"):
-                                for i, v in enumerate(new_roster_vals): wks_today.update_cell(3, i+2, v)
-                                st.success("ĐÃ CẬP NHẬT!"); st.rerun()
+                                with st.spinner("Đang cập nhật..."):
+                                    for i, v in enumerate(new_roster_vals): wks_today.update_cell(3, i+2, v)
+                                    st.success("ĐÃ CẬP NHẬT!"); st.rerun()
                     with tab_del_vo:
                         st.error("⚠️ HÀNH ĐỘNG NÀY SẼ XÓA TOÀN BỘ DỮ LIỆU NGÀY NÀY!")
                         if st.button("XÁC NHẬN XÓA SỔ"): 
-                            sh_trucso.del_worksheet(wks_today)
-                            st.success("ĐÃ XÓA!")
-                            st.rerun()
+                            with st.spinner("Đang xóa..."):
+                                sh_trucso.del_worksheet(wks_today); st.success("ĐÃ XÓA!"); st.rerun()
 
         if tab_exists:
             with st.expander("ℹ️ XEM EKIP TRỰC", expanded=True):
@@ -466,18 +480,19 @@ else:
                 ts_linkduyet = c9.text_input("LINK DUYỆT"); ts_linksp = c10.text_input("LINK SẢN PHẨM"); ts_ykien = st.text_input("Ý KIẾN / GHI CHÚ")
 
                 if st.form_submit_button("LƯU VÀO SỔ", type="primary"):
-                    try:
-                        all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 4) + 1
-                        plats = ts_nentang if ts_nentang else [""]
-                        for p in plats:
-                            row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), ts_ykien, ts_linkduyet, ts_giodang.strftime("%H:%M") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp]
-                            wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
-                        st.success("ĐÃ LƯU!"); st.rerun()
-                    except Exception as e: st.error(f"Lỗi: {e}")
+                    with st.spinner("Đang lưu..."):
+                        try:
+                            all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 4) + 1
+                            plats = ts_nentang if ts_nentang else [""]
+                            for p in plats:
+                                row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), ts_ykien, ts_linkduyet, ts_giodang.strftime("%H:%M") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp]
+                                wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
+                            st.success("ĐÃ LƯU!"); st.rerun()
+                        except Exception as e: st.error(f"Lỗi: {e}")
 
             st.divider()
             st.markdown("##### 📋 DANH SÁCH TIN BÀI")
-            df_content = lay_du_lieu_trucso(wks_today)
+            df_content = safe_read_values(wks_today)
             if not df_content.empty:
                 with st.expander("🛠️ CẬP NHẬT / CHỈNH SỬA DÒNG TIN", expanded=False):
                     st.info("ℹ️ QUY TRÌNH: Chờ xử lý -> Đang biên tập -> Gửi duyệt TCSX -> Yêu cầu sửa -> Gửi duyệt LĐP -> Đã duyệt -> Đã đăng")
@@ -505,23 +520,23 @@ else:
                             e_lsp = ec7.text_input("LINK SẢN PHẨM", value=r_news['LINK SẢN PHẨM'])
                             e_yk = st.text_input("Ý KIẾN (GHI CHÚ SỬA/DUYỆT)", value=r_news['Ý KIẾN ĐIỀU CHỈNH'])
                             if st.form_submit_button("CẬP NHẬT DÒNG TIN"):
-                                r_sh = idx_news + 5 
-                                wks_today.update_cell(r_sh, 2, e_nd); wks_today.update_cell(r_sh, 3, e_dd)
-                                wks_today.update_cell(r_sh, 4, e_nt); wks_today.update_cell(r_sh, 5, e_st)
-                                wks_today.update_cell(r_sh, 8, e_ns); wks_today.update_cell(r_sh, 9, e_yk)
-                                wks_today.update_cell(r_sh, 10, e_ld); wks_today.update_cell(r_sh, 12, e_ndang.strftime("%d/%m/%Y"))
-                                wks_today.update_cell(r_sh, 13, e_lsp)
-                                st.success("ĐÃ CẬP NHẬT!"); st.rerun()
+                                with st.spinner("Đang cập nhật..."):
+                                    r_sh = idx_news + 5 
+                                    wks_today.update_cell(r_sh, 2, e_nd); wks_today.update_cell(r_sh, 3, e_dd)
+                                    wks_today.update_cell(r_sh, 4, e_nt); wks_today.update_cell(r_sh, 5, e_st)
+                                    wks_today.update_cell(r_sh, 8, e_ns); wks_today.update_cell(r_sh, 9, e_yk)
+                                    wks_today.update_cell(r_sh, 10, e_ld); wks_today.update_cell(r_sh, 12, e_ndang.strftime("%d/%m/%Y"))
+                                    wks_today.update_cell(r_sh, 13, e_lsp)
+                                    st.success("ĐÃ CẬP NHẬT!"); st.rerun()
                 st.dataframe(df_content, use_container_width=True, hide_index=True, column_config={"LINK DUYỆT": st.column_config.LinkColumn(display_text="Xem"),"LINK SẢN PHẨM": st.column_config.LinkColumn(display_text="Link"),})
             else: st.info("CHƯA CÓ TIN BÀI NÀO.")
 
     # ================= TAB 5: LỊCH LÀM VIỆC =================
     with tabs[4]:
         st.header("📅 LỊCH LÀM VIỆC & DEADLINE")
-        df_tasks = lay_du_lieu_main(sh_main.worksheet("CongViec"))
-        if not df_tasks.empty:
+        if not df_cv.empty:
             task_list = []
-            for i, r in df_tasks.iterrows():
+            for i, r in df_cv.iterrows():
                 try:
                     dl_str = r['Deadline']; dl_dt = datetime.strptime(dl_str, "%H:%M %d/%m/%Y")
                     start_dt = dl_dt - timedelta(days=2) 
@@ -567,5 +582,4 @@ else:
                     st_counts = df_content['STATUS'].value_counts().reset_index(); st_counts.columns = ['Status', 'Count']
                     fig_st = px.pie(st_counts, values='Count', names='Status', title='TIẾN ĐỘ TIN BÀI'); st.plotly_chart(fig_st, use_container_width=True)
         with tabs[7]:
-            df_log = lay_du_lieu_main(sh_main.worksheet("NhatKy"))
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
