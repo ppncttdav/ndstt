@@ -21,16 +21,16 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 # --- CSS TÙY CHỈNH: GIAO DIỆN GỌN & FIX LỖI FONT/ICON ---
 st.markdown("""
 <style>
-    /* Chỉ đổi font cho các thành phần văn bản, TRÁNH ảnh hưởng đến Icon hệ thống */
-    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, button, input, textarea {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    /* 1. Áp dụng font hệ thống cho các thẻ văn bản cụ thể (TRÁNH DÙNG * ĐỂ KHÔNG LỖI ICON) */
+    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, button, input, textarea, select, option {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !important;
     }
     
-    /* Chỉnh Sidebar gọn gàng */
+    /* 2. Chỉnh Sidebar gọn gàng */
     [data-testid="stSidebar"] { padding-top: 1rem; background-color: #f8f9fa; }
     [data-testid="stSidebar"] .block-container { padding-top: 0rem; }
     
-    /* Card User Gọn */
+    /* 3. Card User Gọn */
     .user-compact {
         background-color: #e8f5e9;
         padding: 8px 12px;
@@ -43,7 +43,7 @@ st.markdown("""
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
 
-    /* Tiêu đề chính */
+    /* 4. Tiêu đề chính */
     .main-header {
         font-size: 2rem;
         font-weight: 800;
@@ -51,7 +51,7 @@ st.markdown("""
         color: #005bea;
     }
     
-    /* Radio button ngày tháng: Không ngắt dòng */
+    /* 5. Radio button ngày tháng: Không ngắt dòng */
     div[role="radiogroup"] label > div:first-child {
         display: flex; align-items: center; white-space: nowrap !important;
     }
@@ -107,7 +107,7 @@ OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM"]
 
-# --- TỪ ĐIỂN HIỂN THỊ (ĐÃ BỔ SUNG VN_COLS_DUAN) ---
+# --- TỪ ĐIỂN HIỂN THỊ (QUAN TRỌNG: ĐÃ BỔ SUNG ĐẦY ĐỦ) ---
 VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
 VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "Định dạng", "NỀN TẢNG": "Nền tảng", "STATUS": "Trạng thái", "NGUỒN": "Nguồn", "NHÂN SỰ": "Nhân sự", "Ý KIẾN ĐIỀU CHỈNH": "Ý kiến", "LINK DUYỆT": "Link Duyệt", "GIỜ ĐĂNG": "Giờ đăng", "NGÀY ĐĂNG": "Ngày đăng", "LINK SẢN PHẨM": "Link SP"}
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
@@ -452,10 +452,9 @@ else:
                     else: st.error("Không tìm thấy dữ liệu quá khứ.")
                 else:
                     st.success("Đã có vỏ.")
-                    # KHÔI PHỤC PHẦN GỬI MAIL ĐẦY ĐỦ
                     try:
-                        r_names = wks_t.row_values(3)[1:]
-                        # Lọc tên hợp lệ
+                        # --- KHÔI PHỤC LOGIC GỬI EMAIL ĐẦY ĐỦ ---
+                        r_names = wks_t.row_values(3)[1:] # Lấy danh sách tên
                         clean_names = [n for n in r_names if n and n != "--" and n in list_nv]
                         
                         c_mail, c_zalo = st.columns(2)
