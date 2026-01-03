@@ -19,11 +19,11 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 
 # --- TÊN FILE GOOGLE SHEET ---
 SHEET_MAIN = "HeThongQuanLy" 
-SHEET_TRUCSO = "VoTrucSo" # Tên file Sheet dữ liệu (Không đổi tên file, chỉ đổi tên hiển thị)
+SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1lsm4FxTPMTmDbc50xq5ldbtCb7PIc-gbk5PMLHdzu7Y/edit?usp=sharing"
 
 # 🔥 Dán link file Lịch trực tổng vào đây
-LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?usp=sharing"
+LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/YOUR_EXTERNAL_SHEET_ID/edit"
 
 # --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
@@ -53,14 +53,9 @@ def get_weather_and_advice():
 
 # --- 1. DANH SÁCH CHỨC DANH ---
 ROLES_HEADER = [
-    "LÃNH ĐẠO BAN",                         # 0
-    "TRỰC THƯ KÝ TÒA SOẠN",                 # 1
-    "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",   # 2 (BTV 1)
-    "TRỰC LỊCH PHÁT SÓNG",                  # 3 (TCSX)
-    "TRỰC THƯ KÝ TÒA SOẠN",                 # 4
-    "TRỰC SẢN XUẤT VIDEO CLIP, LPS",        # 5
-    "TRỰC QUẢN TRỊ CỔNG TTĐT",              # 6 (BTV 2)
-    "TRỰC QUẢN TRỊ APP"                     # 7 (BTV 3)
+    "LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
+    "TRỰC LỊCH PHÁT SÓNG", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
+    "TRỰC QUẢN TRỊ CỔNG TTĐT", "TRỰC QUẢN TRỊ APP"
 ]
 
 # --- 2. CÁC TÙY CHỌN ---
@@ -242,7 +237,6 @@ else:
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     sh_trucso = ket_noi_sheet(SHEET_TRUCSO)
     
-    # --- ĐỔI TÊN TAB THEO YÊU CẦU ---
     list_tabs = ["✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📝 TRỰC SỐ", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
     tabs = st.tabs(list_tabs)
@@ -250,6 +244,7 @@ else:
     # ================= TAB 1: CHECKLIST CÁ NHÂN =================
     with tabs[0]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
+        
         try: wks_canhan = sh_main.worksheet("ViecCaNhan")
         except: 
             wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
@@ -269,6 +264,7 @@ else:
                 elif view_mode == "Tháng này" and t_date.month == today.month and t_date.year == today.year: filtered_tasks.append(t)
             except: pass
         
+        # --- VIEW NHANH ---
         if filtered_tasks:
             df_my_view = pd.DataFrame(filtered_tasks)
             df_my_view['Xong'] = df_my_view['TrangThai'].apply(lambda x: True if str(x).upper() == "TRUE" else False)
@@ -282,7 +278,7 @@ else:
                 }, hide_index=True, key="editor_checklist"
             )
             
-            if st.button("💾 CẬP NHẬT CHECKLIST"):
+            if st.button("💾 CẬP NHẬT TRẠNG THÁI"):
                 with st.spinner("Đang lưu..."):
                     try:
                         all_values = wks_canhan.get_all_values()
@@ -296,6 +292,59 @@ else:
                         st.success("Đã cập nhật!"); clear_cache_and_rerun()
                     except Exception as e: st.error(f"Lỗi: {e}")
         else: st.info(f"Bạn chưa có việc cá nhân nào trong {view_mode.lower()}.")
+
+        st.divider()
+        
+        # --- QUẢN LÝ CHI TIẾT (THÊM / SỬA / XÓA) ---
+        with st.expander("🛠️ QUẢN LÝ CHI TIẾT (THÊM / SỬA / XÓA)", expanded=False):
+            st.warning("⚠️ Tại đây bạn có thể chỉnh sửa tự do. Sau khi sửa xong hãy bấm nút 'LƯU TOÀN BỘ' ở dưới cùng.")
+            all_my_tasks_df = pd.DataFrame(my_tasks)
+            if not all_my_tasks_df.empty:
+                all_my_tasks_df['TrangThai'] = all_my_tasks_df['TrangThai'].apply(lambda x: True if str(x).upper() == "TRUE" else False)
+                edited_full_df = st.data_editor(
+                    all_my_tasks_df[['TenViec', 'Ngay', 'TrangThai', 'GhiChu']],
+                    column_config={
+                        "TrangThai": st.column_config.CheckboxColumn("Xong", default=False),
+                        "TenViec": st.column_config.TextColumn("Tên việc (Sửa được)", width="medium"),
+                        "Ngay": st.column_config.TextColumn("Ngày (DD/MM/YYYY)"),
+                        "GhiChu": st.column_config.TextColumn("Ghi chú"),
+                    }, num_rows="dynamic", use_container_width=True, key="editor_full_manage"
+                )
+                if st.button("💾 LƯU TOÀN BỘ THAY ĐỔI (Sửa/Xóa)"):
+                    with st.spinner("Đang đồng bộ dữ liệu..."):
+                        try:
+                            full_sheet_data = wks_canhan.get_all_values()
+                            header = full_sheet_data[0]
+                            others_data = [r for r in full_sheet_data[1:] if r[0] != curr_name]
+                            my_new_data = []
+                            for i, row in edited_full_df.iterrows():
+                                t_name = row.get('TenViec', '')
+                                if t_name:
+                                    t_date = row.get('Ngay', today.strftime("%d/%m/%Y"))
+                                    t_status = "TRUE" if row.get('TrangThai') else "FALSE"
+                                    t_note = row.get('GhiChu', '')
+                                    my_new_data.append([curr_name, t_name, t_date, t_status, t_note])
+                            final_data = [header] + others_data + my_new_data
+                            wks_canhan.clear(); wks_canhan.update(final_data)
+                            st.success("Đã lưu thành công!"); clear_cache_and_rerun()
+                        except Exception as e: st.error(f"Lỗi: {e}")
+            else:
+                st.info("Danh sách trống. Bạn có thể thêm dòng mới ở bảng trên.")
+                empty_df = pd.DataFrame(columns=['TenViec', 'Ngay', 'TrangThai', 'GhiChu'])
+                edited_new = st.data_editor(empty_df, num_rows="dynamic", key="editor_new")
+                if st.button("LƯU VIỆC MỚI"):
+                    with st.spinner("Đang lưu..."):
+                        try:
+                            my_new_data = []
+                            for i, row in edited_new.iterrows():
+                                t_name = row.get('TenViec', '')
+                                if t_name:
+                                    t_date = row.get('Ngay', today.strftime("%d/%m/%Y"))
+                                    t_status = "TRUE" if row.get('TrangThai') else "FALSE"
+                                    t_note = row.get('GhiChu', '')
+                                    wks_canhan.append_row([curr_name, t_name, t_date, t_status, t_note])
+                            st.success("Đã lưu!"); clear_cache_and_rerun()
+                        except Exception as e: st.error(f"Lỗi: {e}")
 
         st.divider()
         c_add1, c_add2 = st.columns(2)
@@ -321,8 +370,6 @@ else:
                             row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
                             try: dl = row['Deadline'].split(" ")[1]
                             except: dl = today.strftime("%d/%m/%Y")
-                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     # ================= TAB 2: CÔNG VIỆC CHUNG =================
@@ -402,8 +449,7 @@ else:
         c_nav1, c_nav2 = st.columns([1, 4])
         with c_nav1:
             lbl_yest = f"HÔM QUA ({yest_vn.strftime('%d/%m')})"; lbl_today = f"HÔM NAY ({today_vn.strftime('%d/%m')})"; lbl_tom = f"NGÀY MAI ({tom_vn.strftime('%d/%m')})"
-            # --- KEY FIX: THÊM KEY ĐỂ KHÔNG BỊ NHẢY VỀ TAB ĐẦU ---
-            mode_view = st.radio("CHỌN NGÀY LÀM VIỆC:", [lbl_yest, lbl_today, lbl_tom], index=1, horizontal=False, key="date_nav")
+            mode_view = st.radio("CHỌN NGÀY LÀM VIỆC:", [lbl_yest, lbl_today, lbl_tom], index=1, horizontal=False, key="radio_chon_ngay")
         
         if mode_view == lbl_yest: target_date = yest_vn
         elif mode_view == lbl_tom: target_date = tom_vn
@@ -453,11 +499,11 @@ else:
                                     val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, index=def_idx, key=f"cr_{i}")
                                     roster_vals.append(val if val != "--" else "")
                             
-                            if st.form_submit_button("🚀 TẠO VỎ TRỰC MỚI"):
+                            if st.form_submit_button("🚀 TẠO TRỰC SỐ MỚI"):
                                 with st.spinner("Đang tạo vỏ..."):
                                     try:
                                         w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
-                                        w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_current}")
+                                        w.update_cell(1, 1, f"TRỰC SỐ VIETNAM TODAY {tab_name_current}")
                                         w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                         for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
                                         w.update_cell(3, 1, "NHÂN SỰ:")
