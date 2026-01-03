@@ -18,12 +18,12 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
 
-# --- CSS TÙY CHỈNH: GIAO DIỆN GỌN & FONT CHUẨN ---
+# --- CSS TÙY CHỈNH: GIAO DIỆN GỌN & FIX LỖI FONT/ICON ---
 st.markdown("""
 <style>
-    /* Font hệ thống chuẩn cho tiếng Việt */
-    * {
-        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    /* Chỉ đổi font cho các thành phần văn bản, TRÁNH ảnh hưởng đến Icon hệ thống */
+    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, button, input, textarea {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
     }
     
     /* Chỉnh Sidebar gọn gàng */
@@ -107,10 +107,10 @@ OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM"]
 
-# --- TỪ ĐIỂN HIỂN THỊ (SỬA LỖI NAME ERROR) ---
+# --- TỪ ĐIỂN HIỂN THỊ (ĐÃ BỔ SUNG VN_COLS_DUAN) ---
 VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
 VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "Định dạng", "NỀN TẢNG": "Nền tảng", "STATUS": "Trạng thái", "NGUỒN": "Nguồn", "NHÂN SỰ": "Nhân sự", "Ý KIẾN ĐIỀU CHỈNH": "Ý kiến", "LINK DUYỆT": "Link Duyệt", "GIỜ ĐĂNG": "Giờ đăng", "NGÀY ĐĂNG": "Ngày đăng", "LINK SẢN PHẨM": "Link SP"}
-VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"} # Đã thêm dòng này
+VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
 # --- BACKEND ---
@@ -452,15 +452,17 @@ else:
                     else: st.error("Không tìm thấy dữ liệu quá khứ.")
                 else:
                     st.success("Đã có vỏ.")
+                    # KHÔI PHỤC PHẦN GỬI MAIL ĐẦY ĐỦ
                     try:
-                        # --- KHÔI PHỤC LOGIC GỬI EMAIL ĐẦY ĐỦ ---
-                        r_names = wks_t.row_values(3)[1:] # Lấy danh sách tên
+                        r_names = wks_t.row_values(3)[1:]
+                        # Lọc tên hợp lệ
                         clean_names = [n for n in r_names if n and n != "--" and n in list_nv]
                         
                         c_mail, c_zalo = st.columns(2)
                         with c_mail:
                             st.markdown("##### 📧 GỬI EMAIL TRÌNH DUYỆT")
                             tk_gui_vo = st.selectbox("CHỌN TÀI KHOẢN GỬI:", range(10), format_func=lambda x: f"TK {x} (Trên máy này)", key="mail_vo")
+                            # Tìm email của những người trong ekip
                             recipients = list(set([df_users[df_users['HoTen'] == n]['Email'].values[0] for n in clean_names if len(df_users[df_users['HoTen'] == n]['Email'].values) > 0]))
                             
                             name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
@@ -577,19 +579,19 @@ Em {name_sender}"""
         sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
         if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
-    # ================= CÁC TAB LÃNH ĐẠO (DASHBOARD, LOGS) =================
-    elif role == 'LanhDao':
-        if selected_menu == "Dashboard":
-            st.header("📊 DASHBOARD TỔNG QUAN")
-            if not df_cv.empty:
-                col1, col2 = st.columns(2)
-                with col1:
-                    status_counts = df_cv['TrangThai'].value_counts().reset_index(); status_counts.columns = ['Trạng thái', 'Số lượng']
-                    fig_pie = px.pie(status_counts, values='Số lượng', names='Trạng thái', title='TỶ LỆ TRẠNG THÁI CÔNG VIỆC', hole=0.4); st.plotly_chart(fig_pie, use_container_width=True)
-                with col2:
-                    all_staff = []; [all_staff.extend([n.strip() for n in s.split(',')]) for s in df_cv['NguoiPhuTrach']]
-                    staff_counts = pd.Series(all_staff).value_counts().reset_index(); staff_counts.columns = ['BTV', 'Số việc']
-                    fig_bar = px.bar(staff_counts, x='BTV', y='Số việc', title='NĂNG SUẤT NHÂN SỰ', color='BTV'); st.plotly_chart(fig_bar, use_container_width=True)
-        elif selected_menu == "Nhật Ký":
-            st.subheader("📜 NHẬT KÝ HOẠT ĐỘNG")
-            if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
+    # 7. DASHBOARD
+    elif role == 'LanhDao' and selected_menu == "Dashboard":
+        st.header("📊 DASHBOARD TỔNG QUAN")
+        if not df_cv.empty:
+            col1, col2 = st.columns(2)
+            with col1:
+                status_counts = df_cv['TrangThai'].value_counts().reset_index(); status_counts.columns = ['Trạng thái', 'Số lượng']
+                fig_pie = px.pie(status_counts, values='Số lượng', names='Trạng thái', title='TỶ LỆ TRẠNG THÁI CÔNG VIỆC', hole=0.4); st.plotly_chart(fig_pie, use_container_width=True)
+            with col2:
+                all_staff = []; [all_staff.extend([n.strip() for n in s.split(',')]) for s in df_cv['NguoiPhuTrach']]
+                staff_counts = pd.Series(all_staff).value_counts().reset_index(); staff_counts.columns = ['BTV', 'Số việc']
+                fig_bar = px.bar(staff_counts, x='BTV', y='Số việc', title='NĂNG SUẤT NHÂN SỰ', color='BTV'); st.plotly_chart(fig_bar, use_container_width=True)
+
+    # 8. NHẬT KÝ
+    elif role == 'LanhDao' and selected_menu == "Nhật Ký":
+        if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
