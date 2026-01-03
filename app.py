@@ -19,10 +19,10 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 
 # --- TÊN FILE GOOGLE SHEET ---
 SHEET_MAIN = "HeThongQuanLy" 
-SHEET_TRUCSO = "VoTrucSo"
+SHEET_TRUCSO = "VoTrucSo" # Tên file Sheet dữ liệu (Không đổi tên file, chỉ đổi tên hiển thị)
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1lsm4FxTPMTmDbc50xq5ldbtCb7PIc-gbk5PMLHdzu7Y/edit?usp=sharing"
 
-# 🔥 Dán link file Lịch trực tổng vào đây (nếu có)
+# 🔥 Dán link file Lịch trực tổng vào đây
 LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?usp=sharing"
 
 # --- CẤU HÌNH THỜI GIAN VN ---
@@ -53,9 +53,14 @@ def get_weather_and_advice():
 
 # --- 1. DANH SÁCH CHỨC DANH ---
 ROLES_HEADER = [
-    "LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
-    "TRỰC LỊCH PHÁT SÓNG", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
-    "TRỰC QUẢN TRỊ CỔNG TTĐT", "TRỰC QUẢN TRỊ APP"
+    "LÃNH ĐẠO BAN",                         # 0
+    "TRỰC THƯ KÝ TÒA SOẠN",                 # 1
+    "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",   # 2 (BTV 1)
+    "TRỰC LỊCH PHÁT SÓNG",                  # 3 (TCSX)
+    "TRỰC THƯ KÝ TÒA SOẠN",                 # 4
+    "TRỰC SẢN XUẤT VIDEO CLIP, LPS",        # 5
+    "TRỰC QUẢN TRỊ CỔNG TTĐT",              # 6 (BTV 2)
+    "TRỰC QUẢN TRỊ APP"                     # 7 (BTV 3)
 ]
 
 # --- 2. CÁC TÙY CHỌN ---
@@ -237,24 +242,22 @@ else:
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     sh_trucso = ket_noi_sheet(SHEET_TRUCSO)
     
-    list_tabs = ["✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📝 VỎ TRỰC SỐ", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
+    # --- ĐỔI TÊN TAB THEO YÊU CẦU ---
+    list_tabs = ["✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📝 TRỰC SỐ", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
     tabs = st.tabs(list_tabs)
 
     # ================= TAB 1: CHECKLIST CÁ NHÂN =================
     with tabs[0]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
-        
         try: wks_canhan = sh_main.worksheet("ViecCaNhan")
         except: 
             wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
             wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
         
-        # --- PHẦN 1: XEM & TICK NHANH (READ-ONLY VIEW) ---
         col_view, col_date = st.columns([1, 2])
         view_mode = col_view.radio("Xem theo:", ["Hôm nay", "Tuần này", "Tháng này"], horizontal=True)
         today = date.today()
-        
         my_tasks = [t for t in df_cn.to_dict('records') if str(t.get('User')) == curr_name]
         
         filtered_tasks = []
@@ -276,10 +279,10 @@ else:
                     "TenViec": st.column_config.TextColumn("Nội dung công việc", width="medium"),
                     "Ngay": st.column_config.TextColumn("Ngày", disabled=True),
                     "GhiChu": st.column_config.TextColumn("Ghi chú"),
-                }, hide_index=True, key="editor_checklist_view"
+                }, hide_index=True, key="editor_checklist"
             )
             
-            if st.button("💾 CẬP NHẬT TRẠNG THÁI"):
+            if st.button("💾 CẬP NHẬT CHECKLIST"):
                 with st.spinner("Đang lưu..."):
                     try:
                         all_values = wks_canhan.get_all_values()
@@ -295,82 +298,32 @@ else:
         else: st.info(f"Bạn chưa có việc cá nhân nào trong {view_mode.lower()}.")
 
         st.divider()
-        
-        # --- PHẦN 2: QUẢN LÝ CHI TIẾT (FULL EDIT) ---
-        with st.expander("🛠️ QUẢN LÝ CHI TIẾT (THÊM / SỬA / XÓA)", expanded=False):
-            st.warning("⚠️ Tại đây bạn có thể chỉnh sửa tự do. Sau khi sửa xong hãy bấm nút 'LƯU TOÀN BỘ' ở dưới cùng.")
-            
-            # Lấy tất cả việc của user (không lọc ngày)
-            all_my_tasks_df = pd.DataFrame(my_tasks)
-            if not all_my_tasks_df.empty:
-                # Chuyển đổi trạng thái sang boolean
-                all_my_tasks_df['TrangThai'] = all_my_tasks_df['TrangThai'].apply(lambda x: True if str(x).upper() == "TRUE" else False)
-                
-                # Cho phép thêm/xóa dòng (num_rows="dynamic")
-                edited_full_df = st.data_editor(
-                    all_my_tasks_df[['TenViec', 'Ngay', 'TrangThai', 'GhiChu']],
-                    column_config={
-                        "TrangThai": st.column_config.CheckboxColumn("Xong", default=False),
-                        "TenViec": st.column_config.TextColumn("Tên việc (Sửa được)", width="medium"),
-                        "Ngay": st.column_config.TextColumn("Ngày (DD/MM/YYYY)"),
-                        "GhiChu": st.column_config.TextColumn("Ghi chú"),
-                    },
-                    num_rows="dynamic", # Cho phép thêm/xóa
-                    use_container_width=True,
-                    key="editor_full_manage"
-                )
-                
-                if st.button("💾 LƯU TOÀN BỘ THAY ĐỔI (Sửa/Xóa)"):
-                    with st.spinner("Đang đồng bộ dữ liệu..."):
-                        try:
-                            # 1. Lấy dữ liệu toàn bộ sheet hiện tại
-                            full_sheet_data = wks_canhan.get_all_values()
-                            header = full_sheet_data[0]
-                            # 2. Lọc ra dữ liệu của NGƯỜI KHÁC (Giữ nguyên)
-                            others_data = [r for r in full_sheet_data[1:] if r[0] != curr_name]
-                            
-                            # 3. Chuẩn bị dữ liệu CỦA MÌNH từ bảng đã sửa
-                            my_new_data = []
-                            for i, row in edited_full_df.iterrows():
-                                # Đảm bảo format chuẩn
-                                t_name = row.get('TenViec', '')
-                                if t_name: # Chỉ lấy dòng có tên
-                                    t_date = row.get('Ngay', today.strftime("%d/%m/%Y"))
-                                    t_status = "TRUE" if row.get('TrangThai') else "FALSE"
-                                    t_note = row.get('GhiChu', '')
-                                    my_new_data.append([curr_name, t_name, t_date, t_status, t_note])
-                            
-                            # 4. Gộp lại và Ghi đè
-                            final_data = [header] + others_data + my_new_data
-                            
-                            wks_canhan.clear()
-                            wks_canhan.update(final_data)
-                            
-                            st.success("Đã lưu thành công!"); clear_cache_and_rerun()
-                        except Exception as e: st.error(f"Lỗi: {e}")
-            else:
-                st.info("Danh sách trống. Bạn có thể thêm dòng mới ở bảng trên.")
-                # Nếu trống vẫn hiện bảng trống để thêm
-                empty_df = pd.DataFrame(columns=['TenViec', 'Ngay', 'TrangThai', 'GhiChu'])
-                edited_new = st.data_editor(empty_df, num_rows="dynamic", key="editor_new")
-                if st.button("LƯU VIỆC MỚI"):
-                     # Logic tương tự trên... (giản lược cho gọn)
-                     pass
-
-        st.divider()
-        st.markdown("#### 📥 LẤY TỪ VIỆC CHUNG")
-        if not df_cv.empty:
-            my_tasks_cv = df_cv[df_cv['NguoiPhuTrach'].astype(str).str.contains(curr_name, case=False, na=False)]
-            if not my_tasks_cv.empty:
-                opts = [f"{r['TenViec']} ({r['Deadline']})" for i, r in my_tasks_cv.iterrows()]
-                sel = st.selectbox("Chọn việc:", opts)
-                if st.button("CHUYỂN SANG CHECKLIST"):
-                    with st.spinner("Đang chuyển..."):
-                        t_name = sel.split(" (")[0]
-                        row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
-                        try: dl = row['Deadline'].split(" ")[1]
-                        except: dl = today.strftime("%d/%m/%Y")
-                        wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
+        c_add1, c_add2 = st.columns(2)
+        with c_add1:
+            st.markdown("#### ➕ TỰ TẠO VIỆC")
+            with st.form("new_personal_task"):
+                n_ten = st.text_input("Nội dung"); n_ngay = st.date_input("Ngày", value=today, format="DD/MM/YYYY"); n_ghichu = st.text_input("Ghi chú")
+                if st.form_submit_button("THÊM"):
+                    if n_ten:
+                        with st.spinner("Đang thêm..."):
+                            wks_canhan.append_row([curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
+                            st.success("Xong!"); clear_cache_and_rerun()
+        with c_add2:
+            st.markdown("#### 📥 LẤY TỪ VIỆC CHUNG")
+            if not df_cv.empty:
+                my_tasks_cv = df_cv[df_cv['NguoiPhuTrach'].astype(str).str.contains(curr_name, case=False, na=False)]
+                if not my_tasks_cv.empty:
+                    opts = [f"{r['TenViec']} ({r['Deadline']})" for i, r in my_tasks_cv.iterrows()]
+                    sel = st.selectbox("Chọn việc:", opts)
+                    if st.button("CHUYỂN SANG CHECKLIST"):
+                        with st.spinner("Đang chuyển..."):
+                            t_name = sel.split(" (")[0]
+                            row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
+                            try: dl = row['Deadline'].split(" ")[1]
+                            except: dl = today.strftime("%d/%m/%Y")
+                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+                            wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     # ================= TAB 2: CÔNG VIỆC CHUNG =================
     with tabs[1]:
@@ -442,21 +395,22 @@ else:
                         sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
-    # ================= TAB 4: VỞ TRỰC SỐ =================
+    # ================= TAB 4: TRỰC SỐ =================
     with tabs[3]:
         today_vn = get_vn_time().date()
         yest_vn = today_vn - timedelta(days=1); tom_vn = today_vn + timedelta(days=1)
         c_nav1, c_nav2 = st.columns([1, 4])
         with c_nav1:
             lbl_yest = f"HÔM QUA ({yest_vn.strftime('%d/%m')})"; lbl_today = f"HÔM NAY ({today_vn.strftime('%d/%m')})"; lbl_tom = f"NGÀY MAI ({tom_vn.strftime('%d/%m')})"
-            mode_view = st.radio("CHỌN NGÀY LÀM VIỆC:", [lbl_yest, lbl_today, lbl_tom], index=1, horizontal=False)
+            # --- KEY FIX: THÊM KEY ĐỂ KHÔNG BỊ NHẢY VỀ TAB ĐẦU ---
+            mode_view = st.radio("CHỌN NGÀY LÀM VIỆC:", [lbl_yest, lbl_today, lbl_tom], index=1, horizontal=False, key="date_nav")
         
         if mode_view == lbl_yest: target_date = yest_vn
         elif mode_view == lbl_tom: target_date = tom_vn
         else: target_date = today_vn
         tab_name_current = target_date.strftime("%d-%m-%Y"); date_str_display = target_date.strftime("%d/%m/%Y")
         
-        with c_nav2: st.header(f"📝 VỎ TRỰC SỐ NGÀY: {tab_name_current}")
+        with c_nav2: st.header(f"📝 TRỰC SỐ NGÀY: {tab_name_current}")
 
         is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat']); use_archive = False
         if is_shift_admin:
