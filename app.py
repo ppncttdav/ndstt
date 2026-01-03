@@ -201,11 +201,18 @@ else:
     with tabs[0]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
         
+        # Đảm bảo sheet tồn tại (có thể bỏ qua nếu đã tạo thủ công)
+        try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+        except: 
+            wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+            wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+        
         col_view, col_date = st.columns([1, 2])
         view_mode = col_view.radio("Xem theo:", ["Hôm nay", "Tuần này", "Tháng này"], horizontal=True)
         today = date.today()
         
-        my_tasks = [t for t in df_cn.to_dict('records') if str(t.get('User')) == curr_name] # Dùng df_cn từ cache
+        # Lấy dữ liệu từ cache df_cn
+        my_tasks = [t for t in df_cn.to_dict('records') if str(t.get('User')) == curr_name]
         
         filtered_tasks = []
         for t in my_tasks:
@@ -232,7 +239,6 @@ else:
             if st.button("💾 CẬP NHẬT CHECKLIST"):
                 with st.spinner("Đang lưu..."):
                     try:
-                        wks_canhan = sh_main.worksheet("ViecCaNhan")
                         all_values = wks_canhan.get_all_values()
                         for i, row in edited_df.iterrows():
                             for idx, sheet_row in enumerate(all_values):
@@ -254,11 +260,6 @@ else:
                 if st.form_submit_button("THÊM"):
                     if n_ten:
                         with st.spinner("Đang thêm..."):
-                            try:
-                                wks_canhan = sh_main.worksheet("ViecCaNhan")
-                            except:
-                                wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
-                                wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
                             st.success("Xong!"); clear_cache_and_rerun()
         with c_add2:
@@ -274,8 +275,6 @@ else:
                             row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
                             try: dl = row['Deadline'].split(" ")[1]
                             except: dl = today.strftime("%d/%m/%Y")
-                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     # ================= TAB 2: CÔNG VIỆC CHUNG =================
@@ -328,9 +327,9 @@ else:
                             e_nt = ce2.text_area("GHI CHÚ", r_dat.get('GhiChu',''))
                             if st.form_submit_button("CẬP NHẬT"):
                                 with st.spinner("Đang cập nhật..."):
-                                    # Tìm đúng dòng trong sheet gốc dựa trên tên việc và dự án (vì index có thể lệch do filter)
+                                    # Tìm đúng dòng trong sheet gốc
                                     w = sh_main.worksheet("CongViec")
-                                    cell = w.find(r_dat['TenViec']) # Tìm ô chứa tên việc
+                                    cell = w.find(r_dat['TenViec']) 
                                     if cell:
                                         rn = cell.row
                                         w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
@@ -395,7 +394,8 @@ else:
                                         w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_current}")
                                         w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                         for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
-                                        w.update_cell(3, 1, "NHÂN SỰ:"); for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
+                                        w.update_cell(3, 1, "NHÂN SỰ:")
+                                        for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
                                         w.append_row(CONTENT_HEADER); dinh_dang_dep(w); st.success("ĐÃ TẠO XONG!"); st.rerun()
                                     except Exception as e: st.error(str(e))
                     else: st.error("KHÔNG TÌM THẤY DỮ LIỆU CỦA NGÀY HÔM QUA (CHƯA ĐƯỢC TẠO).")
