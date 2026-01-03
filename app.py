@@ -18,38 +18,40 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
 
-# --- CSS TÙY CHỈNH: FONT CHUẨN & GIAO DIỆN ---
+# --- CSS TÙY CHỈNH: GIAO DIỆN GỌN & FONT CHUẨN ---
 st.markdown("""
 <style>
-    /* Font hệ thống chuẩn */
-    html, body, [class*="css"]  {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    /* Font hệ thống chuẩn cho tiếng Việt */
+    * {
+        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
     }
     
+    /* Chỉnh Sidebar gọn gàng */
     [data-testid="stSidebar"] { padding-top: 1rem; background-color: #f8f9fa; }
+    [data-testid="stSidebar"] .block-container { padding-top: 0rem; }
     
+    /* Card User Gọn */
     .user-compact {
         background-color: #e8f5e9;
-        padding: 10px 15px;
-        border-radius: 8px;
+        padding: 8px 12px;
+        border-radius: 6px;
         border-left: 4px solid #2e7d32;
-        margin-bottom: 10px;
+        margin-bottom: 5px;
         color: #1b5e20;
         font-weight: 700;
-        font-size: 15px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-size: 14px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
 
+    /* Tiêu đề chính */
     .main-header {
-        font-size: 2.2rem;
+        font-size: 2rem;
         font-weight: 800;
         margin-bottom: 0.5rem;
-        background: -webkit-linear-gradient(left, #005bea, #00c6fb);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #005bea;
     }
     
-    /* Radio button không ngắt dòng */
+    /* Radio button ngày tháng: Không ngắt dòng */
     div[role="radiogroup"] label > div:first-child {
         display: flex; align-items: center; white-space: nowrap !important;
     }
@@ -104,6 +106,12 @@ OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
 OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Hủy"]
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "LINK DUYỆT", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM"]
+
+# --- TỪ ĐIỂN HIỂN THỊ (SỬA LỖI NAME ERROR) ---
+VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
+VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "Định dạng", "NỀN TẢNG": "Nền tảng", "STATUS": "Trạng thái", "NGUỒN": "Nguồn", "NHÂN SỰ": "Nhân sự", "Ý KIẾN ĐIỀU CHỈNH": "Ý kiến", "LINK DUYỆT": "Link Duyệt", "GIỜ ĐĂNG": "Giờ đăng", "NGÀY ĐĂNG": "Ngày đăng", "LINK SẢN PHẨM": "Link SP"}
+VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"} # Đã thêm dòng này
+VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
 # --- BACKEND ---
 @st.cache_resource(ttl=3600)
@@ -233,6 +241,7 @@ if not st.session_state['dang_nhap']:
 else:
     u_info = st.session_state['user_info']; curr_name = u_info['HoTen']; curr_username = str(u_info['TenDangNhap']); role = u_info.get('VaiTro', 'NhanVien')
     
+    # --- SIDEBAR COMPACT ---
     with st.sidebar:
         st.markdown(f'<div class="user-compact">👤 {curr_name.upper()}</div>', unsafe_allow_html=True)
         if st.button("🔄 LÀM MỚI DỮ LIỆU", type="primary", use_container_width=True): clear_cache_and_rerun()
@@ -265,6 +274,7 @@ else:
         
         if st.button("Đăng xuất", use_container_width=True): st.session_state['dang_nhap'] = False; st.rerun()
 
+    # --- MAIN CONTENT ---
     st.markdown('<div class="main-header">🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG</div>', unsafe_allow_html=True)
     sh_trucso = ket_noi_sheet(SHEET_TRUCSO)
 
@@ -442,17 +452,15 @@ else:
                     else: st.error("Không tìm thấy dữ liệu quá khứ.")
                 else:
                     st.success("Đã có vỏ.")
-                    # KHÔI PHỤC PHẦN GỬI MAIL ĐẦY ĐỦ
                     try:
-                        r_names = wks_t.row_values(3)[1:]
-                        # Lọc tên hợp lệ
+                        # --- KHÔI PHỤC LOGIC GỬI EMAIL ĐẦY ĐỦ ---
+                        r_names = wks_t.row_values(3)[1:] # Lấy danh sách tên
                         clean_names = [n for n in r_names if n and n != "--" and n in list_nv]
                         
                         c_mail, c_zalo = st.columns(2)
                         with c_mail:
                             st.markdown("##### 📧 GỬI EMAIL TRÌNH DUYỆT")
                             tk_gui_vo = st.selectbox("CHỌN TÀI KHOẢN GỬI:", range(10), format_func=lambda x: f"TK {x} (Trên máy này)", key="mail_vo")
-                            # Tìm email
                             recipients = list(set([df_users[df_users['HoTen'] == n]['Email'].values[0] for n in clean_names if len(df_users[df_users['HoTen'] == n]['Email'].values) > 0]))
                             
                             name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
@@ -505,7 +513,7 @@ Em {name_sender}"""
         if exists:
             with st.expander("ℹ️ EKIP TRỰC", expanded=True):
                 try:
-                    rn = wks_t.row_values(3)[1:] # Load lại để hiển thị mới nhất
+                    rn = wks_t.row_values(3)[1:] # Load lại tên mới nhất
                     rr = wks_t.row_values(2)[1:]
                     c = st.columns(4)
                     for i in range(4):
@@ -522,7 +530,6 @@ Em {name_sender}"""
                 c6, c7, c8 = st.columns(3); ng = c6.text_input("NGUỒN"); gd = c7.time_input("GIỜ", value=None); nda = c8.date_input("NGÀY ĐĂNG", value=datetime.strptime(tab_name, "%d-%m-%Y").date(), format="DD/MM/YYYY")
                 c9, c10 = st.columns(2); ld = c9.text_input("LINK DUYỆT"); lsp = c10.text_input("LINK SP"); yk = st.text_input("Ý KIẾN")
                 
-                # Sửa tên nút thành THÊM VÀO VỎ
                 if st.form_submit_button("THÊM VÀO VỎ", type="primary"):
                     with st.spinner("Lưu..."):
                         start = len(wks_t.get_all_values()) - 4 + 1
@@ -546,7 +553,7 @@ Em {name_sender}"""
                 st.dataframe(df_c, use_container_width=True, hide_index=True)
             else: st.info("Chưa có tin.")
 
-    # 5. LỊCH LÀM VIỆC
+    # ================= TAB 5: LỊCH LÀM VIỆC =================
     elif selected_menu == "Lịch Làm Việc":
         st.subheader("📅 LỊCH & DEADLINE")
         if not df_cv.empty:
@@ -562,7 +569,7 @@ Em {name_sender}"""
                 st.dataframe(pd.DataFrame(tl)[['Task', 'Finish', 'Status']], use_container_width=True)
         else: st.info("Trống.")
 
-    # 6. EMAIL
+    # ================= TAB 6: EMAIL =================
     elif selected_menu == "Email":
         st.subheader("📧 GỬI EMAIL NỘI BỘ")
         tk = st.selectbox("TK GỬI:", range(10), format_func=lambda x:f"TK {x}")
@@ -570,14 +577,19 @@ Em {name_sender}"""
         sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
         if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
-    # 7. DASHBOARD
-    elif role == 'LanhDao' and selected_menu == "Dashboard":
-        st.header("📊 DASHBOARD"); c1, c2 = st.columns(2)
-        if not df_cv.empty:
-            c1.plotly_chart(px.pie(df_cv['TrangThai'].value_counts().reset_index(), values='count', names='TrangThai'), use_container_width=True)
-            all_s = []; [all_s.extend([n.strip() for n in s.split(',')]) for s in df_cv['NguoiPhuTrach']]
-            c2.plotly_chart(px.bar(pd.Series(all_s).value_counts().reset_index(), x='count', y='index', orientation='h'), use_container_width=True)
-
-    # 8. NHẬT KÝ
-    elif role == 'LanhDao' and selected_menu == "Nhật Ký":
-        if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
+    # ================= CÁC TAB LÃNH ĐẠO (DASHBOARD, LOGS) =================
+    elif role == 'LanhDao':
+        if selected_menu == "Dashboard":
+            st.header("📊 DASHBOARD TỔNG QUAN")
+            if not df_cv.empty:
+                col1, col2 = st.columns(2)
+                with col1:
+                    status_counts = df_cv['TrangThai'].value_counts().reset_index(); status_counts.columns = ['Trạng thái', 'Số lượng']
+                    fig_pie = px.pie(status_counts, values='Số lượng', names='Trạng thái', title='TỶ LỆ TRẠNG THÁI CÔNG VIỆC', hole=0.4); st.plotly_chart(fig_pie, use_container_width=True)
+                with col2:
+                    all_staff = []; [all_staff.extend([n.strip() for n in s.split(',')]) for s in df_cv['NguoiPhuTrach']]
+                    staff_counts = pd.Series(all_staff).value_counts().reset_index(); staff_counts.columns = ['BTV', 'Số việc']
+                    fig_bar = px.bar(staff_counts, x='BTV', y='Số việc', title='NĂNG SUẤT NHÂN SỰ', color='BTV'); st.plotly_chart(fig_bar, use_container_width=True)
+        elif selected_menu == "Nhật Ký":
+            st.subheader("📜 NHẬT KÝ HOẠT ĐỘNG")
+            if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
