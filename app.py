@@ -9,6 +9,7 @@ import pytz
 import requests
 import plotly.express as px
 import time
+import random
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -16,10 +17,14 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide")
 
-# --- TÊN FILE GOOGLE SHEET ---
+# --- CẤU HÌNH FILE GOOGLE SHEET ---
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1lsm4FxTPMTmDbc50xq5ldbtCb7PIc-gbk5PMLHdzu7Y/edit?usp=sharing"
+
+# 🔥 QUAN TRỌNG: Dán link file Lịch trực tổng vào đây
+# Ví dụ: https://docs.google.com/spreadsheets/d/1jPQGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0Qqzxbl/edit
+LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?usp=sharing" 
 
 # --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
@@ -31,7 +36,7 @@ def get_short_name(full_name):
     parts = full_name.strip().split()
     return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
-# --- HÀM LẤY THỜI TIẾT (CACHE 1 GIỜ) ---
+# --- HÀM LẤY THỜI TIẾT ---
 @st.cache_data(ttl=3600)
 def get_weather_and_advice():
     try:
@@ -39,20 +44,24 @@ def get_weather_and_advice():
         res = requests.get(url, timeout=2).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
-        condition = "CÓ MÂY"
-        advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
+        condition = "CÓ MÂY"; advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
         if wcode in [0, 1]: condition = "NẮNG ĐẸP ☀️"; advice = "TRỜI ĐẸP! GIỮ NĂNG LƯỢNG TÍCH CỰC NHÉ."
         elif wcode in [2, 3]: condition = "NHIỀU MÂY ☁️"; advice = "THỜI TIẾT DỊU MÁT, TẬP TRUNG CAO ĐỘ NÀO!"
         elif wcode in [51, 53, 55, 61, 63, 65]: condition = "CÓ MƯA 🌧️"; advice = "TRỜI MƯA, ĐƯỜNG TRƠN. CÁC BTV ĐI LẠI CẨN THẬN!"
         elif wcode >= 95: condition = "GIÔNG BÃO ⛈️"; advice = "THỜI TIẾT XẤU. HẠN CHẾ RA NGOÀI."
         return f"{temp}°C - {condition}", advice
-    except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
+    except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NHÉ!"
 
 # --- 1. DANH SÁCH CHỨC DANH ---
 ROLES_HEADER = [
-    "LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
-    "TRỰC LỊCH PHÁT SÓNG", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
-    "TRỰC QUẢN TRỊ CỔNG TTĐT", "TRỰC QUẢN TRỊ APP"
+    "LÃNH ĐẠO BAN",                         # 0
+    "TRỰC THƯ KÝ TÒA SOẠN",                 # 1
+    "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",   # 2 (BTV 1)
+    "TRỰC LỊCH PHÁT SÓNG",                  # 3 (TCSX)
+    "TRỰC THƯ KÝ TÒA SOẠN",                 # 4
+    "TRỰC SẢN XUẤT VIDEO CLIP, LPS",        # 5
+    "TRỰC QUẢN TRỊ CỔNG TTĐT",              # 6 (BTV 2)
+    "TRỰC QUẢN TRỊ APP"                     # 7 (BTV 3)
 ]
 
 # --- 2. CÁC TÙY CHỌN ---
@@ -70,8 +79,8 @@ VN_COLS_TRUCSO = {"STT": "STT", "NỘI DUNG": "Nội dung", "ĐỊNH DẠNG": "�
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
-# ================= 1. BACKEND TỐI ƯU =================
-@st.cache_resource(ttl=3600) # Cache kết nối 1 tiếng
+# ================= 1. BACKEND =================
+@st.cache_resource(ttl=3600)
 def get_gspread_client_cached():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -80,34 +89,111 @@ def get_gspread_client_cached():
         return gspread.authorize(creds)
     except Exception as e: st.error(f"🔴 Lỗi chứng thực: {e}"); return None
 
-def ket_noi_sheet(sheet_name):
+def ket_noi_sheet(sheet_name_or_url):
     client = get_gspread_client_cached()
     if not client: return None
-    try: return client.open(sheet_name)
-    except Exception as e: st.error(f"🔴 Lỗi kết nối '{sheet_name}': {e}"); st.stop()
+    try:
+        if "http" in sheet_name_or_url: return client.open_by_url(sheet_name_or_url)
+        else: return client.open(sheet_name_or_url)
+    except Exception as e: st.error(f"🔴 Lỗi kết nối sheet: {e}"); st.stop()
 
-# --- HÀM ĐỌC DỮ LIỆU AN TOÀN (RETRY LOGIC) ---
 def safe_read_records(wks):
     for i in range(3):
         try: return pd.DataFrame(wks.get_all_records())
         except: time.sleep(1)
     return pd.DataFrame()
 
-# --- HÀM TẢI DỮ LIỆU CHUNG (QUAN TRỌNG: CACHED) ---
-@st.cache_data(ttl=600) # Cache dữ liệu 10 phút, chỉ tải lại khi cần
+def safe_read_values(wks):
+    for i in range(3):
+        try: 
+            data = wks.get_all_values()
+            if len(data) > 4: return pd.DataFrame(data[4:], columns=data[3])
+            return pd.DataFrame(columns=CONTENT_HEADER)
+        except: time.sleep(1)
+    return pd.DataFrame(columns=CONTENT_HEADER)
+
+# --- THUẬT TOÁN ĐỌC LỊCH PHỨC TẠP (QUAN TRỌNG) ---
+def lay_nhan_su_tu_lich_phuc_tap(target_date_obj):
+    """
+    Tìm ngày 02/01/2026 bất kỳ đâu trong sheet, sau đó quét dọc xuống để tìm người trực.
+    """
+    try:
+        if "docs.google.com" not in LINK_LICH_TONG: return [], []
+
+        sh_lich = ket_noi_sheet(LINK_LICH_TONG)
+        wks_lich = sh_lich.get_worksheet(0) # Mặc định lấy sheet đầu tiên
+        
+        # Lấy toàn bộ dữ liệu 1 lần để không tốn quota
+        data = wks_lich.get_all_values()
+        
+        target_str = target_date_obj.strftime("%d/%m/%Y") # Ví dụ: 02/01/2026
+        
+        found_col_idx = -1
+        found_row_idx = -1 
+        
+        # 1. Quét tìm tọa độ ngày
+        for r_idx, row in enumerate(data):
+            for c_idx, cell_val in enumerate(row):
+                # Tìm chuỗi ngày (xóa khoảng trắng thừa)
+                if target_str in str(cell_val).strip():
+                    found_row_idx = r_idx
+                    found_col_idx = c_idx
+                    break
+            if found_row_idx != -1: break
+            
+        if found_row_idx == -1: return [], []
+
+        # 2. Quét xuống dưới để tìm người
+        list_tcsx = []
+        list_btv = []
+        
+        scan_range = 40 # Quét 40 dòng phía dưới ngày tìm thấy
+        current_row = found_row_idx + 1
+        
+        while current_row < len(data) and current_row < found_row_idx + scan_range:
+            row_data = data[current_row]
+            if len(row_data) > found_col_idx:
+                # Ô nội dung trực (x, trực số, tcsx)
+                cell_val = str(row_data[found_col_idx]).strip().lower()
+                
+                # Điều kiện nhận diện trực
+                is_working = False
+                is_tcsx = False
+                
+                if "tcsx" in cell_val: 
+                    is_working = True; is_tcsx = True
+                elif "trực số" in cell_val or cell_val == "x":
+                    is_working = True
+                
+                if is_working:
+                    # Lấy tên ở Cột B (Index 1) - Cấu trúc file mẫu của bạn
+                    # Nếu file mẫu có cột A trống, cột B là tên
+                    name = ""
+                    if len(row_data) > 1: name = row_data[1].strip()
+                    
+                    if name and name != "--":
+                        if is_tcsx: list_tcsx.append(name)
+                        else: list_btv.append(name)
+            current_row += 1
+            
+        return list_tcsx, list_btv
+
+    except Exception as e:
+        # st.error(f"Lỗi đọc lịch: {e}")
+        return [], []
+
+# --- HÀM TẢI DỮ LIỆU CHUNG ---
+@st.cache_data(ttl=600)
 def load_all_data():
     try:
         sh = ket_noi_sheet(SHEET_MAIN)
         df_u = safe_read_records(sh.worksheet("TaiKhoan"))
         df_d = safe_read_records(sh.worksheet("DuAn"))
         df_c = safe_read_records(sh.worksheet("CongViec"))
-        # Sheet ViecCaNhan
         try: wks_cn = sh.worksheet("ViecCaNhan"); df_cn = safe_read_records(wks_cn)
         except: df_cn = pd.DataFrame()
-        # Sheet NhatKy
         try: wks_nk = sh.worksheet("NhatKy"); df_nk = safe_read_records(wks_nk)
         except: df_nk = pd.DataFrame()
-        
         return df_u, df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
@@ -149,10 +235,7 @@ def dinh_dang_dong_moi(wks, row_idx):
 if 'dang_nhap' not in st.session_state: st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
 sh_main = ket_noi_sheet(SHEET_MAIN)
 
-# --- LOAD DATA (TỐI ƯU HÓA) ---
-# Tải tất cả dữ liệu cần thiết một lần
 df_users, df_duan, df_cv, df_cn, df_log = load_all_data()
-
 list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
 list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
 
@@ -200,8 +283,6 @@ else:
     # ================= TAB 1: VIỆC CÁ NHÂN =================
     with tabs[0]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
-        
-        # Đảm bảo sheet tồn tại (có thể bỏ qua nếu đã tạo thủ công)
         try: wks_canhan = sh_main.worksheet("ViecCaNhan")
         except: 
             wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
@@ -210,8 +291,6 @@ else:
         col_view, col_date = st.columns([1, 2])
         view_mode = col_view.radio("Xem theo:", ["Hôm nay", "Tuần này", "Tháng này"], horizontal=True)
         today = date.today()
-        
-        # Lấy dữ liệu từ cache df_cn
         my_tasks = [t for t in df_cn.to_dict('records') if str(t.get('User')) == curr_name]
         
         filtered_tasks = []
@@ -275,6 +354,8 @@ else:
                             row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
                             try: dl = row['Deadline'].split(" ")[1]
                             except: dl = today.strftime("%d/%m/%Y")
+                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     # ================= TAB 2: CÔNG VIỆC CHUNG =================
@@ -327,7 +408,6 @@ else:
                             e_nt = ce2.text_area("GHI CHÚ", r_dat.get('GhiChu',''))
                             if st.form_submit_button("CẬP NHẬT"):
                                 with st.spinner("Đang cập nhật..."):
-                                    # Tìm đúng dòng trong sheet gốc
                                     w = sh_main.worksheet("CongViec")
                                     cell = w.find(r_dat['TenViec']) 
                                     if cell:
@@ -383,10 +463,32 @@ else:
                 if not tab_exists:
                     if target_date >= today_vn:
                         st.warning(f"CHƯA CÓ SỔ TRỰC NGÀY {tab_name_current}.")
+                        
+                        # --- TỰ ĐỘNG LẤY TÊN TỪ LỊCH ---
+                        auto_tcsx, auto_btv = lay_nhan_su_tu_lich_phuc_tap(target_date)
+                        default_roster = [""] * len(ROLES_HEADER)
+                        
+                        # Điền TCSX (Vị trí 3: TRỰC LỊCH PHÁT SÓNG)
+                        if auto_tcsx: default_roster[3] = auto_tcsx[0]
+                        
+                        # Điền BTV Random vào 2, 6, 7
+                        random.shuffle(auto_btv)
+                        if len(auto_btv) > 0: default_roster[2] = auto_btv[0] # MXH + Video
+                        if len(auto_btv) > 1: default_roster[6] = auto_btv[1] # Cổng TTĐT
+                        if len(auto_btv) > 2: default_roster[7] = auto_btv[2] # App
+
                         with st.form("init_roster"):
                             cols = st.columns(3); roster_vals = []
                             for i, r_t in enumerate(ROLES_HEADER):
-                                with cols[i%3]: val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, key=f"cr_{i}"); roster_vals.append(val if val != "--" else "")
+                                with cols[i%3]: 
+                                    def_idx = 0
+                                    # Kiểm tra xem tên tự động có trong list_nv không
+                                    if default_roster[i] in list_nv:
+                                        def_idx = list_nv.index(default_roster[i]) + 1
+                                    
+                                    val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, index=def_idx, key=f"cr_{i}")
+                                    roster_vals.append(val if val != "--" else "")
+                            
                             if st.form_submit_button("🚀 TẠO VỎ TRỰC MỚI"):
                                 with st.spinner("Đang tạo vỏ..."):
                                     try:
