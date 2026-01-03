@@ -23,7 +23,7 @@ SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1lsm4FxTPMTmDbc50xq5ldbtCb7PIc-gbk5PMLHdzu7Y/edit?usp=sharing"
 
 # 🔥 Dán link file Lịch trực tổng vào đây
-LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/YOUR_EXTERNAL_SHEET_ID/edit"
+LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?gid=0#gid=0"
 
 # --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
