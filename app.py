@@ -206,7 +206,6 @@ else:
             df_my_view = pd.DataFrame(filtered_tasks)
             df_my_view['Xong'] = df_my_view['TrangThai'].apply(lambda x: True if str(x).upper() == "TRUE" else False)
             
-            # CHỈ HIỂN THỊ CÁC CỘT CẦN THIẾT (BỎ CỘT NGUỒN)
             edited_df = st.data_editor(
                 df_my_view[['TenViec', 'Ngay', 'GhiChu', 'Xong']],
                 column_config={
@@ -380,7 +379,9 @@ else:
                                     w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_current}")
                                     w.update_cell(2, 1, "DANH SÁCH TRỰC:")
                                     for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
-                                    w.update_cell(3, 1, "NHÂN SỰ:"); for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
+                                    w.update_cell(3, 1, "NHÂN SỰ:")
+                                    for i, v in enumerate(roster_vals): 
+                                        w.update_cell(3, i+2, v)
                                     w.append_row(CONTENT_HEADER); st.info("ĐANG ĐỊNH DẠNG..."); dinh_dang_dep(w); st.success("ĐÃ TẠO XONG!"); st.rerun()
                                 except Exception as e: st.error(str(e))
                     else: st.error("KHÔNG TÌM THẤY DỮ LIỆU CỦA NGÀY HÔM QUA (CHƯA ĐƯỢC TẠO).")
@@ -424,7 +425,11 @@ else:
                                 for i, v in enumerate(new_roster_vals): wks_today.update_cell(3, i+2, v)
                                 st.success("ĐÃ CẬP NHẬT!"); st.rerun()
                     with tab_del_vo:
-                        st.error("⚠️ HÀNH ĐỘNG NÀY SẼ XÓA TOÀN BỘ DỮ LIỆU NGÀY NÀY!"); if st.button("XÁC NHẬN XÓA SỔ"): sh_trucso.del_worksheet(wks_today); st.success("ĐÃ XÓA!"); st.rerun()
+                        st.error("⚠️ HÀNH ĐỘNG NÀY SẼ XÓA TOÀN BỘ DỮ LIỆU NGÀY NÀY!")
+                        if st.button("XÁC NHẬN XÓA SỔ"): 
+                            sh_trucso.del_worksheet(wks_today)
+                            st.success("ĐÃ XÓA!")
+                            st.rerun()
 
         if tab_exists:
             with st.expander("ℹ️ XEM EKIP TRỰC", expanded=True):
