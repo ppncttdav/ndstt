@@ -10,6 +10,8 @@ import requests
 import plotly.express as px
 import time
 import random
+import re
+import io
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -21,8 +23,6 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1lsm4FxTPMTmDbc50xq5ldbtCb7PIc-gbk5PMLHdzu7Y/edit?usp=sharing"
-
-# 🔥 Dán link file Lịch trực tổng vào đây
 LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?gid=0#gid=0"
 
 # --- CẤU HÌNH THỜI GIAN VN ---
@@ -51,17 +51,11 @@ def get_weather_and_advice():
         return f"{temp}°C - {condition}", advice
     except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
 
-# --- 1. DANH SÁCH CHỨC DANH (QUAN TRỌNG: KHÔNG ĐỔI THỨ TỰ) ---
-# Index: 0:LĐ, 1:TKTS(Web), 2:MXH, 3:LPS, 4:TKTS(FB), 5:Video, 6:Web, 7:App
+# --- 1. DANH SÁCH CHỨC DANH ---
 ROLES_HEADER = [
-    "LÃNH ĐẠO BAN",                         # 0
-    "TRỰC THƯ KÝ TÒA SOẠN",                 # 1
-    "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",   # 2
-    "TRỰC LỊCH PHÁT SÓNG",                  # 3
-    "TRỰC THƯ KÝ TÒA SOẠN",                 # 4
-    "TRỰC SẢN XUẤT VIDEO CLIP, LPS",        # 5
-    "TRỰC QUẢN TRỊ CỔNG TTĐT",              # 6
-    "TRỰC QUẢN TRỊ APP"                     # 7
+    "LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
+    "TRỰC LỊCH PHÁT SÓNG", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
+    "TRỰC QUẢN TRỊ CỔNG TTĐT", "TRỰC QUẢN TRỊ APP"
 ]
 
 # --- 2. CÁC TÙY CHỌN ---
@@ -70,7 +64,7 @@ OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
 OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Hủy"]
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
-# --- 3. TIÊU ĐỀ CỘT (ĐÃ THÊM TEXT CỦA TIN) ---
+# --- 3. TIÊU ĐỀ CỘT ---
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "Ý KIẾN ĐIỀU CHỈNH", "TEXT CỦA TIN", "LINK DUYỆT", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM"]
 
 # --- TỪ ĐIỂN HIỂN THỊ ---
@@ -149,89 +143,6 @@ def lay_nhan_su_tu_lich_phuc_tap(target_date_obj):
         return list_tcsx, list_btv
     except: return [], []
 
-# --- HÀM TỰ ĐỘNG CẬP NHẬT THỐNG KÊ (AUTO-FILL) ---
-def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
-    """
-    Hàm tự động điền người trực vào sheet 'ThongKe'.
-    - roster: List tên nhân sự [LĐ, TKTS, MXH, LPS, TKTS2, Video, Web, App]
-    - Logic: TKTS (idx 1) và LPS (idx 3) làm cả 2 ca. Các vị trí khác chỉ làm Ca 1.
-    """
-    try:
-        # 1. Kết nối hoặc tạo sheet ThongKe
-        try:
-            wks_stats = sh_trucso.worksheet("ThongKe")
-        except:
-            wks_stats = sh_trucso.add_worksheet("ThongKe", 1000, 20)
-            header_stats = ["Ngày trực", "Ca trực", 
-                            "Trực thư ký tòa soạn 450.000 (Web)", 
-                            "Trực quản trị MXH 350.000", 
-                            "Trực lịch phát sóng 450.000", 
-                            "Trực thư ký tòa soạn 450.000 (FB, YT,TK)", 
-                            "Trực sản xuất video clip, lịch phát sóng 450.000", 
-                            "Trực quản trị cổng thông tin điện tử 350.000", 
-                            "Trực quản trị app 350.000"]
-            wks_stats.append_row(header_stats)
-            format_cell_range(wks_stats, "A1:I1", CellFormat(textFormat=TextFormat(bold=True), horizontalAlignment='CENTER'))
-
-        # 2. Chuẩn bị dữ liệu 2 Ca
-        # Mapping từ Roster (App) sang Cột Thống kê (Sheet):
-        # Roster Index: 0:LĐ(Bỏ), 1:TKTS1, 2:MXH, 3:LPS, 4:TKTS2, 5:Video, 6:Web, 7:App
-        
-        # Dữ liệu Ca 1 (Full các vị trí trừ Lãnh đạo)
-        # Thứ tự cột trong ThongKe: TKTS1, MXH, LPS, TKTS2, Video, Web, App
-        data_ca1 = [
-            roster[1], # TKTS1
-            roster[2], # MXH
-            roster[3], # LPS
-            roster[4], # TKTS2
-            roster[5], # Video
-            roster[6], # Web
-            roster[7]  # App
-        ]
-        row_ca1 = [date_str, "1"] + data_ca1
-
-        # Dữ liệu Ca 2 (Chỉ TKTS1 và LPS)
-        data_ca2 = [
-            roster[1], # TKTS1 (Làm tiếp)
-            "",        # MXH (Nghỉ)
-            roster[3], # LPS (Làm tiếp)
-            "",        # TKTS2 (Nghỉ)
-            "",        # Video (Nghỉ)
-            "",        # Web (Nghỉ)
-            ""         # App (Nghỉ)
-        ]
-        row_ca2 = [date_str, "2"] + data_ca2
-
-        # 3. Tìm vị trí để ghi
-        cell_found = wks_stats.find(date_str)
-        
-        if cell_found:
-            # Nếu ngày đã tồn tại -> Cập nhật (Giả định 2 dòng Ca 1, Ca 2 nằm liền nhau)
-            r = cell_found.row
-            # Update Ca 1
-            for i, val in enumerate(row_ca1): wks_stats.update_cell(r, i+1, val)
-            # Update Ca 2 (Dòng kế tiếp)
-            for i, val in enumerate(row_ca2): wks_stats.update_cell(r+1, i+1, val)
-            
-            # Tô màu lại
-            format_cell_range(wks_stats, f"A{r}:I{r}", CellFormat(backgroundColor=Color(1, 1, 1))) # Trắng
-            format_cell_range(wks_stats, f"A{r+1}:I{r+1}", CellFormat(backgroundColor=Color(1, 1, 0))) # Vàng
-        else:
-            # Nếu chưa có -> Thêm mới xuống dưới cùng
-            wks_stats.append_row(row_ca1)
-            wks_stats.append_row(row_ca2)
-            
-            # Tô màu 2 dòng vừa thêm
-            last_row = len(wks_stats.get_all_values())
-            # Dòng Ca 1 (last_row - 1) -> Trắng
-            format_cell_range(wks_stats, f"A{last_row-1}:I{last_row-1}", CellFormat(backgroundColor=Color(1, 1, 1)))
-            # Dòng Ca 2 (last_row) -> Vàng
-            format_cell_range(wks_stats, f"A{last_row}:I{last_row}", CellFormat(backgroundColor=Color(1, 1, 0)))
-            
-    except Exception as e:
-        print(f"Lỗi cập nhật thống kê: {e}") 
-        # Không hiển thị lỗi ra UI để tránh làm phiền user, chỉ log ở server
-
 # --- HÀM TẢI DỮ LIỆU CHUNG ---
 @st.cache_data(ttl=600)
 def load_all_data():
@@ -264,6 +175,36 @@ def check_quyen(current_user, role, row, df_da):
     except: pass
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
+
+# --- HÀM TẠO LỊCH PHÁT SÓNG TỰ ĐỘNG ---
+def parse_khung_cell(cell_val):
+    if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
+    # Tách dòng
+    lines = [line.strip() for line in str(cell_val).split('\n') if line.strip()]
+    if not lines: return "", ""
+    
+    title = lines[0]
+    # Dùng REGEX để lọc nhiễu (Ghi chú, Thời lượng)
+    title = re.sub(r'\(.*?\)', '', title) # Bỏ ngoặc đơn (PL...)
+    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) # Bỏ 15', 30m ở cuối
+    title = re.sub(r'\s*\d+\s*$', '', title) # Bỏ số thừa
+    title = title.split('/')[0].strip() # Lấy phần trước dấu /
+    
+    desc = ""
+    if len(lines) > 1:
+        for line in lines[1:]:
+            # Bỏ qua các dòng chứa ghi chú nội bộ
+            if not line.startswith('(') and "PL" not in line and "PM" not in line:
+                desc = line.split('/')[0].strip()
+                break
+    return title, desc
+
+def format_time_col(t):
+    if pd.isna(t): return ""
+    try:
+        if isinstance(t, str): return t
+        return t.strftime("%H:%M")
+    except: return str(t)
 
 # --- FORMATTING ---
 def dinh_dang_dep(wks):
@@ -326,12 +267,12 @@ else:
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     sh_trucso = ket_noi_sheet(SHEET_TRUCSO)
     
-    # --- ĐỔI VỊ TRÍ TAB: TRỰC SỐ LÊN ĐẦU ---
-    list_tabs = ["📝 TRỰC SỐ", "✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
+    # --- CẬP NHẬT TABS: THÊM TAB "TẠO LPS TỰ ĐỘNG" ---
+    list_tabs = ["📝 TRỰC SỐ", "📺 TẠO LPS TỰ ĐỘNG", "✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
     tabs = st.tabs(list_tabs)
 
-    # ================= TAB 0: TRỰC SỐ (VỊ TRÍ ĐẦU TIÊN) =================
+    # ================= TAB 0: TRỰC SỐ =================
     with tabs[0]:
         today_vn = get_vn_time().date()
         yest_vn = today_vn - timedelta(days=1); tom_vn = today_vn + timedelta(days=1)
@@ -345,7 +286,7 @@ else:
         else: target_date = today_vn
         tab_name_current = target_date.strftime("%d-%m-%Y"); date_str_display = target_date.strftime("%d/%m/%Y")
         
-        with c_nav2: st.header(f"📝 VỎ TRỰC SỐ NGÀY: {tab_name_current}")
+        with c_nav2: st.header(f"📝 TRỰC SỐ NGÀY: {tab_name_current}")
 
         is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat']); use_archive = False
         if is_shift_admin:
@@ -382,12 +323,11 @@ else:
                                     def_idx = 0
                                     if default_roster[i] in list_nv:
                                         def_idx = list_nv.index(default_roster[i]) + 1
-                                    
                                     val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, index=def_idx, key=f"cr_{i}")
                                     roster_vals.append(val if val != "--" else "")
                             
                             if st.form_submit_button("🚀 TẠO VỎ TRỰC MỚI"):
-                                with st.spinner("Đang tạo vỏ và cập nhật thống kê..."):
+                                with st.spinner("Đang tạo vỏ..."):
                                     try:
                                         w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
                                         w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {tab_name_current}")
@@ -395,16 +335,11 @@ else:
                                         for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
                                         w.update_cell(3, 1, "NHÂN SỰ:")
                                         for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
-                                        w.append_row(CONTENT_HEADER); dinh_dang_dep(w); 
-                                        
-                                        # --- GHI SANG THỐNG KÊ ---
-                                        tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, roster_vals)
-
-                                        st.success("ĐÃ TẠO XONG VÀ CẬP NHẬT THỐNG KÊ!"); st.rerun()
+                                        w.append_row(CONTENT_HEADER); dinh_dang_dep(w); st.success("ĐÃ TẠO XONG!"); st.rerun()
                                     except Exception as e: st.error(str(e))
                     else: st.error("KHÔNG TÌM THẤY DỮ LIỆU CỦA NGÀY HÔM QUA (CHƯA ĐƯỢC TẠO).")
                 else:
-                    st.success("Đã có vỏ.")
+                    st.success("ĐÃ CÓ VỎ TRỰC."); st.subheader("📢 GỬI THÔNG BÁO CA TRỰC")
                     try:
                         r_names = wks_today.row_values(3)[1:]
                         name_ld = get_short_name(r_names[0] if len(r_names) > 0 else "")
@@ -442,11 +377,7 @@ else:
                             if st.form_submit_button("CẬP NHẬT EKIP"):
                                 with st.spinner("Đang cập nhật..."):
                                     for i, v in enumerate(new_roster_vals): wks_today.update_cell(3, i+2, v)
-                                    
-                                    # --- AUTO FILL THONG KE KHI UPDATE ---
-                                    tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, new_roster_vals)
-
-                                    st.success("ĐÃ CẬP NHẬT VÀ LƯU THỐNG KÊ!"); st.rerun()
+                                    st.success("ĐÃ CẬP NHẬT!"); st.rerun()
                     with tab_del_vo:
                         st.error("⚠️ HÀNH ĐỘNG NÀY SẼ XÓA TOÀN BỘ DỮ LIỆU NGÀY NÀY!")
                         if st.button("XÁC NHẬN XÓA SỔ"): 
@@ -485,8 +416,8 @@ else:
                 ts_giodang = c7.time_input("GIỜ ĐĂNG (DK)", value=None)
                 ts_ngaydang = c8.date_input("NGÀY ĐĂNG", value=datetime.strptime(tab_name_current, "%d-%m-%Y").date(), format="DD/MM/YYYY")
                 
-                # --- TRƯỜNG TEXT CỦA TIN ---
-                st.markdown("**NỘI DUNG CAPTION/TEXT ĐỂ DUYỆT:**")
+                # --- THÊM TEXT CỦA TIN ---
+                st.markdown("**NỘI DUNG CAPTION/TEXT:**")
                 ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
 
                 c9, c10 = st.columns(2)
@@ -498,7 +429,6 @@ else:
                             all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 4) + 1
                             plats = ts_nentang if ts_nentang else [""]
                             for p in plats:
-                                # Chèn text vào index 9 (Cột 10)
                                 row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), ts_ykien, ts_texttin, ts_linkduyet, ts_giodang.strftime("%H:%M") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp]
                                 wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
                             st.success("ĐÃ LƯU!"); st.rerun()
@@ -542,17 +472,112 @@ else:
                                     wks_today.update_cell(r_sh, 2, e_nd); wks_today.update_cell(r_sh, 3, e_dd)
                                     wks_today.update_cell(r_sh, 4, e_nt); wks_today.update_cell(r_sh, 5, e_st)
                                     wks_today.update_cell(r_sh, 8, e_ns); wks_today.update_cell(r_sh, 9, e_yk)
-                                    wks_today.update_cell(r_sh, 10, e_texttin) # Cột J
-                                    wks_today.update_cell(r_sh, 11, e_ld)      # Cột K
-                                    wks_today.update_cell(r_sh, 12, "")        # Giờ đăng (tạm để trống vì ko có trong form sửa)
-                                    wks_today.update_cell(r_sh, 13, e_ndang.strftime("%d/%m/%Y"))
+                                    wks_today.update_cell(r_sh, 10, e_texttin)
+                                    wks_today.update_cell(r_sh, 11, e_ld); wks_today.update_cell(r_sh, 13, e_ndang.strftime("%d/%m/%Y"))
                                     wks_today.update_cell(r_sh, 14, e_lsp)
                                     st.success("ĐÃ CẬP NHẬT!"); st.rerun()
-                st.dataframe(df_content, use_container_width=True, hide_index=True, column_config={"LINK DUYỆT": st.column_config.LinkColumn(display_text="Xem"),"LINK SẢN PHẨM": st.column_config.LinkColumn(display_text="Link"), "TEXT CỦA TIN": st.column_config.TextColumn("Caption", width="large")})
+                st.dataframe(df_content.drop(columns=['TEXT CỦA TIN'], errors='ignore'), use_container_width=True, hide_index=True)
             else: st.info("CHƯA CÓ TIN BÀI NÀO.")
 
-    # ================= TAB 2: CHECKLIST CÁ NHÂN =================
+    # ================= TAB 1: TẠO LPS TỰ ĐỘNG (TAB MỚI) =================
     with tabs[1]:
+        st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
+        st.info("Upload file Excel 'Khung Vietnam Today' để hệ thống tự động bóc tách chương trình và xuất Lịch Phát Sóng (LPS).")
+        
+        uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung", type=["xlsx", "xls"])
+        
+        if uploaded_file is not None:
+            try:
+                xls = pd.ExcelFile(uploaded_file)
+                sheet_names = xls.sheet_names
+                
+                col_sh, col_day = st.columns(2)
+                selected_sheet = col_sh.selectbox("📍 Chọn Sheet tuần cần xuất", sheet_names)
+                
+                days_of_week = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+                selected_day = col_day.selectbox("📅 Chọn Ngày xuất LPS", days_of_week)
+                
+                if st.button("🚀 BẮT ĐẦU TẠO LPS", type="primary"):
+                    with st.spinner(f"Đang phân tích dữ liệu {selected_day}..."):
+                        df_khung = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None)
+                        
+                        # Từ điển từ khóa để dò tìm đúng Cột của Ngày
+                        day_keywords = {
+                            "Thứ Hai": ["thứ hai", "monday", "mon"],
+                            "Thứ Ba": ["thứ ba", "tuesday", "tue"],
+                            "Thứ Tư": ["thứ tư", "wednesday", "wed"],
+                            "Thứ Năm": ["thứ năm", "thursday", "thu"],
+                            "Thứ Sáu": ["thứ sáu", "friday", "fri"],
+                            "Thứ Bảy": ["thứ bảy", "saturday", "sat"],
+                            "Chủ Nhật": ["chủ nhật", "sunday", "sun"]
+                        }
+                        
+                        target_col_idx = -1
+                        keywords = day_keywords[selected_day]
+                        
+                        # Dò tìm Cột chứa Ngày trong 4 dòng đầu
+                        for r_idx in range(4):
+                            for c_idx in range(len(df_khung.columns)):
+                                cell_val = str(df_khung.iloc[r_idx, c_idx]).lower()
+                                if any(kw in cell_val for kw in keywords):
+                                    target_col_idx = c_idx
+                                    break
+                            if target_col_idx != -1: break
+                        
+                        # Fallback nếu Regex dò không ra thì lấy cột cứng
+                        if target_col_idx == -1:
+                            fallback_map = {"Thứ Hai": 8, "Thứ Ba": 9, "Thứ Tư": 10, "Thứ Năm": 11, "Thứ Sáu": 12, "Thứ Bảy": 13, "Chủ Nhật": 14}
+                            target_col_idx = fallback_map[selected_day]
+                        
+                        # Giả định cột Thời gian luôn nằm ở Cột D (Index 3)
+                        time_col_idx = 3 
+                        
+                        lps_data = []
+                        # Quét từ dòng thứ 5 trở đi (bỏ header)
+                        for r_idx in range(5, len(df_khung)):
+                            time_val = df_khung.iloc[r_idx, time_col_idx]
+                            content_val = df_khung.iloc[r_idx, target_col_idx]
+                            
+                            # Chỉ lấy dòng có dữ liệu chương trình
+                            if not pd.isna(content_val) and str(content_val).strip() != "":
+                                title, desc = parse_khung_cell(content_val)
+                                formatted_time = format_time_col(time_val)
+                                
+                                # Chỉ đưa vào lịch nếu có Time rõ ràng (hoặc ít nhất có tên Title)
+                                if title:
+                                    lps_data.append({
+                                        "Giờ phát sóng (hh:mm)": formatted_time,
+                                        "Tiêu đề": title,
+                                        "Mô tả": desc
+                                    })
+                        
+                        if lps_data:
+                            df_lps = pd.DataFrame(lps_data)
+                            st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}!")
+                            
+                            # Cho phép User review & sửa nhẹ lại (nếu Regex sót)
+                            st.caption("Bạn có thể chỉnh sửa trực tiếp trong bảng dưới đây trước khi tải về:")
+                            edited_lps = st.data_editor(df_lps, use_container_width=True, hide_index=True)
+                            
+                            # Chức năng tải xuống Excel
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                                edited_lps.to_excel(writer, index=False, sheet_name=selected_day)
+                                
+                            st.download_button(
+                                label="📥 TẢI FILE EXCEL LPS VỀ MÁY",
+                                data=output.getvalue(),
+                                file_name=f"LPS_VNTD_{selected_day}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary"
+                            )
+                        else:
+                            st.warning(f"Không tìm thấy dữ liệu phát sóng nào cho {selected_day} trong Sheet này.")
+            except Exception as e:
+                st.error(f"Đã xảy ra lỗi khi đọc file: {e}")
+
+    # ================= TAB 2: CHECKLIST CÁ NHÂN =================
+    with tabs[2]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
         try: wks_canhan = sh_main.worksheet("ViecCaNhan")
         except: 
@@ -630,7 +655,7 @@ else:
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     # ================= TAB 3: CÔNG VIỆC CHUNG =================
-    with tabs[2]:
+    with tabs[3]:
         st.caption("QUẢN LÝ TIẾN ĐỘ DỰ ÁN TOÀN PHÒNG.")
         with st.expander("➕ TẠO ĐẦU VIỆC MỚI", expanded=False):
             c1, c2 = st.columns(2)
@@ -690,7 +715,7 @@ else:
         else: st.info("CHƯA CÓ CÔNG VIỆC NÀO.")
 
     # ================= TAB 4: DỰ ÁN =================
-    with tabs[3]:
+    with tabs[4]:
         if role == 'LanhDao':
             with st.form("new_da"):
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
@@ -700,7 +725,7 @@ else:
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
     # ================= TAB 5: LỊCH LÀM VIỆC =================
-    with tabs[4]:
+    with tabs[5]:
         st.header("📅 LỊCH LÀM VIỆC & DEADLINE")
         if not df_cv.empty:
             task_list = []
@@ -722,7 +747,7 @@ else:
         else: st.info("CHƯA CÓ CÔNG VIỆC NÀO.")
 
     # ================= TAB 6: EMAIL =================
-    with tabs[5]:
+    with tabs[6]:
         tk = st.selectbox("TK GỬI:", range(10), format_func=lambda x:f"TK {x}")
         to = st.multiselect("ĐẾN:", df_users['Email'].tolist())
         sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
@@ -730,7 +755,7 @@ else:
 
     # ================= CÁC TAB LÃNH ĐẠO (DASHBOARD, LOGS) =================
     if role == 'LanhDao':
-        with tabs[6]:
+        with tabs[7]:
             st.header("📊 DASHBOARD TỔNG QUAN")
             if not df_cv.empty:
                 col1, col2 = st.columns(2)
@@ -749,5 +774,5 @@ else:
                 with c4:
                     st_counts = df_content['STATUS'].value_counts().reset_index(); st_counts.columns = ['Status', 'Count']
                     fig_st = px.pie(st_counts, values='Count', names='Status', title='TIẾN ĐỘ TIN BÀI'); st.plotly_chart(fig_st, use_container_width=True)
-        with tabs[7]:
+        with tabs[8]:
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
