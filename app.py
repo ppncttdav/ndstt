@@ -267,7 +267,7 @@ else:
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     sh_trucso = ket_noi_sheet(SHEET_TRUCSO)
     
-    # --- CẬP NHẬT TABS: THÊM TAB "TẠO LPS TỰ ĐỘNG" ---
+    # --- CẬP NHẬT TABS ---
     list_tabs = ["📝 TRỰC SỐ", "📺 TẠO LPS TỰ ĐỘNG", "✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
     tabs = st.tabs(list_tabs)
@@ -479,10 +479,10 @@ else:
                 st.dataframe(df_content.drop(columns=['TEXT CỦA TIN'], errors='ignore'), use_container_width=True, hide_index=True)
             else: st.info("CHƯA CÓ TIN BÀI NÀO.")
 
-    # ================= TAB 1: TẠO LPS TỰ ĐỘNG (TAB MỚI) =================
+    # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
-        st.info("Upload file Excel 'Khung Vietnam Today' để hệ thống tự động bóc tách chương trình và xuất Lịch Phát Sóng (LPS).")
+        st.info("Upload file Excel 'Khung Vietnam Today' để hệ thống tự động bóc tách chương trình và xuất Lịch Phát Sóng (LPS). Các slot Đệm, Thời tiết, Trailer sẽ tự động được lọc bỏ.")
         
         uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung", type=["xlsx", "xls"])
         
@@ -543,8 +543,15 @@ else:
                                 title, desc = parse_khung_cell(content_val)
                                 formatted_time = format_time_col(time_val)
                                 
-                                # Chỉ đưa vào lịch nếu có Time rõ ràng (hoặc ít nhất có tên Title)
                                 if title:
+                                    # --- BỘ LỌC TỪ KHÓA (BỎ QUA THỜI TIẾT, ĐỆM, FILLER, TRAILER) ---
+                                    exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
+                                    title_lower = title.lower()
+                                    
+                                    # Nếu tiêu đề chứa từ khóa bị cấm thì BỎ QUA dòng này
+                                    if any(kw in title_lower for kw in exclude_keywords):
+                                        continue 
+                                        
                                     lps_data.append({
                                         "Giờ phát sóng (hh:mm)": formatted_time,
                                         "Tiêu đề": title,
@@ -553,9 +560,9 @@ else:
                         
                         if lps_data:
                             df_lps = pd.DataFrame(lps_data)
-                            st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}!")
+                            st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}! (Đã lọc bỏ các slot đệm/thời tiết)")
                             
-                            # Cho phép User review & sửa nhẹ lại (nếu Regex sót)
+                            # Cho phép User review & sửa nhẹ lại
                             st.caption("Bạn có thể chỉnh sửa trực tiếp trong bảng dưới đây trước khi tải về:")
                             edited_lps = st.data_editor(df_lps, use_container_width=True, hide_index=True)
                             
@@ -572,7 +579,7 @@ else:
                                 type="primary"
                             )
                         else:
-                            st.warning(f"Không tìm thấy dữ liệu phát sóng nào cho {selected_day} trong Sheet này.")
+                            st.warning(f"Không tìm thấy dữ liệu phát sóng hợp lệ nào cho {selected_day} trong Sheet này.")
             except Exception as e:
                 st.error(f"Đã xảy ra lỗi khi đọc file: {e}")
 
