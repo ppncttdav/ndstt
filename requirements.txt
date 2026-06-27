@@ -2,8 +2,7 @@ streamlit
 pandas
 gspread
 oauth2client
-streamlit-authenticator
-gspread-formatting
+pytz
 requests
 plotly
-streamlit-option-menu
+gspread-formatting
