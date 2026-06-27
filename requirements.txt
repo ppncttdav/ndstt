@@ -6,3 +6,5 @@ pytz
 requests
 plotly
 gspread-formatting
+openpyxl
+xlsxwriter
