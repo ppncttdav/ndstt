@@ -176,34 +176,67 @@ def check_quyen(current_user, role, row, df_da):
     if current_user in str(row.get('NguoiPhuTrach','')): return 1
     return 0
 
-# --- HÀM TẠO LỊCH PHÁT SÓNG TỰ ĐỘNG ---
+# --- CÁC HÀM XỬ LÝ LỊCH PHÁT SÓNG ---
+def format_title_name(text):
+    """Chuẩn hóa tên chương trình: Replace chữ viết tắt và định dạng Title Case chuẩn"""
+    # Xử lý các từ viết tắt cụ thể trước
+    text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
+    
+    # Chuyển về định dạng Title Case
+    text = text.title()
+    
+    # Khôi phục các mạo từ, giới từ về chữ thường (chuẩn tiếng Anh)
+    replacements = {
+        " Of ": " of ",
+        " At ": " at ",
+        " A ": " a ",
+        " An ": " an ",
+        " The ": " the ",
+        " In ": " in ",
+        " On ": " on ",
+        " To ": " to ",
+        " And ": " and "
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+        
+    return text
+
 def parse_khung_cell(cell_val):
     if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
-    # Tách dòng
     lines = [line.strip() for line in str(cell_val).split('\n') if line.strip()]
     if not lines: return "", ""
     
     title = lines[0]
-    # Dùng REGEX để lọc nhiễu (Ghi chú, Thời lượng)
-    title = re.sub(r'\(.*?\)', '', title) # Bỏ ngoặc đơn (PL...)
-    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) # Bỏ 15', 30m ở cuối
+    # Lọc nhiễu
+    title = re.sub(r'\(.*?\)', '', title) # Bỏ ngoặc đơn
+    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) # Bỏ đuôi 15', 30m
     title = re.sub(r'\s*\d+\s*$', '', title) # Bỏ số thừa
-    title = title.split('/')[0].strip() # Lấy phần trước dấu /
+    title = title.split('/')[0].strip() 
+    
+    # Áp dụng chuẩn hóa Tên chương trình
+    title = format_title_name(title)
     
     desc = ""
     if len(lines) > 1:
         for line in lines[1:]:
-            # Bỏ qua các dòng chứa ghi chú nội bộ
             if not line.startswith('(') and "PL" not in line and "PM" not in line:
                 desc = line.split('/')[0].strip()
                 break
     return title, desc
 
 def format_time_col(t):
+    """Định dạng thời gian chuẩn hh:mm:ss"""
     if pd.isna(t): return ""
     try:
-        if isinstance(t, str): return t
-        return t.strftime("%H:%M")
+        if isinstance(t, str):
+            t = t.strip()
+            # Nếu chuỗi đang là hh:mm, nối thêm :00
+            if len(t) == 5 and ":" in t:
+                return f"{t}:00"
+            return t
+        # Nếu là object datetime/time
+        return t.strftime("%H:%M:%S")
     except: return str(t)
 
 # --- FORMATTING ---
@@ -429,7 +462,7 @@ else:
                             all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 4) + 1
                             plats = ts_nentang if ts_nentang else [""]
                             for p in plats:
-                                row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), ts_ykien, ts_texttin, ts_linkduyet, ts_giodang.strftime("%H:%M") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp]
+                                row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), ts_ykien, ts_texttin, ts_linkduyet, ts_giodang.strftime("%H:%M:%S") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp]
                                 wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
                             st.success("ĐÃ LƯU!"); st.rerun()
                         except Exception as e: st.error(f"Lỗi: {e}")
@@ -461,10 +494,19 @@ else:
 
                             ec5, ec6, ec7 = st.columns(3)
                             e_ld = ec5.text_input("LINK DUYỆT", value=r_news['LINK DUYỆT'])
+                            try: 
+                                # Cố gắng parse giờ hiện tại (có thể là hh:mm hoặc hh:mm:ss)
+                                time_str = r_news['GIỜ ĐĂNG']
+                                if time_str.count(":") == 2: val_time = datetime.strptime(time_str, "%H:%M:%S").time()
+                                elif time_str.count(":") == 1: val_time = datetime.strptime(time_str, "%H:%M").time()
+                                else: val_time = None
+                            except: val_time = None
+                            e_giodang = ec6.time_input("GIỜ ĐĂNG DỰ KIẾN", value=val_time)
+                            
                             try: curr_d_val = datetime.strptime(r_news['NGÀY ĐĂNG'], "%d/%m/%Y").date()
                             except: curr_d_val = datetime.now().date()
-                            e_ndang = ec6.date_input("NGÀY ĐĂNG", value=curr_d_val, format="DD/MM/YYYY")
-                            e_lsp = ec7.text_input("LINK SẢN PHẨM", value=r_news['LINK SẢN PHẨM'])
+                            e_ndang = ec7.date_input("NGÀY ĐĂNG", value=curr_d_val, format="DD/MM/YYYY")
+                            e_lsp = st.text_input("LINK SẢN PHẨM", value=r_news['LINK SẢN PHẨM'])
                             e_yk = st.text_input("Ý KIẾN (GHI CHÚ SỬA/DUYỆT)", value=r_news['Ý KIẾN ĐIỀU CHỈNH'])
                             if st.form_submit_button("CẬP NHẬT DÒNG TIN"):
                                 with st.spinner("Đang cập nhật..."):
@@ -473,7 +515,9 @@ else:
                                     wks_today.update_cell(r_sh, 4, e_nt); wks_today.update_cell(r_sh, 5, e_st)
                                     wks_today.update_cell(r_sh, 8, e_ns); wks_today.update_cell(r_sh, 9, e_yk)
                                     wks_today.update_cell(r_sh, 10, e_texttin)
-                                    wks_today.update_cell(r_sh, 11, e_ld); wks_today.update_cell(r_sh, 13, e_ndang.strftime("%d/%m/%Y"))
+                                    wks_today.update_cell(r_sh, 11, e_ld)
+                                    wks_today.update_cell(r_sh, 12, e_giodang.strftime("%H:%M:%S") if e_giodang else "")
+                                    wks_today.update_cell(r_sh, 13, e_ndang.strftime("%d/%m/%Y"))
                                     wks_today.update_cell(r_sh, 14, e_lsp)
                                     st.success("ĐÃ CẬP NHẬT!"); st.rerun()
                 st.dataframe(df_content.drop(columns=['TEXT CỦA TIN'], errors='ignore'), use_container_width=True, hide_index=True)
@@ -553,14 +597,14 @@ else:
                                         continue 
                                         
                                     lps_data.append({
-                                        "Giờ phát sóng (hh:mm)": formatted_time,
+                                        "Giờ phát sóng (hh:mm:ss)": formatted_time, # CẬP NHẬT HEADER HH:MM:SS
                                         "Tiêu đề": title,
                                         "Mô tả": desc
                                     })
                         
                         if lps_data:
                             df_lps = pd.DataFrame(lps_data)
-                            st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}! (Đã lọc bỏ các slot đệm/thời tiết)")
+                            st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}! (Đã chuẩn hóa định dạng)")
                             
                             # Cho phép User review & sửa nhẹ lại
                             st.caption("Bạn có thể chỉnh sửa trực tiếp trong bảng dưới đây trước khi tải về:")
@@ -679,7 +723,7 @@ else:
             if st.button("💾 LƯU & GỬI EMAIL"):
                 with st.spinner("Đang lưu..."):
                     try:
-                        dl_fmt = f"{tv_time.strftime('%H:%M')} {tv_date.strftime('%d/%m/%Y')}"
+                        dl_fmt = f"{tv_time.strftime('%H:%M:%S')} {tv_date.strftime('%d/%m/%Y')}"
                         sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
                         ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
                         if opt_nv and tv_nguoi:
@@ -738,7 +782,7 @@ else:
             task_list = []
             for i, r in df_cv.iterrows():
                 try:
-                    dl_str = r['Deadline']; dl_dt = datetime.strptime(dl_str, "%H:%M %d/%m/%Y")
+                    dl_str = r['Deadline']; dl_dt = datetime.strptime(dl_str, "%H:%M:%S %d/%m/%Y")
                     start_dt = dl_dt - timedelta(days=2) 
                     if role != 'LanhDao' and curr_name not in r['NguoiPhuTrach']: continue
                     task_list.append({"Task": r['TenViec'], "Start": start_dt, "Finish": dl_dt, "Assignee": r['NguoiPhuTrach'], "Status": r['TrangThai'], "Project": r['DuAn']})
