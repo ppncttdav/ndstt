@@ -597,7 +597,7 @@ else:
                                         continue 
                                         
                                     lps_data.append({
-                                        "Giờ phát sóng (hh:mm:ss)": formatted_time, # CẬP NHẬT HEADER HH:MM:SS
+                                        "Giờ phát sóng (hh:mm)": formatted_time, # CẬP NHẬT HEADER HH:MM:SS
                                         "Tiêu đề": title,
                                         "Mô tả": desc
                                     })
