@@ -165,6 +165,20 @@ def get_cached_schedule(url, sheet_id):
         return wks.get_all_values()
     except: return None
 
+# HÀM BỎ QUA API ĐỂ TẢI THẲNG FILE PUBLIC THÀNH EXCEL 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_public_gsheet_as_excel(url):
+    try:
+        sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+        if not sheet_id_match: return None
+        sheet_id = sheet_id_match.group(1)
+        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+        res = requests.get(export_url, timeout=10)
+        if res.status_code == 200:
+            return res.content
+    except: pass
+    return None
+
 def clear_cache_and_rerun(): st.cache_data.clear(); st.rerun()
 
 def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
@@ -791,64 +805,58 @@ else:
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ================= TAB TẠO LPS TỰ ĐỘNG (ZERO-CLICK) =================
+    # ================= TAB TẠO LPS TỰ ĐỘNG (ZERO-CLICK BYPASS) =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
-        st.info("Hệ thống tự động liên kết với Google Sheet Khung Vietnam Today. Mặc định tải sẵn LPS của ngày mai để tiết kiệm thời gian.")
+        st.info("Hệ thống giả lập trình duyệt tải ngầm File Khung để bóc tách tự động LPS ngày mai (Không yêu cầu cấp quyền).")
         
         tom_date = get_vn_time().date() + timedelta(days=1)
-        
         col_d, col_s = st.columns([1, 2])
         target_date_lps = col_d.date_input("📅 Chọn Ngày phát sóng:", value=tom_date, format="DD/MM/YYYY")
         
         @st.cache_data(ttl=1800, show_spinner=False)
-        def get_khung_sheets():
+        def get_public_gsheet_as_excel(url):
             try:
-                client = get_gspread_client_cached()
-                if client:
-                    sh = client.open_by_url(LINK_KHUNG_LPS)
-                    return [w.title for w in sh.worksheets()]
-            except: return []
-            return []
-            
-        @st.cache_data(ttl=600, show_spinner=False)
-        def get_khung_data(sheet_title):
-            try:
-                client = get_gspread_client_cached()
-                if client:
-                    sh = client.open_by_url(LINK_KHUNG_LPS)
-                    wks = sh.worksheet(sheet_title)
-                    data = wks.get_all_values()
-                    if data:
-                        max_cols = max(len(r) for r in data)
-                        return [r + [""] * (max_cols - len(r)) for r in data]
+                sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+                if not sheet_id_match: return None
+                sheet_id = sheet_id_match.group(1)
+                export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+                res = requests.get(export_url, timeout=10)
+                if res.status_code == 200:
+                    return res.content
             except: pass
-            return []
+            return None
+
+        excel_bytes = get_public_gsheet_as_excel(LINK_KHUNG_LPS)
+        
+        if not excel_bytes:
+            st.error("⚠️ Không thể tải dữ liệu ngầm. Có thể File đang bị giới hạn quyền truy cập. Hãy dùng File Tải Lên.")
+            uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung thay thế", type=["xlsx", "xls"])
+            if uploaded_file: excel_bytes = uploaded_file.getvalue()
             
-        sheet_titles = get_khung_sheets()
-        if not sheet_titles:
-            st.error("⚠️ Không thể kết nối tới Google Sheet Khung. Vui lòng cấp quyền Viewer cho Bot.")
-        else:
-            target_str_1 = target_date_lps.strftime("%d.%m")
-            target_str_2 = target_date_lps.strftime("%d/%m")
-            target_str_3 = f"{target_date_lps.day:02d}.{target_date_lps.month:02d}"
-            best_idx = 0
-            for i, title in enumerate(sheet_titles):
-                if target_str_1 in title or target_str_2 in title or target_str_3 in title:
-                    best_idx = i
-                    break
-            
-            selected_sheet = col_s.selectbox("📍 Đã tự động chọn Sheet Khung phù hợp (Có thể đổi):", sheet_titles, index=best_idx)
-            
-            data_khung = get_khung_data(selected_sheet)
-            if data_khung:
-                df_khung = pd.DataFrame(data_khung)
+        if excel_bytes:
+            try:
+                xls = pd.ExcelFile(io.BytesIO(excel_bytes))
+                sheet_names = xls.sheet_names
+                
+                target_str_1 = target_date_lps.strftime("%d.%m")
+                target_str_2 = target_date_lps.strftime("%d/%m")
+                target_str_3 = f"{target_date_lps.day:02d}.{target_date_lps.month:02d}"
+                best_idx = 0
+                for i, title in enumerate(sheet_names):
+                    if target_str_1 in title or target_str_2 in title or target_str_3 in title:
+                        best_idx = i
+                        break
+                
+                selected_sheet = col_s.selectbox("📍 Đã tự động chọn Tab Khung phù hợp (Có thể đổi):", sheet_names, index=best_idx)
+                
+                df_khung = pd.read_excel(xls, sheet_name=selected_sheet, header=None)
+                
                 days_of_week = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
                 selected_day = days_of_week[target_date_lps.weekday()]
                 
                 day_keywords = {"Thứ Hai": ["thứ hai", "monday", "mon"], "Thứ Ba": ["thứ ba", "tuesday", "tue"], "Thứ Tư": ["thứ tư", "wednesday", "wed"], "Thứ Năm": ["thứ năm", "thursday", "thu"], "Thứ Sáu": ["thứ sáu", "friday", "fri"], "Thứ Bảy": ["thứ bảy", "saturday", "sat"], "Chủ Nhật": ["chủ nhật", "sunday", "sun"]}
-                target_col_idx = -1
-                keywords = day_keywords[selected_day]
+                target_col_idx = -1; keywords = day_keywords[selected_day]
                 
                 for r_idx in range(min(5, len(df_khung))):
                     for c_idx in range(len(df_khung.columns)):
@@ -860,7 +868,7 @@ else:
                 if target_col_idx == -1:
                     fallback_map = {"Thứ Hai": 8, "Thứ Ba": 9, "Thứ Tư": 10, "Thứ Năm": 11, "Thứ Sáu": 12, "Thứ Bảy": 13, "Chủ Nhật": 14}
                     target_col_idx = fallback_map[selected_day]
-                    
+                
                 time_col_idx = 3 
                 lps_data = []
                 
@@ -876,7 +884,7 @@ else:
                                 title_lower = title.lower()
                                 if not any(kw in title_lower for kw in exclude_keywords): 
                                     lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
-                                    
+                
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
                     st.success(f"✅ Đã tự động bóc tách thành công LPS cho {selected_day} ngày {target_date_lps.strftime('%d/%m/%Y')}!")
@@ -894,7 +902,9 @@ else:
                         type="primary"
                     )
                 else: 
-                    st.warning("📭 Không tìm thấy dữ liệu phát sóng trong cột của ngày này.")
+                    st.warning(f"📭 Không tìm thấy dữ liệu phát sóng trong cột {selected_day} của Tab này.")
+            except Exception as e:
+                st.error(f"Lỗi khi đọc file Khung: {e}")
 
     # ================= CÁC TAB KHÁC =================
     with tabs[2]:
@@ -957,7 +967,7 @@ else:
                             except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
-    with tabs[3]:
+    with tabs[4]:
         st.caption("QUẢN LÝ TIẾN ĐỘ DỰ ÁN TOÀN PHÒNG.")
         with st.expander("➕ TẠO ĐẦU VIỆC MỚI", expanded=False):
             c1, c2 = st.columns(2)
@@ -1012,7 +1022,7 @@ else:
                                         st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
-    with tabs[4]:
+    with tabs[5]:
         if role == 'LanhDao':
             with st.form("new_da"):
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
@@ -1021,7 +1031,7 @@ else:
                         sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
-    with tabs[5]:
+    with tabs[6]:
         st.header("📅 LỊCH LÀM VIỆC & DEADLINE")
         if not df_cv.empty:
             task_list = []
@@ -1040,14 +1050,14 @@ else:
                 st.divider()
                 st.dataframe(df_gantt[['Task', 'Finish', 'Assignee', 'Status']], use_container_width=True)
 
-    with tabs[6]:
+    with tabs[7]:
         tk = st.selectbox("TK GỬI:", range(10), format_func=lambda x:f"TK {x}")
         to = st.multiselect("ĐẾN:", df_users['Email'].tolist())
         sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
         if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
     if role == 'LanhDao':
-        with tabs[7]:
+        with tabs[8]:
             st.header("📊 DASHBOARD TỔNG QUAN")
             if not df_cv.empty:
                 col1, col2 = st.columns(2)
@@ -1058,5 +1068,5 @@ else:
                     all_staff = []; [all_staff.extend([n.strip() for n in s.split(',')]) for s in df_cv['NguoiPhuTrach']]
                     staff_counts = pd.Series(all_staff).value_counts().reset_index(); staff_counts.columns = ['BTV', 'Số việc']
                     fig_bar = px.bar(staff_counts, x='BTV', y='Số việc', title='NĂNG SUẤT NHÂN SỰ', color='BTV'); st.plotly_chart(fig_bar, use_container_width=True)
-        with tabs[8]:
+        with tabs[9]:
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
