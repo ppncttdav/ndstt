@@ -805,7 +805,7 @@ else:
     # ================= TAB TẠO LPS TỰ ĐỘNG =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
-        st.info("Hệ thống tự động tải ngầm file Khung Vietnam Today bằng đường link Public, tự nhận diện Tab chứa ngày phát sóng để bóc tách LPS cực kỳ chính xác.")
+       
         
         tom_date = get_vn_time().date() + timedelta(days=1)
         col_d, col_s = st.columns([1, 2])
