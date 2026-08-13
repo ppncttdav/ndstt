@@ -92,18 +92,18 @@ def ket_noi_sheet(sheet_name_or_url):
     except Exception as e: st.error(f"🔴 Lỗi kết nối sheet: {e}"); st.stop()
 
 def safe_read_records(wks):
-    for i in range(3):
+    for i in range(2): # Đã giảm số lần thử để chống treo (Lag)
         try: return pd.DataFrame(wks.get_all_records())
-        except: time.sleep(1)
+        except: time.sleep(0.2) # Đã giảm thời gian chờ để app load tốc biến
     return pd.DataFrame()
 
 def safe_read_values(wks):
-    for i in range(3):
+    for i in range(2):
         try: 
             data = wks.get_all_values()
             if len(data) > 4: return pd.DataFrame(data[4:], columns=data[3])
             return pd.DataFrame(columns=CONTENT_HEADER)
-        except: time.sleep(1)
+        except: time.sleep(0.2)
     return pd.DataFrame(columns=CONTENT_HEADER)
 
 def lay_nhan_su_tu_lich_phuc_tap(target_date_obj):
@@ -143,20 +143,27 @@ def lay_nhan_su_tu_lich_phuc_tap(target_date_obj):
         return list_tcsx, list_btv
     except: return [], []
 
-# --- HÀM TẢI DỮ LIỆU CHUNG ---
-@st.cache_data(ttl=600)
-def load_all_data():
+# --- [TỐI ƯU TỐC ĐỘ 1]: Tách riêng hàm tải danh sách Tài khoản (Tải cực nhanh) ---
+@st.cache_data(ttl=1800)
+def load_tai_khoan():
     try:
         sh = ket_noi_sheet(SHEET_MAIN)
-        df_u = safe_read_records(sh.worksheet("TaiKhoan"))
+        return safe_read_records(sh.worksheet("TaiKhoan"))
+    except: return pd.DataFrame()
+
+# --- [TỐI ƯU TỐC ĐỘ 2]: Các dữ liệu nặng chỉ tải KHI VÀ CHỈ KHI đã đăng nhập thành công ---
+@st.cache_data(ttl=600)
+def load_du_lieu_app():
+    try:
+        sh = ket_noi_sheet(SHEET_MAIN)
         df_d = safe_read_records(sh.worksheet("DuAn"))
         df_c = safe_read_records(sh.worksheet("CongViec"))
-        try: wks_cn = sh.worksheet("ViecCaNhan"); df_cn = safe_read_records(wks_cn)
+        try: df_cn = safe_read_records(sh.worksheet("ViecCaNhan"))
         except: df_cn = pd.DataFrame()
-        try: wks_nk = sh.worksheet("NhatKy"); df_nk = safe_read_records(wks_nk)
+        try: df_nk = safe_read_records(sh.worksheet("NhatKy"))
         except: df_nk = pd.DataFrame()
-        return df_u, df_d, df_c, df_cn, df_nk
-    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return df_d, df_c, df_cn, df_nk
+    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def clear_cache_and_rerun():
     st.cache_data.clear()
@@ -178,64 +185,36 @@ def check_quyen(current_user, role, row, df_da):
 
 # --- CÁC HÀM XỬ LÝ LỊCH PHÁT SÓNG ---
 def format_title_name(text):
-    """Chuẩn hóa tên chương trình: Replace chữ viết tắt và định dạng Title Case chuẩn"""
-    # Xử lý các từ viết tắt cụ thể trước
     text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
-    
-    # Chuyển về định dạng Title Case
     text = text.title()
-    
-    # Khôi phục các mạo từ, giới từ về chữ thường (chuẩn tiếng Anh)
-    replacements = {
-        " Of ": " of ",
-        " At ": " at ",
-        " A ": " a ",
-        " An ": " an ",
-        " The ": " the ",
-        " In ": " in ",
-        " On ": " on ",
-        " To ": " to ",
-        " And ": " and "
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-        
+    replacements = { " Of ": " of ", " At ": " at ", " A ": " a ", " An ": " an ", " The ": " the ", " In ": " in ", " On ": " on ", " To ": " to ", " And ": " and " }
+    for old, new in replacements.items(): text = text.replace(old, new)
     return text
 
 def parse_khung_cell(cell_val):
     if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
     lines = [line.strip() for line in str(cell_val).split('\n') if line.strip()]
     if not lines: return "", ""
-    
     title = lines[0]
-    # Lọc nhiễu
-    title = re.sub(r'\(.*?\)', '', title) # Bỏ ngoặc đơn
-    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) # Bỏ đuôi 15', 30m
-    title = re.sub(r'\s*\d+\s*$', '', title) # Bỏ số thừa
+    title = re.sub(r'\(.*?\)', '', title) 
+    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) 
+    title = re.sub(r'\s*\d+\s*$', '', title) 
     title = title.split('/')[0].strip() 
-    
-    # Áp dụng chuẩn hóa Tên chương trình
     title = format_title_name(title)
-    
     desc = ""
     if len(lines) > 1:
         for line in lines[1:]:
             if not line.startswith('(') and "PL" not in line and "PM" not in line:
-                desc = line.split('/')[0].strip()
-                break
+                desc = line.split('/')[0].strip(); break
     return title, desc
 
 def format_time_col(t):
-    """Định dạng thời gian chuẩn hh:mm:ss"""
     if pd.isna(t): return ""
     try:
         if isinstance(t, str):
             t = t.strip()
-            # Nếu chuỗi đang là hh:mm, nối thêm :00
-            if len(t) == 5 and ":" in t:
-                return f"{t}:00"
+            if len(t) == 5 and ":" in t: return f"{t}:00"
             return t
-        # Nếu là object datetime/time
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
@@ -255,14 +234,25 @@ def dinh_dang_dong_moi(wks, row_idx):
     rng = f"A{row_idx}:N{row_idx}"
     format_cell_range(wks, rng, CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
 
-# ================= 2. AUTH =================
-if 'dang_nhap' not in st.session_state: st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
-sh_main = ket_noi_sheet(SHEET_MAIN)
+# ================= 2. AUTH & XỬ LÝ URL =================
+if 'dang_nhap' not in st.session_state: 
+    st.session_state['dang_nhap'] = False
+    st.session_state['user_info'] = {}
 
-df_users, df_duan, df_cv, df_cn, df_log = load_all_data()
-list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
+# Tải danh sách người dùng rất nhanh (Không bị treo máy)
+df_users = load_tai_khoan()
 list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
 
+# --- [TỐI ƯU]: CHỐNG VĂNG TÀI KHOẢN KHI F5 ---
+# Kiểm tra nếu trên link web đang lưu token đăng nhập thì tự động mở cửa
+if "session_user" in st.query_params and not st.session_state['dang_nhap']:
+    saved_username = st.query_params["session_user"]
+    u_row = df_users[df_users['TenDangNhap'].astype(str) == saved_username]
+    if not u_row.empty:
+        st.session_state['dang_nhap'] = True
+        st.session_state['user_info'] = u_row.iloc[0].to_dict()
+
+# --- MÀN HÌNH ĐĂNG NHẬP ---
 if not st.session_state['dang_nhap']:
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
     with st.form("login"):
@@ -271,11 +261,22 @@ if not st.session_state['dang_nhap']:
             if not df_users.empty:
                 u_row = df_users[(df_users['TenDangNhap'].astype(str)==user) & (df_users['MatKhau'].astype(str)==pwd)]
                 if not u_row.empty:
-                    st.session_state['dang_nhap'] = True; st.session_state['user_info'] = u_row.iloc[0].to_dict()
+                    st.session_state['dang_nhap'] = True; 
+                    st.session_state['user_info'] = u_row.iloc[0].to_dict()
+                    
+                    # Cài token vào URL để khi F5 không bị thoát ra
+                    st.query_params["session_user"] = user
+                    
+                    sh_main = ket_noi_sheet(SHEET_MAIN)
                     ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success"); clear_cache_and_rerun()
                 else: st.error("Sai thông tin!")
             else: st.error("Lỗi dữ liệu Tài khoản.")
 else:
+    # --- ĐÃ VÀO TRONG: BẮT ĐẦU TẢI DỮ LIỆU NẶNG ---
+    df_duan, df_cv, df_cn, df_log = load_du_lieu_app()
+    list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
+    
+    sh_main = ket_noi_sheet(SHEET_MAIN)
     u_info = st.session_state['user_info']; curr_name = u_info['HoTen']; curr_username = str(u_info['TenDangNhap']); role = u_info.get('VaiTro', 'NhanVien')
     
     with st.sidebar:
@@ -295,7 +296,13 @@ else:
                             wks_acc.update_cell(cell.row, 2, new_p); st.session_state['user_info']['MatKhau'] = new_p; 
                             st.success("Xong!"); clear_cache_and_rerun()
         if st.button("🔄 LÀM MỚI DỮ LIỆU"): clear_cache_and_rerun()
-        if st.button("ĐĂNG XUẤT"): st.session_state['dang_nhap'] = False; st.rerun()
+        
+        # Sửa nút Đăng xuất để dọn dẹp URL
+        if st.button("ĐĂNG XUẤT"): 
+            st.session_state['dang_nhap'] = False
+            if "session_user" in st.query_params:
+                del st.query_params["session_user"]
+            st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     sh_trucso = ket_noi_sheet(SHEET_TRUCSO)
@@ -495,7 +502,6 @@ else:
                             ec5, ec6, ec7 = st.columns(3)
                             e_ld = ec5.text_input("LINK DUYỆT", value=r_news['LINK DUYỆT'])
                             try: 
-                                # Cố gắng parse giờ hiện tại (có thể là hh:mm hoặc hh:mm:ss)
                                 time_str = r_news['GIỜ ĐĂNG']
                                 if time_str.count(":") == 2: val_time = datetime.strptime(time_str, "%H:%M:%S").time()
                                 elif time_str.count(":") == 1: val_time = datetime.strptime(time_str, "%H:%M").time()
@@ -545,7 +551,6 @@ else:
                     with st.spinner(f"Đang phân tích dữ liệu {selected_day}..."):
                         df_khung = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None)
                         
-                        # Từ điển từ khóa để dò tìm đúng Cột của Ngày
                         day_keywords = {
                             "Thứ Hai": ["thứ hai", "monday", "mon"],
                             "Thứ Ba": ["thứ ba", "tuesday", "tue"],
@@ -559,7 +564,6 @@ else:
                         target_col_idx = -1
                         keywords = day_keywords[selected_day]
                         
-                        # Dò tìm Cột chứa Ngày trong 4 dòng đầu
                         for r_idx in range(4):
                             for c_idx in range(len(df_khung.columns)):
                                 cell_val = str(df_khung.iloc[r_idx, c_idx]).lower()
@@ -568,36 +572,29 @@ else:
                                     break
                             if target_col_idx != -1: break
                         
-                        # Fallback nếu Regex dò không ra thì lấy cột cứng
                         if target_col_idx == -1:
                             fallback_map = {"Thứ Hai": 8, "Thứ Ba": 9, "Thứ Tư": 10, "Thứ Năm": 11, "Thứ Sáu": 12, "Thứ Bảy": 13, "Chủ Nhật": 14}
                             target_col_idx = fallback_map[selected_day]
                         
-                        # Giả định cột Thời gian luôn nằm ở Cột D (Index 3)
                         time_col_idx = 3 
                         
                         lps_data = []
-                        # Quét từ dòng thứ 5 trở đi (bỏ header)
                         for r_idx in range(5, len(df_khung)):
                             time_val = df_khung.iloc[r_idx, time_col_idx]
                             content_val = df_khung.iloc[r_idx, target_col_idx]
                             
-                            # Chỉ lấy dòng có dữ liệu chương trình
                             if not pd.isna(content_val) and str(content_val).strip() != "":
                                 title, desc = parse_khung_cell(content_val)
                                 formatted_time = format_time_col(time_val)
                                 
                                 if title:
-                                    # --- BỘ LỌC TỪ KHÓA (BỎ QUA THỜI TIẾT, ĐỆM, FILLER, TRAILER) ---
                                     exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
                                     title_lower = title.lower()
-                                    
-                                    # Nếu tiêu đề chứa từ khóa bị cấm thì BỎ QUA dòng này
                                     if any(kw in title_lower for kw in exclude_keywords):
                                         continue 
                                         
                                     lps_data.append({
-                                        "Giờ phát sóng (hh:mm)": formatted_time, # CẬP NHẬT HEADER HH:MM:SS
+                                        "Giờ phát sóng (hh:mm)": formatted_time, 
                                         "Tiêu đề": title,
                                         "Mô tả": desc
                                     })
@@ -606,11 +603,9 @@ else:
                             df_lps = pd.DataFrame(lps_data)
                             st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}! (Đã chuẩn hóa định dạng)")
                             
-                            # Cho phép User review & sửa nhẹ lại
                             st.caption("Bạn có thể chỉnh sửa trực tiếp trong bảng dưới đây trước khi tải về:")
                             edited_lps = st.data_editor(df_lps, use_container_width=True, hide_index=True)
                             
-                            # Chức năng tải xuống Excel
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                                 edited_lps.to_excel(writer, index=False, sheet_name=selected_day)
