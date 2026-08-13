@@ -36,8 +36,11 @@ st.markdown("""
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B3v7MV_XFjHXj_v9UZXK0ZI/edit?gid=1107365160#gid=1107365160"
+
+# KHAI BÁO CÁC ĐƯỜNG LINK
 LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=387062810#gid=387062810"
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
+LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
 def generate_secure_token(username):
     secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
@@ -152,7 +155,6 @@ def load_du_lieu_app():
         return df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# --- BỘ NHỚ ĐỆM SIÊU TỐC CHO LỊCH (Lưu RAM 1 Tiếng) ---
 @st.cache_data(ttl=3600)
 def get_cached_schedule(url, sheet_id):
     try:
@@ -222,7 +224,6 @@ def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
     btv_list = []
     errors = []
     
-    # Kéo dữ liệu từ RAM siêu tốc
     data_ldp = get_cached_schedule(LINK_LICH_LDP, "570145520")
     if data_ldp is None:
         errors.append("⚠️ Không tải được Lịch LĐP. Vui lòng Share file cho Bot!")
@@ -345,7 +346,50 @@ def format_title_name(text):
     for old, new in replacements.items(): text = text.replace(old, new)
     return text
 
-# ================= 2. AUTH & GIAO DIỆN =================
+def parse_khung_cell(cell_val):
+    if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
+    lines = [line.strip() for line in str(cell_val).split('\n') if line.strip()]
+    if not lines: return "", ""
+    title = lines[0]
+    title = re.sub(r'\(.*?\)', '', title) 
+    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) 
+    title = re.sub(r'\s*\d+\s*$', '', title) 
+    title = title.split('/')[0].strip() 
+    title = format_title_name(title)
+    desc = ""
+    if len(lines) > 1:
+        for line in lines[1:]:
+            if not line.startswith('(') and "PL" not in line and "PM" not in line:
+                desc = line.split('/')[0].strip(); break
+    return title, desc
+
+def format_time_col(t):
+    if pd.isna(t): return ""
+    try:
+        if isinstance(t, str):
+            t = t.strip()
+            if len(t) == 5 and ":" in t: return f"{t}:00"
+            return t
+        return t.strftime("%H:%M:%S")
+    except: return str(t)
+
+def dinh_dang_dep(wks):
+    wks.merge_cells('A1:N1')
+    format_cell_range(wks, 'A1:N1', CellFormat(backgroundColor=Color(0, 1, 1), textFormat=TextFormat(bold=True, fontSize=14), horizontalAlignment='CENTER', verticalAlignment='MIDDLE'))
+    format_cell_range(wks, 'A2:N3', CellFormat(textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+    format_cell_range(wks, 'A2:N2', CellFormat(backgroundColor=Color(0.8, 1, 1)))
+    format_cell_range(wks, 'A4:N4', CellFormat(backgroundColor=Color(1, 1, 0), textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+    set_column_width(wks, 'A', 40); set_column_width(wks, 'B', 300); set_column_width(wks, 'C', 100); set_column_width(wks, 'D', 100)
+    set_column_width(wks, 'E', 130); set_column_width(wks, 'F', 50); set_column_width(wks, 'G', 80); set_column_width(wks, 'H', 120)
+    set_column_width(wks, 'I', 150); set_column_width(wks, 'J', 150); set_column_width(wks, 'K', 80); set_column_width(wks, 'L', 100)
+    set_column_width(wks, 'M', 150); set_column_width(wks, 'N', 350)
+    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP'))
+
+def dinh_dang_dong_moi(wks, row_idx):
+    rng = f"A{row_idx}:N{row_idx}"
+    format_cell_range(wks, rng, CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+
+# ================= 2. AUTH & GIAO DIỆN (BẢO MẬT 100% - KHÔNG DÙNG URL) =================
 if 'dang_nhap' not in st.session_state: 
     st.session_state['dang_nhap'] = False
     st.session_state['user_info'] = {}
@@ -747,56 +791,112 @@ else:
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ================= CÁC TAB KHÁC =================
+    # ================= TAB TẠO LPS TỰ ĐỘNG (ZERO-CLICK) =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
-        st.info("Upload file Excel 'Khung Vietnam Today' để hệ thống tự động bóc tách chương trình và xuất Lịch Phát Sóng (LPS). Các slot Đệm, Thời tiết, Trailer sẽ tự động được lọc bỏ.")
-        uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung", type=["xlsx", "xls"])
-        if uploaded_file is not None:
+        st.info("Hệ thống tự động liên kết với Google Sheet Khung Vietnam Today. Mặc định tải sẵn LPS của ngày mai để tiết kiệm thời gian.")
+        
+        tom_date = get_vn_time().date() + timedelta(days=1)
+        
+        col_d, col_s = st.columns([1, 2])
+        target_date_lps = col_d.date_input("📅 Chọn Ngày phát sóng:", value=tom_date, format="DD/MM/YYYY")
+        
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def get_khung_sheets():
             try:
-                xls = pd.ExcelFile(uploaded_file)
-                sheet_names = xls.sheet_names
-                col_sh, col_day = st.columns(2)
-                selected_sheet = col_sh.selectbox("📍 Chọn Sheet tuần cần xuất", sheet_names)
-                days_of_week = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
-                selected_day = col_day.selectbox("📅 Chọn Ngày xuất LPS", days_of_week)
-                if st.button("🚀 BẮT ĐẦU TẠO LPS", type="primary"):
-                    with st.spinner(f"Đang phân tích dữ liệu {selected_day}..."):
-                        df_khung = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None)
-                        day_keywords = {"Thứ Hai": ["thứ hai", "monday", "mon"], "Thứ Ba": ["thứ ba", "tuesday", "tue"], "Thứ Tư": ["thứ tư", "wednesday", "wed"], "Thứ Năm": ["thứ năm", "thursday", "thu"], "Thứ Sáu": ["thứ sáu", "friday", "fri"], "Thứ Bảy": ["thứ bảy", "saturday", "sat"], "Chủ Nhật": ["chủ nhật", "sunday", "sun"]}
-                        target_col_idx = -1; keywords = day_keywords[selected_day]
-                        for r_idx in range(4):
-                            for c_idx in range(len(df_khung.columns)):
-                                cell_val = str(df_khung.iloc[r_idx, c_idx]).lower()
-                                if any(kw in cell_val for kw in keywords):
-                                    target_col_idx = c_idx; break
-                            if target_col_idx != -1: break
-                        if target_col_idx == -1:
-                            fallback_map = {"Thứ Hai": 8, "Thứ Ba": 9, "Thứ Tư": 10, "Thứ Năm": 11, "Thứ Sáu": 12, "Thứ Bảy": 13, "Chủ Nhật": 14}
-                            target_col_idx = fallback_map[selected_day]
-                        time_col_idx = 3 
-                        lps_data = []
-                        for r_idx in range(5, len(df_khung)):
-                            time_val = df_khung.iloc[r_idx, time_col_idx]
-                            content_val = df_khung.iloc[r_idx, target_col_idx]
-                            if not pd.isna(content_val) and str(content_val).strip() != "":
-                                title, desc = parse_khung_cell(content_val)
-                                formatted_time = format_time_col(time_val)
-                                if title:
-                                    exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
-                                    title_lower = title.lower()
-                                    if any(kw in title_lower for kw in exclude_keywords): continue 
-                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
-                        if lps_data:
-                            df_lps = pd.DataFrame(lps_data)
-                            st.success(f"✅ Đã xử lý thành công LPS cho {selected_day}!")
-                            edited_lps = st.data_editor(df_lps, use_container_width=True, hide_index=True)
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer: edited_lps.to_excel(writer, index=False, sheet_name=selected_day)
-                            st.download_button(label="📥 TẢI FILE EXCEL LPS VỀ MÁY", data=output.getvalue(), file_name=f"LPS_VNTD_{selected_day}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
-                        else: st.warning("Không tìm thấy dữ liệu phát sóng.")
+                client = get_gspread_client_cached()
+                if client:
+                    sh = client.open_by_url(LINK_KHUNG_LPS)
+                    return [w.title for w in sh.worksheets()]
+            except: return []
+            return []
+            
+        @st.cache_data(ttl=600, show_spinner=False)
+        def get_khung_data(sheet_title):
+            try:
+                client = get_gspread_client_cached()
+                if client:
+                    sh = client.open_by_url(LINK_KHUNG_LPS)
+                    wks = sh.worksheet(sheet_title)
+                    data = wks.get_all_values()
+                    if data:
+                        max_cols = max(len(r) for r in data)
+                        return [r + [""] * (max_cols - len(r)) for r in data]
             except: pass
+            return []
+            
+        sheet_titles = get_khung_sheets()
+        if not sheet_titles:
+            st.error("⚠️ Không thể kết nối tới Google Sheet Khung. Vui lòng cấp quyền Viewer cho Bot.")
+        else:
+            target_str_1 = target_date_lps.strftime("%d.%m")
+            target_str_2 = target_date_lps.strftime("%d/%m")
+            target_str_3 = f"{target_date_lps.day:02d}.{target_date_lps.month:02d}"
+            best_idx = 0
+            for i, title in enumerate(sheet_titles):
+                if target_str_1 in title or target_str_2 in title or target_str_3 in title:
+                    best_idx = i
+                    break
+            
+            selected_sheet = col_s.selectbox("📍 Đã tự động chọn Sheet Khung phù hợp (Có thể đổi):", sheet_titles, index=best_idx)
+            
+            data_khung = get_khung_data(selected_sheet)
+            if data_khung:
+                df_khung = pd.DataFrame(data_khung)
+                days_of_week = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+                selected_day = days_of_week[target_date_lps.weekday()]
+                
+                day_keywords = {"Thứ Hai": ["thứ hai", "monday", "mon"], "Thứ Ba": ["thứ ba", "tuesday", "tue"], "Thứ Tư": ["thứ tư", "wednesday", "wed"], "Thứ Năm": ["thứ năm", "thursday", "thu"], "Thứ Sáu": ["thứ sáu", "friday", "fri"], "Thứ Bảy": ["thứ bảy", "saturday", "sat"], "Chủ Nhật": ["chủ nhật", "sunday", "sun"]}
+                target_col_idx = -1
+                keywords = day_keywords[selected_day]
+                
+                for r_idx in range(min(5, len(df_khung))):
+                    for c_idx in range(len(df_khung.columns)):
+                        cell_val = str(df_khung.iloc[r_idx, c_idx]).lower()
+                        if any(kw in cell_val for kw in keywords):
+                            target_col_idx = c_idx; break
+                    if target_col_idx != -1: break
+                    
+                if target_col_idx == -1:
+                    fallback_map = {"Thứ Hai": 8, "Thứ Ba": 9, "Thứ Tư": 10, "Thứ Năm": 11, "Thứ Sáu": 12, "Thứ Bảy": 13, "Chủ Nhật": 14}
+                    target_col_idx = fallback_map[selected_day]
+                    
+                time_col_idx = 3 
+                lps_data = []
+                
+                if target_col_idx < len(df_khung.columns):
+                    for r_idx in range(5, len(df_khung)):
+                        time_val = df_khung.iloc[r_idx, time_col_idx]
+                        content_val = df_khung.iloc[r_idx, target_col_idx]
+                        if not pd.isna(content_val) and str(content_val).strip() != "":
+                            title, desc = parse_khung_cell(content_val)
+                            formatted_time = format_time_col(time_val)
+                            if title:
+                                exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
+                                title_lower = title.lower()
+                                if not any(kw in title_lower for kw in exclude_keywords): 
+                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    
+                if lps_data:
+                    df_lps = pd.DataFrame(lps_data)
+                    st.success(f"✅ Đã tự động bóc tách thành công LPS cho {selected_day} ngày {target_date_lps.strftime('%d/%m/%Y')}!")
+                    edited_lps = st.data_editor(df_lps, use_container_width=True, hide_index=True)
+                    
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer: 
+                        edited_lps.to_excel(writer, index=False, sheet_name=selected_day)
+                    
+                    st.download_button(
+                        label="📥 TẢI FILE EXCEL LPS VỀ MÁY", 
+                        data=output.getvalue(), 
+                        file_name=f"LPS_VNTD_{target_date_lps.strftime('%d_%m')}.xlsx", 
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                        type="primary"
+                    )
+                else: 
+                    st.warning("📭 Không tìm thấy dữ liệu phát sóng trong cột của ngày này.")
 
+    # ================= CÁC TAB KHÁC =================
     with tabs[2]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
         try: wks_canhan = sh_main.worksheet("ViecCaNhan")
