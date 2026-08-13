@@ -19,11 +19,13 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide")
 
+# --- TÊN FILE GOOGLE SHEET ---
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B3v7MV_XFjHXj_v9UZXK0ZI/edit?gid=1107365160#gid=1107365160"
 LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?gid=0#gid=0"
 
+# --- CẤU HÌNH THỜI GIAN VN ---
 def get_vn_time():
     return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
 
@@ -47,6 +49,7 @@ def get_weather_and_advice():
         return f"{temp}°C - {condition}", advice
     except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
 
+# --- 1. DANH SÁCH CHỨC DANH ---
 ROLES_HEADER = [
     "LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
     "TRỰC LỊCH PHÁT SÓNG", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC SẢN XUẤT VIDEO CLIP, LPS",
@@ -60,7 +63,7 @@ OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Ho
 
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
 
-# ĐẢM BẢO KHÔNG BỊ NAME ERROR Ở CÁC TAB SAU
+# ĐẢM BẢO KHAI BÁO BIẾN CHO CÁC TAB (Khắc phục NameError)
 VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
@@ -211,7 +214,7 @@ def build_appended_comment(history_text, new_text, is_ok_checked):
     return added_str
 
 def get_smart_status(group_df):
-    """Nội suy tiến độ với Bộ quét từ khóa (Keyword Scanner)"""
+    """Nội suy tiến độ thông minh dựa trên Text và Keywords"""
     tcsx_cmts = " ".join(group_df['TCSX'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     ldp_cmts = " ".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     all_cmts = tcsx_cmts + " " + ldp_cmts
@@ -224,13 +227,14 @@ def get_smart_status(group_df):
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b', tcsx_cmts)
     ldp_ok = re.search(r'\bok\b|\bokie\b|\bokay\b', ldp_cmts)
     
-    # BỘ QUÉT TỪ KHÓA: Nhận diện BTV đã phản hồi/sửa bài
+    # BỘ QUÉT TỪ KHÓA BTV BÁO CÁO (Đã nâng cấp)
     btv_keywords = ["đã sửa", "đã update", "upd", "đã chỉnh", "đã thay", "e đã", "em đã", "đã xong", "đã bổ sung", "đã cắt"]
     btv_fixed = any(kw in all_cmts for kw in btv_keywords)
     
-    # Bài cần sửa: Có comment dài nhưng không có OK, hoặc Status báo là sửa
+    # Logic kiểm tra cần sửa
     needs_fix = (not tcsx_ok and len(tcsx_cmts) > 5) or (not ldp_ok and len(ldp_cmts) > 5) or ("sửa" in status)
 
+    # ĐỔI LẠI TÊN TRẠNG THÁI THEO YÊU CẦU
     if ldp_ok or "đã duyệt" in status or "đã đăng" in status or "posted" in status: 
         return "✅ Đã duyệt"
     if btv_fixed and needs_fix: 
@@ -449,11 +453,20 @@ else:
             df_content = safe_read_values(wks_today)
             
             if not df_content.empty:
-                # ================= 1. TIỀN XỬ LÝ NỘI SUY (FORWARD FILL) =================
+                # ================= 1. TIỀN XỬ LÝ (TỰ ĐỘNG CHUẨN HÓA & LỌC DÒNG RÁC) =================
                 df_context = df_content.copy()
-                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill().fillna("Chưa có tên")
-                # TỰ ĐỘNG KÉO TÊN NHÂN SỰ VÀ NGUỒN XUỐNG CÁC Ô TRỐNG BỊ MERGE CỦA CÙNG BÀI
-                df_context['NHÂN SỰ'] = df_context['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("")
+                
+                # BỘ LỌC DÒNG RÁC: Chỉ giữ lại các dòng có điền Nền Tảng (Tránh lỗi do format thừa của Excel)
+                df_context = df_context[df_context['NỀN TẢNG'].astype(str).str.strip() != ""]
+
+                # LẤP ĐẦY DỮ LIỆU BỊ GỘP Ô
+                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill()
+                df_context = df_context.dropna(subset=['NỘI DUNG_GROUP']) # Xóa nếu dòng đầu tiên cùng trống
+                
+                df_context['NHÂN SỰ'] = df_context['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("Chưa phân công")
+                # CHUẨN HÓA TÊN (Viết hoa chữ cái đầu để ghép Ngọc Linh và Ngọc linh làm 1)
+                df_context['NHÂN SỰ'] = df_context['NHÂN SỰ'].apply(lambda x: str(x).strip().title() if str(x).strip() != "" else "Chưa phân công")
+                
                 df_context['NGUỒN'] = df_context['NGUỒN'].replace('', pd.NA).ffill().fillna("")
                 
                 # ================= 2. DASHBOARD TỔNG QUAN =================
@@ -468,7 +481,7 @@ else:
                     smart_status = get_smart_status(group)
                     
                     btvs = group['NHÂN SỰ'].unique()
-                    btv_name = ", ".join([b for b in btvs if b.strip()]) if len(btvs) > 0 else "Chưa phân công"
+                    btv_name = ", ".join([b for b in btvs if b and b != "Chưa Phân Công"]) if len(btvs) > 0 else "Chưa phân công"
                     plats = group['NỀN TẢNG'].replace('', pd.NA).dropna().tolist()
                     
                     summary_data.append({
@@ -481,7 +494,7 @@ else:
                 df_summary = pd.DataFrame(summary_data)
                 
                 if not df_summary.empty:
-                    # Hàng Metric
+                    # Metric
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("📌 Tổng bài viết", len(df_summary))
                     m2.metric("👀 Chờ duyệt", len(df_summary[df_summary["Tiến độ"].isin(["👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt"])]))
@@ -489,9 +502,9 @@ else:
                     m4.metric("✅ Đã duyệt", len(df_summary[df_summary["Tiến độ"] == "✅ Đã duyệt"]))
                     
                     st.write("")
-                    # Tiến độ theo BTV
-                    st.markdown("###### 🎯 NĂNG SUẤT BIÊN TẬP VIÊN")
-                    btv_list = [b for b in df_summary['BTV'].unique() if b != "Chưa phân công"]
+                    # ĐỔI TÊN TITLE
+                    st.markdown("###### 🎯 THỐNG KÊ TIẾN ĐỘ CÁ NHÂN")
+                    btv_list = [b for b in df_summary['BTV'].unique() if b not in ["Chưa Phân Công", "Chưa phân công", ""]]
                     if btv_list:
                         btv_cols = st.columns(len(btv_list))
                         for i, b in enumerate(btv_list):
@@ -500,7 +513,6 @@ else:
                             done_b = len(b_df[b_df['Tiến độ'] == "✅ Đã duyệt"])
                             btv_cols[i].info(f"**{b}**\n\n✅ Đã duyệt: {done_b}/{total_b} bài")
 
-                    # Bộ lọc thông minh
                     st.write("")
                     filter_opt = st.pills("Bộ lọc tin bài:", ["Tất cả", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả")
                     
@@ -510,7 +522,7 @@ else:
                 
                 st.divider()
 
-                # ================= 3. KHU VỰC DUYỆT BÀI CHI TIẾT (MASTER-DETAIL) =================
+                # ================= 3. KHU VỰC DUYỆT BÀI CHI TIẾT =================
                 st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
                 
                 sel_product = st.selectbox("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC:", ["-- Chọn bài viết --"] + valid_products)
@@ -568,9 +580,9 @@ else:
                                     e_ldp_new = st.text_input("LĐP Nhập chỉ đạo (Nếu có):", key="in_ldp")
                                     e_ldp_ok = st.checkbox("🚀 LĐP CHỐT FINAL", key="chk_ldp")
 
-                        # --- CỘT PHẢI: CHI TIẾT NỀN TẢNG TÙY CHỌN ---
+                        # --- CỘT PHẢI: TRẠNG THÁI NỀN TẢNG ---
                         with col_right:
-                            st.markdown("**:orange[3. NỀN TẢNG (TÙY CHỌN CẬP NHẬT)]**")
+                            st.markdown("**:orange[3. TRẠNG THÁI TỪNG NỀN TẢNG]**")
                             st.caption("Các nền tảng phát sóng của bài viết này. Chỉ cập nhật khi có thay đổi giờ/link sản phẩm.")
                             
                             platform_updates = {}
@@ -653,7 +665,7 @@ else:
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ================= CÁC TAB KHÁC =================
+    # ================= CÁC TAB KHÁC (GIỮ NGUYÊN) =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
         st.info("Upload file Excel 'Khung Vietnam Today' để hệ thống tự động bóc tách chương trình và xuất Lịch Phát Sóng (LPS). Các slot Đệm, Thời tiết, Trailer sẽ tự động được lọc bỏ.")
@@ -759,6 +771,8 @@ else:
                             t_name = sel.split(" (")[0]; row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
                             try: dl = row['Deadline'].split(" ")[1]
                             except: dl = today.strftime("%d/%m/%Y")
+                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
     with tabs[3]:
@@ -815,6 +829,7 @@ else:
                                         w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
                                         st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
+        else: st.info("CHƯA CÓ CÔNG VIỆC NÀO.")
 
     with tabs[4]:
         if role == 'LanhDao':
