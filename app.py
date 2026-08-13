@@ -84,7 +84,7 @@ def check_quyen(curr_name, role, task_row, df_duan):
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=1).json()
+        res = requests.get(url, timeout=2).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         condition = "CÓ MÂY"; advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
@@ -164,18 +164,28 @@ def load_du_lieu_app():
         return df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+# HÀM BỊ THIẾU GÂY LỖI NAMEERROR ĐÃ ĐƯỢC KHÔI PHỤC
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_public_gsheet_as_excel(url):
+    try:
+        sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+        if not sheet_id_match: return None
+        sheet_id = sheet_id_match.group(1)
+        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+        res = requests.get(export_url, timeout=15)
+        if res.status_code == 200:
+            return res.content
+    except: pass
+    return None
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_and_parse_schedules(url_ldp, url_btv):
     results = {"LDP": pd.DataFrame(), "BTV": pd.DataFrame()}
     def _fetch_and_parse(url, kw):
         try:
-            sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
-            if not sheet_id_match: return kw, pd.DataFrame()
-            sheet_id = sheet_id_match.group(1)
-            export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
-            res = requests.get(export_url, timeout=15)
-            if res.status_code == 200:
-                xls = pd.ExcelFile(io.BytesIO(res.content))
+            excel_bytes = get_public_gsheet_as_excel(url)
+            if excel_bytes:
+                xls = pd.ExcelFile(io.BytesIO(excel_bytes))
                 target_sheet = xls.sheet_names[0]
                 if kw == "LDP":
                     for sn in xls.sheet_names:
@@ -204,15 +214,15 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
     m = target_date_obj.month
-    m_str = str(m)
-    m_str_02 = f"{m:02d}"
+    
+    # ÉP XÓA SẠCH KHOẢNG TRẮNG ĐỂ CHỐNG LỖI TYPO
+    month_str1 = f"tháng{m}"
+    month_str2 = f"tháng{m:02d}"
     
     month_row_idx = -1
-    month_str1 = f"tháng {m_str}"
-    month_str2 = f"tháng {m_str_02}"
-    
     for r in range(len(df)-1, -1, -1):
-        row_joined = " ".join([str(x).lower().strip() for x in df.iloc[r].values])
+        # Gộp toàn bộ dòng và xóa khoảng trắng
+        row_joined = "".join([str(x).lower().strip() for x in df.iloc[r].values if str(x).lower() != 'nan'])
         if month_str1 in row_joined or month_str2 in row_joined:
             month_row_idx = r
             break
@@ -233,9 +243,10 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
                 
     if target_col != -1 and header_row != -1:
         for r in range(header_row + 1, len(df)):
-            row_joined = " ".join([str(x).lower() for x in df.iloc[r].values])
+            row_joined = "".join([str(x).lower() for x in df.iloc[r].values if str(x).lower() != 'nan'])
             if "tháng" in row_joined and str(m) not in row_joined:
                 break
+                
             val = str(df.iloc[r, target_col]).lower().strip()
             if "số" in val or "trực" in val or val == "x" or "ts" in val or "họp" in val:
                 name = ""
@@ -266,7 +277,8 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     target_col = -1
     header_row = -1
     
-    for r in range(min(100, len(df))):
+    # BỎ GIỚI HẠN 100 DÒNG, QUÉT TOÀN BỘ FILE EXCEL ĐỂ TÌM NGÀY
+    for r in range(len(df)):
         for c in range(len(df.columns)):
             val = str(df.iloc[r, c]).strip().lower()
             if any(p in val for p in date_patterns) and "tháng" not in val:
@@ -456,19 +468,15 @@ def format_time_col(t):
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
-# --- THUẬT TOÁN ĐỊNH DẠNG SIÊU TỐC BẰNG BATCH UPDATE ---
 def dinh_dang_dep(wks, roster_vals):
-    # Thay vì gọi 40 API calls, chúng ta gom toàn bộ dữ liệu vào 1 list duy nhất và update 1 phát
     date_str_display = wks.title
     row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
     row2 = ["DANH SÁCH TRỰC:"] + ROLES_HEADER + [""]*5
     row3 = ["NHÂN SỰ:"] + roster_vals + [""]*5
     row4 = CONTENT_HEADER
     
-    # 1 Lệnh update toàn bộ Text
     wks.update('A1:N4', [row1, row2, row3, row4])
     
-    # Gom các lệnh định dạng (Gộp ô, Kẻ khung, Chỉnh màu)
     requests = []
     
     requests.append({
@@ -665,7 +673,6 @@ else:
                         with st.spinner("Đang tạo vỏ trực số bằng Batch Update Siêu Tốc..."):
                             try:
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
-                                # Thay vì dùng loop update_cell, gọi hàm Batch Update
                                 dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, roster_vals)
                                 st.cache_data.clear()
@@ -1043,7 +1050,7 @@ else:
                                 exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
                                 title_lower = title.lower()
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
@@ -1180,7 +1187,7 @@ else:
                                         rn = cell.row
                                         w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
                                         w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
-                                        st.success("ĐĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
+                                        st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
     with tabs[4]:
