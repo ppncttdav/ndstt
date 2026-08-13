@@ -334,6 +334,18 @@ else:
             st.rerun()
 
     sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO) 
+
+# --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP MÀN HÌNH ---
+    st.markdown("""
+        <style>
+        /* Ép Streamlit không được làm mờ (opacity) các khối dữ liệu khi đang tự động Reload */
+        div[data-testid="stFragment"], 
+        div[data-testid="stVerticalBlock"] {
+            opacity: 1 !important;
+            transition: none !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
     list_tabs = ["📝 VỎ TRỰC SỐ", "🔍 TRA CỨU TIN", "📺 TẠO LPS", "✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
