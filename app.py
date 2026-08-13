@@ -64,7 +64,8 @@ OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
 OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Scheduled", "Posted", "Hủy"]
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
-# --- 3. TIÊU ĐỀ CỘT CHUẨN MỚI NHẤT (14 CỘT) ---
+# --- 3. TIÊU ĐỀ CỘT CHUẨN (14 CỘT - GIỮ THEO FORM EXCEL CŨ) ---
+# Vì file Excel bạn gửi không chứa cột TEXT CỦA TIN riêng biệt, mà nó được gộp vào LINK DUYỆT.
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
 
 # --- TỪ ĐIỂN HIỂN THỊ ---
@@ -274,7 +275,7 @@ def dinh_dang_dep(wks):
     format_cell_range(wks, 'A4:N4', CellFormat(backgroundColor=Color(1, 1, 0), textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
     set_column_width(wks, 'A', 40); set_column_width(wks, 'B', 300); set_column_width(wks, 'C', 100); set_column_width(wks, 'D', 100)
     set_column_width(wks, 'E', 130); set_column_width(wks, 'F', 50); set_column_width(wks, 'G', 80); set_column_width(wks, 'H', 120)
-    set_column_width(wks, 'I', 150); set_column_width(wks, 'J', 100); set_column_width(wks, 'K', 80); set_column_width(wks, 'L', 100)
+    set_column_width(wks, 'I', 150); set_column_width(wks, 'J', 150); set_column_width(wks, 'K', 80); set_column_width(wks, 'L', 100)
     set_column_width(wks, 'M', 150); set_column_width(wks, 'N', 350)
     format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP'))
 
@@ -338,7 +339,7 @@ else:
             st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
-    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO) # Đã FIX Link vỏ trực
+    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO) 
     
     list_tabs = ["📝 TRỰC SỐ", "📺 TẠO LPS TỰ ĐỘNG", "✅ CHECKLIST CÁ NHÂN", "📋 QUẢN LÝ CÔNG VIỆC", "🗂️ QUẢN LÝ DỰ ÁN", "📅 LỊCH LÀM VIỆC", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
@@ -357,7 +358,6 @@ else:
         elif mode_view == lbl_tom: target_date = tom_vn
         else: target_date = today_vn
         
-        # Format chuẩn của Sheet: dd/mm/yyyy
         tab_name_current = target_date.strftime("%d/%m/%Y") 
         date_str_display = target_date.strftime("%d/%m/%Y")
         
@@ -515,19 +515,18 @@ else:
 
             st.divider()
             
-            # --- ĐỌC DỮ LIỆU ---
+            # --- ĐỌC DỮ LIỆU ĐỂ HIỂN THỊ VÀ SỬA ---
             df_content = safe_read_values(wks_today)
             
             if not df_content.empty:
                 # ================= GIAO DIỆN 1: BẢNG RÚT GỌN (MASTER VIEW) =================
                 st.markdown("##### 📋 BẢNG THEO DÕI NHANH (MÔ PHỎNG EXCEL)")
-                st.caption("Giao diện được rút gọn để dễ nhìn. Các ô trống thể hiện dữ liệu được gộp chung với ô phía trên giống như trên Google Sheet.")
+                st.caption("Giao diện xem lướt đã được rút gọn để dễ kiểm soát. Các ô trống thể hiện cấu trúc gộp bài bên Excel.")
                 
-                # Tạm ẩn các cột rườm rà
-                cols_to_hide = ['CHECK', 'TCSX', 'LĐP', 'LINK SẢN PHẨM', 'LINK DUYỆT', 'TEXT CỦA TIN']
-                df_display = df_content.drop(columns=[c for c in cols_to_hide if c in df_content.columns], errors='ignore')
+                # CHỈ HIỂN THỊ ĐÚNG CÁC CỘT BẠN YÊU CẦU
+                cols_to_keep = ['STT', 'NỘI DUNG', 'NỀN TẢNG', 'STATUS', 'NGUỒN', 'NHÂN SỰ', 'TCSX', 'LĐP', 'LINK DUYỆT']
+                df_display = df_content[[c for c in cols_to_keep if c in df_content.columns]]
                 
-                # Cấu hình UI cho bảng
                 st.dataframe(
                     df_display, 
                     use_container_width=True, 
@@ -536,104 +535,123 @@ else:
                         "NỘI DUNG": st.column_config.TextColumn("NỘI DUNG", width="large"),
                         "STATUS": st.column_config.TextColumn("TRẠNG THÁI", width="medium"),
                         "NỀN TẢNG": st.column_config.TextColumn("NỀN TẢNG", width="small"),
+                        "LINK DUYỆT": st.column_config.TextColumn("NỘI DUNG LINK DUYỆT", width="large"),
                     }
                 )
 
                 st.divider()
 
-                # ================= GIAO DIỆN 2: KHU VỰC LÀM VIỆC (DETAIL VIEW) =================
-                st.markdown("##### 🛠️ KHU VỰC CHỈNH SỬA / DUYỆT BÀI")
+                # ================= GIAO DIỆN 2: KHU VỰC DUYỆT BÀI (DETAIL VIEW) =================
+                st.markdown("##### 🛠️ KHU VỰC DUYỆT VÀ CHỈNH SỬA TỔNG THỂ")
+                st.info("💡 Lãnh đạo và TCSX chỉ cần chọn Tên bài. Hệ thống sẽ tự động gán nhận xét vào toàn bộ các dòng của bài đó, đồng thời cho phép cập nhật Trạng thái riêng biệt cho từng nền tảng mạng xã hội.")
                 
-                # THUẬT TOÁN TẠO LABEL THÔNG MINH (XỬ LÝ LỖI MERGE CELLS)
+                # TẠO NHÓM ĐỂ HIỂN THỊ THEO "SẢN PHẨM" THAY VÌ "TỪNG DÒNG"
                 df_context = df_content.copy()
-                df_context['NỘI DUNG_FILL'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill()
-                
-                edit_opts = []
-                for i, r in df_context.iterrows():
-                    stt = r['STT']
-                    nentang = r['NỀN TẢNG']
-                    if str(r['NỘI DUNG']).strip() == "":
-                        parent_name = str(r['NỘI DUNG_FILL'])
-                        short_name = parent_name[:35] + "..." if len(parent_name) > 35 else parent_name
-                        label = f"Dòng {stt} ➔ {nentang} (Thuộc bài: {short_name})"
-                    else:
-                        my_name = str(r['NỘI DUNG'])
-                        short_name = my_name[:35] + "..." if len(my_name) > 35 else my_name
-                        label = f"Dòng {stt} ➔ {nentang} ({short_name})"
-                    edit_opts.append(label)
+                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill()
+                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG_GROUP'].fillna("Chưa có tên")
 
-                sel_news = st.selectbox("📌 CHỌN DÒNG TIN CẦN XỬ LÝ:", edit_opts)
+                unique_products = df_context['NỘI DUNG_GROUP'].unique()
+                valid_products = [p for p in unique_products if str(p).strip() != ""]
                 
-                if sel_news:
-                    idx_news = edit_opts.index(sel_news)
-                    r_news = df_content.iloc[idx_news]
+                sel_product = st.selectbox("📌 CHỌN SẢN PHẨM CẦN XỬ LÝ:", ["-- Chọn sản phẩm --"] + valid_products)
+                
+                if sel_product and sel_product != "-- Chọn sản phẩm --":
+                    # Tìm tất cả các dòng thuộc về Bài viết này
+                    group_df = df_context[df_context['NỘI DUNG_GROUP'] == sel_product]
                     
-                    current_text, current_link = split_text_link(r_news.get('LINK DUYỆT', ''))
+                    # Lấy thông tin chung từ dòng đầu tiên của cụm
+                    first_row_idx = group_df.index[0]
+                    first_row_data = group_df.iloc[0]
                     
-                    with st.form("edit_news_form"):
-                        st.markdown(f"**Đang chỉnh sửa cho:** `{sel_news}`")
+                    current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
+                    
+                    with st.form("edit_group_form"):
+                        st.markdown(f"**Đang xử lý sản phẩm:** `{sel_product}`")
                         
-                        # CHIA FORM THÀNH 2 CỘT
-                        col_left, col_right = st.columns([1.5, 1])
+                        col_global, col_specific = st.columns([1.5, 1])
                         
-                        with col_left:
-                            st.markdown("**:blue[1. NỘI DUNG & TÀI NGUYÊN]**")
-                            e_nd = st.text_area("Tên bài / Nội dung chính (Chỉ điền ở dòng đầu tiên của cụm)", value=r_news['NỘI DUNG'], height=68)
+                        # --- CỘT TRÁI: DỮ LIỆU TỔNG QUAN (Chỉ ghi vào dòng 1) ---
+                        with col_global:
+                            st.markdown("**:blue[1. THÔNG TIN CHUNG (Duyệt 1 lần cho cả cụm)]**")
+                            e_nd = st.text_area("Tên bài / Nội dung chính", value=first_row_data['NỘI DUNG_GROUP'], height=68)
                             
-                            c_dd, c_nt = st.columns(2)
-                            e_dd = c_dd.selectbox("Định dạng", OPTS_DINH_DANG, index=OPTS_DINH_DANG.index(r_news['ĐỊNH DẠNG']) if r_news['ĐỊNH DẠNG'] in OPTS_DINH_DANG else 0)
-                            e_nt = c_nt.text_input("Nền tảng", value=r_news['NỀN TẢNG'])
-                            
-                            e_texttin = st.text_area("Caption / Text bài đăng", value=current_text, height=150)
-                            e_ld = st.text_input("🔗 Link Google Drive (Video/Ảnh)", value=current_link)
-                            e_lsp = st.text_input("✅ Link Sản Phẩm (Sau khi đã đăng web/mxh)", value=r_news.get('LINK SẢN PHẨM', ''))
-
-                        with col_right:
-                            st.markdown("**:orange[2. QUẢN LÝ TIẾN ĐỘ & PHÊ DUYỆT]**")
-                            
-                            e_st = st.selectbox("Trạng thái", OPTS_STATUS_TRUCSO, index=OPTS_STATUS_TRUCSO.index(r_news['STATUS']) if r_news['STATUS'] in OPTS_STATUS_TRUCSO else 0)
-                            e_ns = st.text_input("BTV Thực hiện", value=r_news['NHÂN SỰ'])
+                            c_dd, c_ns, c_nguon = st.columns(3)
+                            try: idx_dd = OPTS_DINH_DANG.index(first_row_data['ĐỊNH DẠNG'])
+                            except: idx_dd = 0
+                            e_dd = c_dd.selectbox("Định dạng", OPTS_DINH_DANG, index=idx_dd)
+                            e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
+                            e_ns = c_ns.text_input("BTV Thực hiện", value=first_row_data['NHÂN SỰ'])
                             
                             st.markdown("---")
-                            st.caption("Ý KIẾN / PHÊ DUYỆT:")
-                            e_tcsx = st.text_input("TCSX (Ghi chú/Duyệt)", value=r_news.get('TCSX', ''))
-                            e_ldp = st.text_input("Lãnh đạo phòng (Ghi chú/Duyệt)", value=r_news.get('LĐP', ''))
+                            e_tcsx = st.text_input("TCSX (Nhận xét / Phê duyệt)", value=first_row_data.get('TCSX', ''))
+                            e_ldp = st.text_input("Lãnh đạo phòng (Nhận xét / Phê duyệt)", value=first_row_data.get('LĐP', ''))
                             
                             st.markdown("---")
-                            c_time, c_date = st.columns(2)
-                            try: 
-                                time_str = r_news.get('GIỜ ĐĂNG', '')
-                                if time_str.count(":") == 2: val_time = datetime.strptime(time_str, "%H:%M:%S").time()
-                                elif time_str.count(":") == 1: val_time = datetime.strptime(time_str, "%H:%M").time()
-                                else: val_time = None
-                            except: val_time = None
-                            e_giodang = c_time.time_input("Giờ đăng", value=val_time)
-                            
-                            try: curr_d_val = datetime.strptime(r_news.get('NGÀY ĐĂNG', ''), "%d/%m/%Y").date()
-                            except: curr_d_val = datetime.now().date()
-                            e_ndang = c_date.date_input("Ngày đăng", value=curr_d_val, format="DD/MM/YYYY")
+                            e_texttin = st.text_area("Nội dung duyệt chữ (Caption, Hashtag...)", value=current_text, height=150)
+                            e_ld = st.text_input("🔗 Link duyệt (Link Drive bài/video)", value=current_link)
 
-                        # NÚT LƯU
+                        # --- CỘT PHẢI: DỮ LIỆU ĐỘC LẬP TỪNG NỀN TẢNG ---
+                        with col_specific:
+                            st.markdown("**:orange[2. TIẾN ĐỘ TỪNG NỀN TẢNG]**")
+                            
+                            platform_updates = {}
+                            for i, r in group_df.iterrows():
+                                nentang = r['NỀN TẢNG']
+                                st.markdown(f"**📍 Trên {nentang}**")
+                                
+                                try: idx_st = OPTS_STATUS_TRUCSO.index(r['STATUS'])
+                                except: idx_st = 0
+                                st_val = st.selectbox(f"Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"st_{i}", label_visibility="collapsed")
+                                
+                                c_t, c_d = st.columns(2)
+                                try: 
+                                    time_str = r.get('GIỜ ĐĂNG', '')
+                                    if time_str.count(":") == 2: val_time = datetime.strptime(time_str, "%H:%M:%S").time()
+                                    elif time_str.count(":") == 1: val_time = datetime.strptime(time_str, "%H:%M").time()
+                                    else: val_time = None
+                                except: val_time = None
+                                time_val = c_t.time_input("Giờ", value=val_time, key=f"ti_{i}")
+                                
+                                try: curr_d_val = datetime.strptime(r.get('NGÀY ĐĂNG', ''), "%d/%m/%Y").date()
+                                except: curr_d_val = datetime.now().date()
+                                date_val = c_d.date_input("Ngày", value=curr_d_val, format="DD/MM/YYYY", key=f"da_{i}")
+                                
+                                lsp_val = st.text_input("Link Sản phẩm đã đăng", value=r.get('LINK SẢN PHẨM', ''), key=f"lsp_{i}")
+                                st.markdown("---")
+                                
+                                platform_updates[i] = {
+                                    'STATUS': st_val,
+                                    'TIME': time_val,
+                                    'DATE': date_val,
+                                    'LINK_SP': lsp_val
+                                }
+
+                        # --- XỬ LÝ LƯU GỘP/TÁCH LÊN GOOGLE SHEET ---
                         st.markdown("<br>", unsafe_allow_html=True)
                         submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
                         with submit_col2:
-                            if st.form_submit_button("💾 LƯU CẬP NHẬT DÒNG NÀY", use_container_width=True, type="primary"):
-                                with st.spinner("Đang đồng bộ dữ liệu với Google Sheet..."):
-                                    r_sh = idx_news + 5 
+                            if st.form_submit_button("💾 LƯU PHÊ DUYỆT CHO SẢN PHẨM NÀY", use_container_width=True, type="primary"):
+                                with st.spinner("Đang cập nhật dữ liệu xuống Google Sheet..."):
+                                    # Cập nhật thông tin Chung vào DUY NHẤT dòng đầu tiên (Giữ đúng cấu trúc Gộp ô của Excel)
+                                    first_sheet_row = first_row_idx + 5
                                     merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
                                     
-                                    wks_today.update_cell(r_sh, 2, e_nd)     # B
-                                    wks_today.update_cell(r_sh, 3, e_dd)     # C
-                                    wks_today.update_cell(r_sh, 4, e_nt)     # D
-                                    wks_today.update_cell(r_sh, 5, e_st)     # E
-                                    wks_today.update_cell(r_sh, 8, e_ns)     # H
-                                    wks_today.update_cell(r_sh, 9, e_tcsx)   # I
-                                    wks_today.update_cell(r_sh, 10, e_ldp)   # J
-                                    wks_today.update_cell(r_sh, 11, e_giodang.strftime("%H:%M:%S") if e_giodang else "") # K
-                                    wks_today.update_cell(r_sh, 12, e_ndang.strftime("%d/%m/%Y")) # L
-                                    wks_today.update_cell(r_sh, 13, e_lsp)   # M
-                                    wks_today.update_cell(r_sh, 14, merged_link_duyet_update) # N
+                                    wks_today.update_cell(first_sheet_row, 2, e_nd)     # Cột B: NỘI DUNG
+                                    wks_today.update_cell(first_sheet_row, 3, e_dd)     # Cột C: ĐỊNH DẠNG
+                                    wks_today.update_cell(first_sheet_row, 7, e_ng)     # Cột G: NGUỒN
+                                    wks_today.update_cell(first_sheet_row, 8, e_ns)     # Cột H: NHÂN SỰ
+                                    wks_today.update_cell(first_sheet_row, 9, e_tcsx)   # Cột I: TCSX
+                                    wks_today.update_cell(first_sheet_row, 10, e_ldp)   # Cột J: LĐP
+                                    wks_today.update_cell(first_sheet_row, 14, merged_link_duyet_update) # Cột N: LINK DUYỆT (Gộp Text+Link)
                                     
+                                    # Cập nhật thông tin Nền tảng (Status, Giờ, Link SP) cho TỪNG DÒNG
+                                    for idx, update_data in platform_updates.items():
+                                        sheet_row = idx + 5
+                                        wks_today.update_cell(sheet_row, 5, update_data['STATUS']) # Cột E: STATUS
+                                        wks_today.update_cell(sheet_row, 11, update_data['TIME'].strftime("%H:%M:%S") if update_data['TIME'] else "") # Cột K: GIỜ
+                                        wks_today.update_cell(sheet_row, 12, update_data['DATE'].strftime("%d/%m/%Y")) # Cột L: NGÀY
+                                        wks_today.update_cell(sheet_row, 13, update_data['LINK_SP']) # Cột M: LINK SẢN PHẨM
+                                        
                                     st.success("✅ Cập nhật thành công!"); time.sleep(1); st.rerun()
             else: st.info("CHƯA CÓ TIN BÀI NÀO.")
 
