@@ -84,7 +84,7 @@ def check_quyen(curr_name, role, task_row, df_duan):
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=1).json()
+        res = requests.get(url, timeout=2).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         condition = "CÓ MÂY"; advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
@@ -340,7 +340,6 @@ def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
         cell_found = wks_stats.find(date_str)
         if cell_found:
             r = cell_found.row
-            # THAY VÌ LOOP, SỬ DỤNG BATCH UPDATE ĐỂ TIẾT KIỆM API CALLS
             cells = [gspread.Cell(r, i+1, val) for i, val in enumerate(row_data)]
             wks_stats.update_cells(cells)
             format_cell_range(wks_stats, f"A{r}:I{r}", CellFormat(backgroundColor=Color(1, 1, 1)))
@@ -432,6 +431,31 @@ def get_priority_score(status):
     if "✅ Đã duyệt" in status: return 6
     return 7
 
+# --- HÀM HỖ TRỢ XỬ LÝ LPS ĐÃ ĐƯỢC KHÔI PHỤC ---
+def format_title_name(text):
+    text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
+    text = text.title()
+    replacements = { " Of ": " of ", " At ": " at ", " A ": " a ", " An ": " an ", " The ": " the ", " In ": " in ", " On ": " on ", " To ": " to ", " And ": " and " }
+    for old, new in replacements.items(): text = text.replace(old, new)
+    return text
+
+def parse_khung_cell(cell_val):
+    if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
+    lines = [line.strip() for line in str(cell_val).split('\n') if line.strip()]
+    if not lines: return "", ""
+    title = lines[0]
+    title = re.sub(r'\(.*?\)', '', title) 
+    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) 
+    title = re.sub(r'\s*\d+\s*$', '', title) 
+    title = title.split('/')[0].strip() 
+    title = format_title_name(title)
+    desc = ""
+    if len(lines) > 1:
+        for line in lines[1:]:
+            if not line.startswith('(') and "PL" not in line and "PM" not in line:
+                desc = line.split('/')[0].strip(); break
+    return title, desc
+
 def format_time_col(t):
     if pd.isna(t): return ""
     try:
@@ -444,7 +468,6 @@ def format_time_col(t):
 
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
-    
     row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
     row2 = ROLES_HEADER + [""]*6
     row3 = roster_vals + [""]*6
@@ -552,7 +575,6 @@ def dinh_dang_dong_moi(wks, start_row, end_row):
         }]
         wks.spreadsheet.batch_update({"requests": req})
     except: pass
-
 
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'dang_nhap' not in st.session_state: 
@@ -918,7 +940,6 @@ else:
                                         
                                         first_sheet_row = first_row_idx + 6
                                         
-                                        # BATCH UPDATE API (Chỉ mất 0.5s thay vì 2 phút)
                                         cells_to_update = [
                                             gspread.Cell(first_sheet_row, 2, e_nd),
                                             gspread.Cell(first_sheet_row, 7, e_ng),
@@ -972,7 +993,6 @@ else:
                                 wks_today.append_rows(rows_to_add)
                                 end_row_to_format = len(all_rows) + len(rows_to_add)
                                 
-                                # Chạy lệnh định dạng hàng loạt
                                 dinh_dang_dong_moi(wks_today, start_row_to_format, end_row_to_format)
                                 
                                 st.cache_data.clear()
