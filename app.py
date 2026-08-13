@@ -12,6 +12,7 @@ import time
 import random
 import re
 import io
+import hashlib
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -36,6 +37,12 @@ SHEET_MAIN = "HeThongQuanLy"
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B3v7MV_XFjHXj_v9UZXK0ZI/edit?gid=1107365160#gid=1107365160"
 LINK_LICH_TONG = "https://docs.google.com/spreadsheets/d/1jqPGEVTA7RfvTnV8rN6FSpRJFWXS7amVIAFQ0QqzXbI/edit?gid=0#gid=0"
+
+# --- HÀM TẠO CHÌA KHÓA BẢO MẬT (TOKEN) ---
+def generate_secure_token(username):
+    # Khóa bí mật (Salt) dùng để băm dữ liệu - Chỉ máy chủ biết
+    secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
+    return hashlib.md5((str(username) + secret_salt).encode()).hexdigest()
 
 def get_vn_time():
     return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
@@ -234,7 +241,6 @@ def normalize_btv_names(name_str):
     if not normalized_parts: return "Chưa phân công"
     return ", ".join(list(dict.fromkeys(normalized_parts)))
 
-# --- TỪ ĐIỂN AI MỚI: BỔ SUNG OKE ĐỂ KHÔNG BỊ TRƯỢT ---
 def get_smart_status(group_df):
     tcsx_cmts = " ".join(group_df['TCSX'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     ldp_cmts = " ".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
@@ -246,7 +252,6 @@ def get_smart_status(group_df):
     
     has_link = len(link_duyet) > 5
     
-    # Bổ sung chữ oke vào regex
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', tcsx_cmts)
     ldp_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', ldp_cmts)
     
@@ -318,18 +323,24 @@ def dinh_dang_dong_moi(wks, row_idx):
     rng = f"A{row_idx}:N{row_idx}"
     format_cell_range(wks, rng, CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
 
-# ================= 2. AUTH & GIAO DIỆN =================
+# ================= 2. AUTH & GIAO DIỆN (CÓ AUTO-LOGIN BẢO MẬT F5) =================
 if 'dang_nhap' not in st.session_state: 
     st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
 
 df_users = load_tai_khoan()
 list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
 
-if "session_user" in st.query_params and not st.session_state['dang_nhap']:
+# THUẬT TOÁN KIỂM TRA BẢO MẬT (CHỐNG VĂNG F5 & CHỐNG HACK URL)
+if "session_user" in st.query_params and "token" in st.query_params and not st.session_state['dang_nhap']:
     saved_username = st.query_params["session_user"]
-    u_row = df_users[df_users['TenDangNhap'].astype(str) == saved_username]
-    if not u_row.empty:
-        st.session_state['dang_nhap'] = True; st.session_state['user_info'] = u_row.iloc[0].to_dict()
+    saved_token = st.query_params["token"]
+    
+    # Kiểm tra Token có khớp với Chữ ký băm của Username không
+    if saved_token == generate_secure_token(saved_username):
+        u_row = df_users[df_users['TenDangNhap'].astype(str) == saved_username]
+        if not u_row.empty:
+            st.session_state['dang_nhap'] = True
+            st.session_state['user_info'] = u_row.iloc[0].to_dict()
 
 if not st.session_state['dang_nhap']:
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
@@ -340,11 +351,15 @@ if not st.session_state['dang_nhap']:
                 u_row = df_users[(df_users['TenDangNhap'].astype(str)==user) & (df_users['MatKhau'].astype(str)==pwd)]
                 if not u_row.empty:
                     st.session_state['dang_nhap'] = True; st.session_state['user_info'] = u_row.iloc[0].to_dict()
+                    
+                    # Cấp Chìa khóa Token và nhét vào URL để chống F5
                     st.query_params["session_user"] = user
+                    st.query_params["token"] = generate_secure_token(user)
+                    
                     sh_main = ket_noi_sheet(SHEET_MAIN)
                     ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success"); clear_cache_and_rerun()
-                else: st.error("Sai thông tin!")
-            else: st.error("Lỗi dữ liệu Tài khoản.")
+                else: st.error("Sai thông tin đăng nhập!")
+            else: st.error("Lỗi kết nối CSDL Tài khoản.")
 else:
     df_duan, df_cv, df_cn, df_log = load_du_lieu_app()
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
@@ -370,8 +385,9 @@ else:
                             st.success("Xong!"); clear_cache_and_rerun()
                             
         if st.button("ĐĂNG XUẤT"): 
-            st.session_state['dang_nhap'] = False
+            st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
             if "session_user" in st.query_params: del st.query_params["session_user"]
+            if "token" in st.query_params: del st.query_params["token"]
             st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
@@ -454,13 +470,10 @@ else:
                 except: pass
 
             st.write("")
-            btn_refresh = st.button("🔄 LÀM MỚI BẢNG DỮ LIỆU (Tải dữ liệu mới từ Sếp/BTV)", type="secondary")
-            if btn_refresh: clear_cache_and_rerun()
 
-            # ================= LỒNG KÍNH PHÂN MẢNH (REAL-TIME AUTO UPDATE) =================
-            @st.fragment(run_every="15s")
+            # ================= LỒNG KÍNH PHÂN MẢNH (REAL-TIME AUTO UPDATE - 10s) =================
+            @st.fragment(run_every="10s")
             def real_time_dashboard_and_table():
-                # Lấy dữ liệu trực tiếp 1 nhịp thay vì nối vòng vèo để tránh bị chết Cache
                 df_content = safe_read_values(wks_today)
                 if df_content.empty: return
                 
@@ -502,6 +515,20 @@ else:
                 
                 if not df_summary.empty:
                     st.markdown("##### 📊 BẢNG THEO DÕI & TIẾN ĐỘ CÁ NHÂN (Cập nhật trực tiếp)")
+                    
+                    # 1. TẦNG 1: THỐNG KÊ TỔNG QUAN
+                    st.markdown("**1. TỔNG QUAN TIẾN ĐỘ TRONG NGÀY:**")
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    m1.metric("📌 Tổng bài", len(df_summary))
+                    m2.metric("📝 Đang làm", len(df_summary[df_summary["Tiến độ"] == "📝 BTV đang hoàn thiện"]))
+                    m3.metric("👀 Chờ TCSX", len(df_summary[df_summary["Tiến độ"] == "👀 Chờ TCSX duyệt"]))
+                    m4.metric("⏳ Chờ LĐP", len(df_summary[df_summary["Tiến độ"] == "⏳ Chờ LĐP duyệt"]))
+                    m5.metric("🔴 Đang sửa", len(df_summary[df_summary["Tiến độ"].isin(["🔴 Cần sửa", "🔄 BTV đã sửa"])]))
+                    m6.metric("✅ Đã chốt", len(df_summary[df_summary["Tiến độ"] == "✅ Đã duyệt"]))
+                    
+                    st.write("")
+                    # 2. TẦNG 2: THỐNG KÊ CÁ NHÂN
+                    st.markdown("**2. BÁO CÁO NHÂN SỰ:**")
                     btv_list = [b for b in df_summary['BTV'].unique() if b not in ["Chưa Phân Công", "Chưa phân công", ""]]
                     if btv_list:
                         btv_cols = st.columns(len(btv_list))
@@ -531,11 +558,11 @@ else:
                     if filter_opt != "Tất cả": df_show = df_show[df_show["Tiến độ"] == filter_opt]
                     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-            # Thực thi Fragment
+            # Thực thi Fragment (Đã ngầm và mượt)
             real_time_dashboard_and_table()
             st.divider()
 
-            # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT (BÊN NGOÀI FRAGMENT) =================
+            # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT =================
             st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
             
             df_content_static = safe_read_values(wks_today)
@@ -571,7 +598,7 @@ else:
                             e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                             
                             st.markdown("---")
-                            if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                            if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                             e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                             e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                             
