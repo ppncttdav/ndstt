@@ -36,6 +36,8 @@ st.markdown("""
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B3v7MV_XFjHXj_v9UZXK0ZI/edit?gid=1107365160#gid=1107365160"
+
+# KHAI BÁO CÁC ĐƯỜNG LINK LỊCH TRỰC
 LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=387062810#gid=387062810"
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
@@ -57,9 +59,10 @@ def match_nv(name, list_nv):
     n_lower = str(name).lower().strip()
     for nv in list_nv:
         nv_lower = str(nv).lower().strip()
+        # Áp dụng Fuzzy Match: Khớp tương đối
         if n_lower in nv_lower or nv_lower in n_lower: 
             return nv
-    return name
+    return name.title()
 
 def get_lanh_dao_ban(d_obj):
     wd = d_obj.weekday()
@@ -68,6 +71,11 @@ def get_lanh_dao_ban(d_obj):
     elif wd in [3, 5]: return "Nguyễn Phương Liên"
     elif wd == 6: return "Trần Thu Hà"
     return ""
+
+def check_quyen(curr_name, role, task_row, df_duan):
+    if role == 'LanhDao': return 2
+    if curr_name in str(task_row.get('NguoiPhuTrach', '')): return 1
+    return 0
 
 @st.cache_data(ttl=3600)
 def get_weather_and_advice():
@@ -153,16 +161,6 @@ def load_du_lieu_app():
         return df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=3600)
-def get_cached_schedule(url, sheet_id):
-    try:
-        client = get_gspread_client_cached()
-        if not client: return None
-        sh = client.open_by_url(url)
-        wks = next((w for w in sh.worksheets() if str(w.id) == sheet_id), sh.get_worksheet(0))
-        return wks.get_all_values()
-    except: return None
-
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_public_gsheet_as_excel(url):
     try:
@@ -182,52 +180,66 @@ def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
     try: sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
     except: pass
 
-def extract_roster_from_sheet(data, target_date_obj, role_type, list_nv):
-    if not data: return "", "", "", []
-    
+# --- THUẬT TOÁN ĐỌC LỊCH BẰNG FILE EXCEL ĐỂ CHỐNG GOOGLE BLOCK ---
+def extract_roster_from_excel_bytes(excel_bytes, target_date_obj, role_type, list_nv):
+    if not excel_bytes: return "", "", "", []
     d = target_date_obj.day
     m = target_date_obj.month
     y = target_date_obj.year
+    
+    # Khớp vô số định dạng ngày kể cả việc sếp chỉ ghi số "14"
     date_patterns = [
         f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}",
         f"{d:02d}-{m:02d}", f"{d}-{m}", f"{d:02d}.{m:02d}", f"{d}.{m}",
         f"ngày {d}/{m}", f"ngày {d:02d}/{m:02d}"
     ]
     
-    found_col = -1
-    for r_idx, row in enumerate(data[:20]):
-        for c_idx, cell in enumerate(row):
-            c_str = str(cell).strip().lower()
-            if any(p in c_str for p in date_patterns):
-                found_col = c_idx
-                break
-        if found_col != -1: break
-        
     res_ldp = ""; res_tcsx = ""; res_ht = ""; res_btv = []
-
-    if found_col != -1:
-        for r in range(len(data)):
-            if found_col < len(data[r]):
-                val = str(data[r][found_col]).lower().strip()
-                if not val: continue 
-                
-                name = str(data[r][0]).strip()
-                if not name and len(data[r]) > 1: name = str(data[r][1]).strip()
-                if not name and len(data[r]) > 2: name = str(data[r][2]).strip()
-                
-                if not name or name.isdigit() or name.lower() in ["stt", "họ và tên", "tên"]: continue
-                full_name = match_nv(name, list_nv)
-                
-                if role_type == "LDP":
-                    if "số" in val or "truc so" in val or "trực số" in val or val == "x":
-                        res_ldp = full_name
+    
+    try:
+        xls = pd.ExcelFile(io.BytesIO(excel_bytes))
+        for sheet_name in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            
+            found_col = -1
+            # Quét khu vực tiêu đề (15 dòng đầu) để tìm ngày
+            for r_idx in range(min(15, len(df))):
+                for c_idx in range(min(40, len(df.columns))):
+                    val = str(df.iloc[r_idx, c_idx]).strip().lower()
+                    if val == str(d) or val == f"{d:02d}" or any(p in val for p in date_patterns):
+                        found_col = c_idx
                         break
-                else:
-                    if "tcsx" in val: res_tcsx = full_name
-                    elif "ht" in val or "hỗ trợ" in val or "ho tro" in val: res_ht = full_name
-                    elif "số" in val or "btv" in val or val == "x" or "vỏ" in val:
-                        if full_name not in res_btv: res_btv.append(full_name)
-                        
+                if found_col != -1: break
+            
+            if found_col != -1:
+                # Dóng thẳng xuống dọc theo cột Ngày để bốc người
+                for r in range(len(df)):
+                    val = str(df.iloc[r, found_col]).lower().strip()
+                    if not val or val == 'nan': continue
+                    
+                    # Quét ngang các cột bên trái để kiếm Tên
+                    name = ""
+                    for c in range(min(4, len(df.columns))):
+                        if c == found_col: continue
+                        temp = str(df.iloc[r, c]).strip()
+                        if temp and temp.lower() != 'nan' and not temp.isdigit() and len(temp) > 2 and temp.lower() not in ["stt", "họ và tên", "tên", "chức danh", "vị trí"]:
+                            name = temp
+                            break
+                    
+                    if not name: continue
+                    full_name = match_nv(name, list_nv)
+                    if not full_name: continue
+                    
+                    if role_type == "LDP":
+                        if any(x in val for x in ["số", "truc so", "trực số", "x", "vỏ", "ts"]):
+                            res_ldp = full_name
+                    else:
+                        if "tcsx" in val: res_tcsx = full_name
+                        elif "ht" in val or "hỗ trợ" in val or "ho tro" in val: res_ht = full_name
+                        elif any(x in val for x in ["số", "btv", "x", "vỏ", "ts", "trực"]):
+                            if full_name not in res_btv: res_btv.append(full_name)
+                break # Tìm thấy tab rồi thì không quét tiếp tab khác nữa
+    except: pass
     return res_ldp, res_tcsx, res_ht, res_btv
 
 def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
@@ -235,17 +247,19 @@ def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
     btv_list = []
     errors = []
     
-    data_ldp = get_cached_schedule(LINK_LICH_LDP, "570145520")
-    if data_ldp is None:
-        errors.append("⚠️ Không tải được Lịch LĐP. Vui lòng Share file cho Bot!")
+    # 1. Quét Lịch LĐP qua đường Excel giả lập
+    excel_bytes_ldp = get_public_gsheet_as_excel(LINK_LICH_LDP)
+    if not excel_bytes_ldp:
+        errors.append("⚠️ Không tải được Lịch LĐP. Vui lòng kiểm tra quyền Public của link.")
     else:
-        ldp, _, _, _ = extract_roster_from_sheet(data_ldp, target_date_obj, "LDP", list_nv)
+        ldp, _, _, _ = extract_roster_from_excel_bytes(excel_bytes_ldp, target_date_obj, "LDP", list_nv)
         
-    data_btv = get_cached_schedule(LINK_LICH_BTV_TCSX, "387062810")
-    if data_btv is None:
-        errors.append("⚠️ Không tải được Lịch BTV/TCSX. Vui lòng Share file cho Bot!")
+    # 2. Quét Lịch BTV/TCSX qua đường Excel giả lập
+    excel_bytes_btv = get_public_gsheet_as_excel(LINK_LICH_BTV_TCSX)
+    if not excel_bytes_btv:
+        errors.append("⚠️ Không tải được Lịch BTV/TCSX. Vui lòng kiểm tra quyền Public của link.")
     else:
-        _, tcsx, ht, btv_list = extract_roster_from_sheet(data_btv, target_date_obj, "BTV", list_nv)
+        _, tcsx, ht, btv_list = extract_roster_from_excel_bytes(excel_bytes_btv, target_date_obj, "BTV", list_nv)
         
     return ldp, tcsx, btv_list, ht, errors
 
@@ -320,6 +334,7 @@ def get_smart_status(group_df):
     
     has_link = len(link_duyet) > 5
     
+    # Các từ khóa siêu ưu tiên cho Đã duyệt
     if any(s in status for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]): return "✅ Đã duyệt"
     
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', tcsx_cmts)
@@ -487,6 +502,7 @@ else:
                     for err in scan_errors: st.warning(err)
                     
                 default_roster = [""] * 8
+                # Map chính xác 8 vị trí bạn đã yêu cầu
                 default_roster[0] = match_nv(get_lanh_dao_ban(target_date), list_nv)
                 default_roster[1] = auto_ldp 
                 default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "" 
@@ -523,7 +539,7 @@ else:
             is_shift_tcsx = False
             try:
                 roster_names_current = wks_today.row_values(3)[1:]
-                
+                # Check tên trong danh sách lịch trực (có thể là tên viết tắt nên dùng in)
                 ldp_in_sheet = str(roster_names_current[1]).strip().lower() if len(roster_names_current) > 1 else ""
                 tcsx_in_sheet = str(roster_names_current[4]).strip().lower() if len(roster_names_current) > 4 else ""
                 curr_lower = curr_name.lower()
@@ -532,11 +548,11 @@ else:
                 if tcsx_in_sheet and (tcsx_in_sheet in curr_lower or curr_lower in tcsx_in_sheet): is_shift_tcsx = True
             except: pass
             
-            # Phân quyền đè tuyệt đối từ CSDL (Bypass Role)
+            # Ghi đè tuyệt đối theo Role: Nếu hệ thống nhận diện bạn là TCSX hoặc Lãnh đạo thì luôn luôn được quyền duyệt
             if role == 'LanhDao': 
                 is_shift_ldp = True
                 is_shift_tcsx = True
-            if role == 'ToChucSanXuat': 
+            if role == 'ToChucSanXuat':
                 is_shift_tcsx = True
 
             with st.expander("👥 THÔNG TIN EKIP TRỰC SỐ", expanded=False):
@@ -695,7 +711,7 @@ else:
                                 e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                 
                                 st.markdown("---")
-                                if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                 e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                 e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                 
