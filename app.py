@@ -221,7 +221,7 @@ def normalize_btv_names(name_str):
     if not normalized_parts: return "Chưa phân công"
     return ", ".join(list(dict.fromkeys(normalized_parts)))
 
-# --- LOGIC NỘI SUY TIẾN ĐỘ THEO CHUỖI ƯU TIÊN NGẶT NGHÈO ---
+# --- LOGIC NỘI SUY TIẾN ĐỘ THÔNG MINH (PHIÊN BẢN CHUỖI ƯU TIÊN MỚI) ---
 def get_smart_status(group_df):
     tcsx_cmts = " ".join(group_df['TCSX'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     ldp_cmts = " ".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
@@ -241,39 +241,44 @@ def get_smart_status(group_df):
     btv_keywords = ["đã sửa", "đã update", "upd", "đã chỉnh", "đã thay", "e đã", "em đã", "đã xong", "đã bổ sung", "đã cắt"]
     btv_fixed = any(kw in all_cmts for kw in btv_keywords)
     
-    # 3. Lọc comment trung lập (Tránh hiểu lầm là Cần sửa)
-    neutral_phrases = ["đã xem", "xem rồi", "good", "được", "tks", "cảm ơn", "nhé", "em nhé", "ok", "okie"]
-    tcsx_is_pure_neutral = any(p in tcsx_cmts for p in neutral_phrases) and not any(w in tcsx_cmts for w in ["sửa", "lỗi", "thiếu", "chưa", "sai", "thêm"])
-    ldp_is_pure_neutral = any(p in ldp_cmts for p in neutral_phrases) and not any(w in ldp_cmts for w in ["sửa", "lỗi", "thiếu", "chưa", "sai", "thêm"])
+    # 3. Lọc comment trung lập và từ khóa tiêu cực
+    neutral_phrases = ["đã xem", "xem rồi", "good", "được", "tks", "cảm ơn", "ok", "okie"]
+    negative_keywords = ["sửa", "lỗi", "thiếu", "chưa", "sai", "thêm", "đừng", "sao lại", "cắt", "nhạy cảm", "giật", "không", "ko", "nếu"]
     
-    # --- CHUỖI ƯU TIÊN ---
-    # Ưu tiên 1: Sếp chốt hoặc Status báo đã đăng
+    tcsx_is_pure_neutral = any(p in tcsx_cmts for p in neutral_phrases) and not any(w in tcsx_cmts for w in negative_keywords)
+    ldp_is_pure_neutral = any(p in ldp_cmts for p in neutral_phrases) and not any(w in ldp_cmts for w in negative_keywords)
+    
+    # --- CHUỖI ƯU TIÊN NGHIÊM NGẶT ---
+    
+    # Ưu tiên 1: LĐP chốt OK hoặc Status báo đã đăng
     if ldp_ok or "đã duyệt" in status or "đã đăng" in status or "posted" in status: 
         return "✅ Đã duyệt"
     
-    # Ưu tiên 2: LĐP chê (Comment dài, không OK, không Trung lập)
-    if not ldp_ok and len(ldp_cmts) > 2 and not ldp_is_pure_neutral:
-        if btv_fixed: return "🔄 BTV đã sửa"
+    # Ưu tiên 2: BTV báo đã cập nhật/sửa lỗi (Vượt qua mọi lời chê trước đó để chờ nghiệm thu)
+    if btv_fixed: 
+        return "🔄 BTV đã sửa"
+        
+    # Ưu tiên 3: LĐP chê (Comment dài, không có chữ OK, chứa từ ngữ yêu cầu sửa/chê)
+    if not ldp_ok and len(ldp_cmts.strip()) > 2 and not ldp_is_pure_neutral:
         return "🔴 Cần sửa"
         
-    # Ưu tiên 3: LĐP chưa ý kiến, TCSX chê
-    if not tcsx_ok and len(tcsx_cmts) > 2 and not tcsx_is_pure_neutral:
-        if btv_fixed: return "🔄 BTV đã sửa"
+    # Ưu tiên 4: LĐP chưa ý kiến, TCSX chê
+    if not tcsx_ok and len(tcsx_cmts.strip()) > 2 and not tcsx_is_pure_neutral:
         return "🔴 Cần sửa"
         
-    # Status báo sửa
+    # Ưu tiên 5: Nếu người dùng tự chỉnh Status là cần sửa
     if "sửa" in status: 
         return "🔴 Cần sửa"
         
-    # Ưu tiên 4: LĐP chưa ý kiến, TCSX đã OK hoặc Trạng thái báo Gửi LĐP
+    # Ưu tiên 6: LĐP chưa ý kiến, nhưng TCSX đã OK hoặc Trạng thái gửi thẳng LĐP
     if tcsx_ok or "lđp" in status: 
         return "⏳ Chờ LĐP duyệt"
         
-    # Ưu tiên 5: Có Link hoặc Trạng thái Gửi TCSX
+    # Ưu tiên 7: BTV up link lên hoặc chuyển Trạng thái gửi TCSX
     if has_link or "tcsx" in status: 
         return "👀 Chờ TCSX duyệt"
     
-    # Mặc định
+    # Mặc định cuối cùng
     return "📝 BTV đang hoàn thiện"
 
 def format_title_name(text):
@@ -482,24 +487,23 @@ else:
             df_content = safe_read_values(wks_today)
             
             if not df_content.empty:
-                # ================= LỌC RÁC & CHUẨN HÓA DỮ LIỆU =================
+                # ================= 1. BẢO TOÀN DỮ LIỆU & LỌC RÁC THÔNG MINH =================
                 df_context = df_content.copy()
                 
-                # CHỈ VỨT BỎ DÒNG RÁC HOÀN TOÀN TRỐNG CỘT NỀN TẢNG
-                df_context = df_context[df_context['NỀN TẢNG'].astype(str).str.strip() != ""]
+                # BỘ LỌC RÁC MỚI: Chỉ xóa các dòng ở cuối Excel mà CẢ 3 cột STT, NỘI DUNG, NỀN TẢNG đều bị trống (tránh xóa nhầm bài chưa nhập nền tảng)
+                def is_valid_row(row):
+                    return str(row['STT']).strip() != "" or str(row['NỘI DUNG']).strip() != "" or str(row['NỀN TẢNG']).strip() != ""
+                df_context = df_context[df_context.apply(is_valid_row, axis=1)]
 
-                # Xử lý Lấp Đầy Ô Gộp
+                # LẤP ĐẦY DỮ LIỆU BỊ GỘP Ô
                 df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill()
-                
-                # DIỆT GỐC BÀI "CHƯA CÓ TÊN"
-                df_context = df_context.dropna(subset=['NỘI DUNG_GROUP'])
-                df_context = df_context[df_context['NỘI DUNG_GROUP'].astype(str).str.strip() != "Chưa có tên"]
+                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG_GROUP'].fillna("Chưa có tên")
                 
                 df_context['NHÂN SỰ'] = df_context['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("Chưa phân công")
                 df_context['NHÂN SỰ_NORM'] = df_context['NHÂN SỰ'].apply(normalize_btv_names)
                 df_context['NGUỒN'] = df_context['NGUỒN'].replace('', pd.NA).ffill().fillna("")
                 
-                # ================= DASHBOARD TỔNG QUAN =================
+                # ================= 2. DASHBOARD TỔNG QUAN =================
                 summary_data = []
                 unique_products = df_context['NỘI DUNG_GROUP'].unique()
                 valid_products = [p for p in unique_products if str(p).strip() != ""]
@@ -523,6 +527,7 @@ else:
                 
                 if not df_summary.empty:
                     st.write("")
+                    # THỐNG KÊ CÁ NHÂN
                     btv_list = [b for b in df_summary['BTV'].unique() if b not in ["Chưa Phân Công", "Chưa phân công", ""]]
                     if btv_list:
                         btv_cols = st.columns(len(btv_list))
@@ -530,7 +535,6 @@ else:
                             b_df = df_summary[df_summary['BTV'] == b]
                             total_b = len(b_df)
                             done_b = len(b_df[b_df['Tiến độ'] == "✅ Đã duyệt"])
-                            
                             btv_cols[i].metric(label=b, value=f"{done_b}/{total_b}", delta="Bài đã duyệt", delta_color="normal" if done_b > 0 else "off")
 
                         st.write("")
@@ -555,7 +559,7 @@ else:
                 
                 st.divider()
 
-                # ================= KHU VỰC DUYỆT BÀI CHI TIẾT =================
+                # ================= 3. KHU VỰC DUYỆT BÀI CHI TIẾT =================
                 st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
                 
                 sel_product = st.selectbox("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC:", ["-- Chọn bài viết --"] + valid_products)
