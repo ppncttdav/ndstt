@@ -13,6 +13,7 @@ import random
 import re
 import io
 import hashlib
+import concurrent.futures
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -56,11 +57,9 @@ def match_nv(name, list_nv):
     if not name or str(name).strip() == "": return ""
     n_lower = str(name).lower().strip()
     
-    # Ưu tiên 1: Khớp chuẩn 100%
     for nv in list_nv:
         if n_lower == str(nv).lower().strip(): return nv
         
-    # Ưu tiên 2: Khớp chữ lồng nhau (Fuzzy match)
     if len(n_lower) >= 2:
         for nv in list_nv:
             nv_lower = str(nv).lower().strip()
@@ -70,17 +69,22 @@ def match_nv(name, list_nv):
 
 def get_lanh_dao_ban(d_obj):
     wd = d_obj.weekday()
-    if wd in [0, 1]: return "Lê Hoàng Linh" # Thứ 2, 3
-    elif wd in [2, 4]: return "Nguyễn Phương Hà" # Thứ 4, 6
-    elif wd in [3, 5]: return "Nguyễn Phương Liên" # Thứ 5, 7
-    elif wd == 6: return "Trần Thu Hà" # CN
+    if wd in [0, 1]: return "Lê Hoàng Linh"
+    elif wd in [2, 4]: return "Nguyễn Phương Hà"
+    elif wd in [3, 5]: return "Nguyễn Phương Liên"
+    elif wd == 6: return "Trần Thu Hà"
     return ""
+
+def check_quyen(curr_name, role, task_row, df_duan):
+    if role == 'LanhDao': return 2
+    if curr_name in str(task_row.get('NguoiPhuTrach', '')): return 1
+    return 0
 
 @st.cache_data(ttl=3600)
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=2).json()
+        res = requests.get(url, timeout=1).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         condition = "CÓ MÂY"; advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
@@ -115,7 +119,7 @@ def get_gspread_client_cached():
         if "gcp_service_account" in st.secrets: creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
         else: creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
         return gspread.authorize(creds)
-    except Exception as e: st.error(f"🔴 Lỗi chứng thực: {e}"); return None
+    except Exception as e: return None
 
 def ket_noi_sheet(sheet_name_or_url):
     client = get_gspread_client_cached()
@@ -161,154 +165,159 @@ def load_du_lieu_app():
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def get_public_gsheet_as_excel(url):
-    try:
-        sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
-        if not sheet_id_match: return None
-        sheet_id = sheet_id_match.group(1)
-        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
-        res = requests.get(export_url, timeout=10)
-        if res.status_code == 200:
-            return res.content
-    except: pass
-    return None
+def fetch_and_parse_schedules(url_ldp, url_btv):
+    results = {"LDP": pd.DataFrame(), "BTV": pd.DataFrame()}
+    def _fetch_and_parse(url, kw):
+        try:
+            sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+            if not sheet_id_match: return kw, pd.DataFrame()
+            sheet_id = sheet_id_match.group(1)
+            export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+            res = requests.get(export_url, timeout=15)
+            if res.status_code == 200:
+                xls = pd.ExcelFile(io.BytesIO(res.content))
+                target_sheet = xls.sheet_names[0]
+                if kw == "LDP":
+                    for sn in xls.sheet_names:
+                        if "LĐP" in sn.upper(): target_sheet = sn; break
+                else:
+                    for sn in xls.sheet_names:
+                        if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
+                            target_sheet = sn; break
+                df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
+                return kw, df
+        except: pass
+        return kw, pd.DataFrame()
 
-def clear_cache_and_rerun(): st.cache_data.clear(); st.rerun()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(_fetch_and_parse, url_ldp, "LDP"),
+            executor.submit(_fetch_and_parse, url_btv, "BTV")
+        ]
+        for f in concurrent.futures.as_completed(futures):
+            k, df = f.result()
+            results[k] = df
+    return results
 
-def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
-    try: sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
-    except: pass
+def get_ldp_from_df(df, target_date_obj, list_nv):
+    if df is None or df.empty: return ""
+    d_str = str(target_date_obj.day)
+    d_str_02 = f"{target_date_obj.day:02d}"
+    m = target_date_obj.month
+    m_str = str(m)
+    m_str_02 = f"{m:02d}"
+    
+    month_row_idx = -1
+    month_str1 = f"tháng {m_str}"
+    month_str2 = f"tháng {m_str_02}"
+    
+    for r in range(len(df)-1, -1, -1):
+        row_joined = " ".join([str(x).lower().strip() for x in df.iloc[r].values])
+        if month_str1 in row_joined or month_str2 in row_joined:
+            month_row_idx = r
+            break
+            
+    if month_row_idx == -1: month_row_idx = 0
+    
+    target_col = -1
+    header_row = -1
+    
+    for r in range(month_row_idx, min(month_row_idx + 15, len(df))):
+        row_vals = [str(x).strip() for x in df.iloc[r].values]
+        row_vals_clean = [v[:-2] if v.endswith('.0') else v for v in row_vals]
+        if d_str in row_vals_clean or d_str_02 in row_vals_clean:
+            if "1" in row_vals_clean or "15" in row_vals_clean or str((target_date_obj.day % 28) + 1) in row_vals_clean:
+                target_col = row_vals_clean.index(d_str) if d_str in row_vals_clean else row_vals_clean.index(d_str_02)
+                header_row = r
+                break
+                
+    if target_col != -1 and header_row != -1:
+        for r in range(header_row + 1, len(df)):
+            row_joined = " ".join([str(x).lower() for x in df.iloc[r].values])
+            if "tháng" in row_joined and str(m) not in row_joined:
+                break
+            val = str(df.iloc[r, target_col]).lower().strip()
+            if "số" in val or "trực" in val or val == "x" or "ts" in val or "họp" in val:
+                name = ""
+                for c in [1, 2, 0, 3]:
+                    if c < len(df.columns):
+                        n = str(df.iloc[r, c]).strip()
+                        if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
+                            name = n
+                            break
+                if name:
+                    matched = match_nv(name, list_nv)
+                    if matched: return matched
+    return ""
 
-# --- THUẬT TOÁN ĐỌC LỊCH THÔNG MINH BẰNG "TỌA ĐỘ KÉP" ---
-def get_roster_from_excel(excel_bytes, target_date_obj, role_type, list_nv):
+def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
+    res_tcsx = ""
+    res_btv = []
+    if df is None or df.empty: return res_tcsx, res_btv
+    
     d = target_date_obj.day
     m = target_date_obj.month
     y = target_date_obj.year
-    d_str = str(d)
-    d_str_02 = f"{d:02d}"
-    
     date_patterns = [
         f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}",
         f"{y}-{m:02d}-{d:02d}", f"{d:02d}.{m:02d}", f"{d}.{m}"
     ]
     
-    month_str1 = f"tháng {m}"
-    month_str2 = f"tháng {m:02d}"
+    target_col = -1
+    header_row = -1
     
-    res_ldp = []
-    res_tcsx = []
-    res_btv = []
-    
-    try:
-        xls = pd.ExcelFile(io.BytesIO(excel_bytes))
-        target_sheet = xls.sheet_names[0]
-        # Bộ lọc Tab chống đi lạc
-        for sn in xls.sheet_names:
-            sn_up = sn.upper()
-            if role_type == "LDP" and "LĐP" in sn_up:
-                target_sheet = sn
+    for r in range(min(100, len(df))):
+        for c in range(len(df.columns)):
+            val = str(df.iloc[r, c]).strip().lower()
+            if any(p in val for p in date_patterns) and "tháng" not in val:
+                target_col = c
+                header_row = r
                 break
-            elif role_type != "LDP" and ("SỐ" in sn_up or "TRỰC" in sn_up) and "LĐP" not in sn_up:
-                target_sheet = sn
-                break
-                
-        df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
+        if target_col != -1: break
         
-        # 1. Tìm vị trí (tọa độ) của "THÁNG" hiện tại (Quét từ dưới lên để lấy tháng mới nhất)
-        month_row_idx = -1
-        for r in range(len(df)-1, -1, -1):
-            row_joined = " ".join([str(x).lower().strip() for x in df.iloc[r].values])
-            if month_str1 in row_joined or month_str2 in row_joined:
-                month_row_idx = r
-                break
-                
-        if month_row_idx == -1: month_row_idx = 0
-        
-        target_col = -1
-        header_row = -1
-        
-        # 2. Quét các dòng lân cận dưới "Tháng" để chốt cột Ngày
-        for r in range(month_row_idx, min(month_row_idx + 15, len(df))):
-            for c in range(len(df.columns)):
-                val = str(df.iloc[r, c]).strip().lower()
-                if val.endswith('.0'): val = val[:-2]
-                
-                # Check số nguyên (đặc sản của lịch LĐP)
-                if val == d_str or val == d_str_02:
-                    # Kiểm định: Ô bên cạnh hoặc ô trước đó phải là số ngày nối tiếp
-                    if c + 1 < len(df.columns):
-                        next_val = str(df.iloc[r, c+1]).strip().lower()
-                        if next_val.endswith('.0'): next_val = next_val[:-2]
-                        if next_val == str((d % 28) + 1) or next_val == f"{(d%28)+1:02d}":
-                            target_col = c
-                            header_row = r
-                            break
-                
-                # Check pattern đầy đủ (đặc sản của lịch Số)
-                if any(p in val for p in date_patterns) and "tháng" not in val:
-                    target_col = c
-                    header_row = r
-                    break
-            if target_col != -1: break
+    if target_col != -1:
+        for r in range(header_row + 1, len(df)):
+            val = str(df.iloc[r, target_col]).lower().strip()
+            if not val or val == 'nan': continue
             
-        # Fallback khẩn cấp cho Lịch Số nếu Tháng và Ngày nằm lệch quá xa
-        if target_col == -1:
-            for r in range(len(df)-1, -1, -1):
-                for c in range(len(df.columns)):
-                    val = str(df.iloc[r, c]).strip().lower()
-                    if any(p in val for p in date_patterns) and "tháng" not in val:
-                        target_col = c; header_row = r; break
-                if target_col != -1: break
-
-        # 3. Quét nhân sự từ ngày đã chốt
-        if target_col != -1 and header_row != -1:
-            for r in range(header_row + 1, len(df)):
-                row_joined = " ".join([str(x).lower().strip() for x in df.iloc[r].values[:10] if str(x).strip() and str(x).lower().strip() != 'nan'])
-                if "tháng" in row_joined and str(m) not in row_joined:
-                    break # Đi lố sang tháng khác, phanh lại!
-                    
-                val = str(df.iloc[r, target_col]).lower().strip()
-                if not val or val == 'nan': continue
-                
-                name = ""
-                # Mò tên ở các cột A, B, C, D
-                for c in [1, 2, 0, 3]:
-                    if c < len(df.columns):
-                        n = str(df.iloc[r, c]).strip()
-                        if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower() and "họ và" not in n.lower():
-                            name = n
-                            break
-                            
-                if name:
-                    matched = match_nv(name, list_nv)
-                    if matched:
-                        if role_type == "LDP":
-                            if "số" in val or "trực" in val or val == "x" or "ts" in val or "họp" in val:
-                                if matched not in res_ldp: res_ldp.append(matched)
-                        else:
-                            if "tcsx" in val:
-                                if matched not in res_tcsx: res_tcsx.append(matched)
-                            elif "số" in val or "btv" in val or "trực" in val or val == "x":
-                                if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val:
-                                    if matched not in res_btv: res_btv.append(matched)
-    except: pass
-    
-    return ", ".join(res_ldp), ", ".join(res_tcsx), res_btv
+            name = ""
+            for c in [1, 2, 0, 3]:
+                if c < len(df.columns):
+                    n = str(df.iloc[r, c]).strip()
+                    if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
+                        name = n
+                        break
+            
+            if name:
+                matched = match_nv(name, list_nv)
+                if matched:
+                    if "tcsx" in val:
+                        res_tcsx = matched
+                    elif "số" in val or "btv" in val or "trực" in val or val == "x":
+                        if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val:
+                            if matched not in res_btv: res_btv.append(matched)
+    return res_tcsx, res_btv
 
 def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
-    ldp, tcsx = "", ""
+    ldp, tcsx, ht = "", "", ""
     btv_list = []
     errors = []
     
-    excel_bytes_ldp = get_public_gsheet_as_excel(LINK_LICH_LDP)
-    if not excel_bytes_ldp: errors.append("⚠️ Không tải được Lịch LĐP.")
-    else: ldp, _, _ = get_roster_from_excel(excel_bytes_ldp, target_date_obj, "LDP", list_nv)
+    dfs = fetch_and_parse_schedules(LINK_LICH_LDP, LINK_LICH_BTV_TCSX)
+    
+    df_ldp = dfs.get("LDP")
+    if df_ldp is None or df_ldp.empty:
+        errors.append("⚠️ Không tải được Lịch LĐP. Vui lòng kiểm tra quyền Public của link.")
+    else:
+        ldp = get_ldp_from_df(df_ldp, target_date_obj, list_nv)
         
-    excel_bytes_btv = get_public_gsheet_as_excel(LINK_LICH_BTV_TCSX)
-    if not excel_bytes_btv: errors.append("⚠️ Không tải được Lịch BTV/TCSX.")
-    else: _, tcsx, btv_list = get_roster_from_excel(excel_bytes_btv, target_date_obj, "BTV", list_nv)
+    df_btv = dfs.get("BTV")
+    if df_btv is None or df_btv.empty:
+        errors.append("⚠️ Không tải được Lịch BTV/TCSX. Vui lòng kiểm tra quyền Public của link.")
+    else:
+        tcsx, btv_list = get_btv_tcsx_from_df(df_btv, target_date_obj, list_nv)
         
-    return ldp, tcsx, btv_list, errors
+    return ldp, tcsx, btv_list, ht, errors
 
 def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
     try:
@@ -447,21 +456,105 @@ def format_time_col(t):
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
-def dinh_dang_dep(wks):
-    wks.merge_cells('A1:N1')
-    format_cell_range(wks, 'A1:N1', CellFormat(backgroundColor=Color(0, 1, 1), textFormat=TextFormat(bold=True, fontSize=14), horizontalAlignment='CENTER', verticalAlignment='MIDDLE'))
-    format_cell_range(wks, 'A2:N3', CellFormat(textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
-    format_cell_range(wks, 'A2:N2', CellFormat(backgroundColor=Color(0.8, 1, 1)))
-    format_cell_range(wks, 'A4:N4', CellFormat(backgroundColor=Color(1, 1, 0), textFormat=TextFormat(bold=True), horizontalAlignment='CENTER', verticalAlignment='MIDDLE', wrapStrategy='WRAP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
-    set_column_width(wks, 'A', 40); set_column_width(wks, 'B', 300); set_column_width(wks, 'C', 100); set_column_width(wks, 'D', 100)
-    set_column_width(wks, 'E', 130); set_column_width(wks, 'F', 50); set_column_width(wks, 'G', 80); set_column_width(wks, 'H', 120)
-    set_column_width(wks, 'I', 150); set_column_width(wks, 'J', 150); set_column_width(wks, 'K', 80); set_column_width(wks, 'L', 100)
-    set_column_width(wks, 'M', 150); set_column_width(wks, 'N', 350)
-    format_cell_range(wks, 'B5:B100', CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP'))
+# --- THUẬT TOÁN ĐỊNH DẠNG SIÊU TỐC BẰNG BATCH UPDATE ---
+def dinh_dang_dep(wks, roster_vals):
+    # Thay vì gọi 40 API calls, chúng ta gom toàn bộ dữ liệu vào 1 list duy nhất và update 1 phát
+    date_str_display = wks.title
+    row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
+    row2 = ["DANH SÁCH TRỰC:"] + ROLES_HEADER + [""]*5
+    row3 = ["NHÂN SỰ:"] + roster_vals + [""]*5
+    row4 = CONTENT_HEADER
+    
+    # 1 Lệnh update toàn bộ Text
+    wks.update('A1:N4', [row1, row2, row3, row4])
+    
+    # Gom các lệnh định dạng (Gộp ô, Kẻ khung, Chỉnh màu)
+    requests = []
+    
+    requests.append({
+        "mergeCells": {
+            "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
+            "mergeType": "MERGE_ALL"
+        }
+    })
+    
+    fmt_title = {
+        "backgroundColor": {"red": 0.0, "green": 1.0, "blue": 1.0},
+        "textFormat": {"bold": True, "fontSize": 14},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"
+    }
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
+            "cell": {"userEnteredFormat": fmt_title}, "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+        }
+    })
+    
+    fmt_roles = {
+        "backgroundColor": {"red": 0.8, "green": 1.0, "blue": 1.0},
+        "textFormat": {"bold": True},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
+        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+    }
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": wks.id, "startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 0, "endColumnIndex": 14},
+            "cell": {"userEnteredFormat": fmt_roles}, "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
+        }
+    })
+    
+    fmt_names = {
+        "textFormat": {"bold": True},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
+        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+    }
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": wks.id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 14},
+            "cell": {"userEnteredFormat": fmt_names}, "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
+        }
+    })
+    
+    fmt_header = {
+        "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 0.0},
+        "textFormat": {"bold": True},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
+        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+    }
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 4, "startColumnIndex": 0, "endColumnIndex": 14},
+            "cell": {"userEnteredFormat": fmt_header}, "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
+        }
+    })
+    
+    col_widths = [40, 300, 100, 100, 130, 50, 80, 120, 150, 150, 80, 100, 150, 350]
+    for c_idx, w in enumerate(col_widths):
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": wks.id, "dimension": "COLUMNS", "startIndex": c_idx, "endIndex": c_idx + 1},
+                "properties": {"pixelSize": w}, "fields": "pixelSize"
+            }
+        })
+        
+    try:
+        wks.spreadsheet.batch_update({"requests": requests})
+    except: pass
 
 def dinh_dang_dong_moi(wks, row_idx):
-    rng = f"A{row_idx}:N{row_idx}"
-    format_cell_range(wks, rng, CellFormat(wrapStrategy='WRAP', verticalAlignment='TOP', borders=Borders(top=Border("SOLID"), bottom=Border("SOLID"), left=Border("SOLID"), right=Border("SOLID"))))
+    try:
+        req = [{
+            "repeatCell": {
+                "range": {"sheetId": wks.id, "startRowIndex": row_idx - 1, "endRowIndex": row_idx, "startColumnIndex": 0, "endColumnIndex": 14},
+                "cell": {"userEnteredFormat": {
+                    "wrapStrategy": "WRAP", "verticalAlignment": "TOP",
+                    "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+                }},
+                "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,borders)"
+            }
+        }]
+        wks.spreadsheet.batch_update({"requests": req})
+    except: pass
 
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'dang_nhap' not in st.session_state: 
@@ -542,8 +635,9 @@ else:
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
             if is_shift_admin:
-                # 🚀 KÍCH HOẠT SIÊU AI QUÉT LỊCH MỚI
-                auto_ldp, auto_tcsx, auto_btv, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
+                
+                with st.spinner("⚡ Đang kết nối siêu tốc đa luồng để phân tích Lịch..."):
+                    auto_ldp, auto_tcsx, auto_btv, auto_ht, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
                 
                 if scan_errors:
                     for err in scan_errors: st.warning(err)
@@ -568,15 +662,11 @@ else:
                             roster_vals.append(val if val != "--" else "")
                     
                     if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
-                        with st.spinner("Đang tạo vỏ trực số..."):
+                        with st.spinner("Đang tạo vỏ trực số bằng Batch Update Siêu Tốc..."):
                             try:
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
-                                w.update_cell(1, 1, f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}")
-                                w.update_cell(2, 1, "DANH SÁCH TRỰC:")
-                                for i, v in enumerate(ROLES_HEADER): w.update_cell(2, i+2, v)
-                                w.update_cell(3, 1, "NHÂN SỰ:")
-                                for i, v in enumerate(roster_vals): w.update_cell(3, i+2, v)
-                                w.append_row(CONTENT_HEADER); dinh_dang_dep(w); 
+                                # Thay vì dùng loop update_cell, gọi hàm Batch Update
+                                dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, roster_vals)
                                 st.cache_data.clear()
                                 st.success("ĐÃ TẠO XONG VỎ TRỰC SỐ!"); time.sleep(1); st.rerun()
@@ -1090,7 +1180,7 @@ else:
                                         rn = cell.row
                                         w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
                                         w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
-                                        st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
+                                        st.success("ĐĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
     with tabs[4]:
