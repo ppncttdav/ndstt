@@ -209,7 +209,19 @@ def build_appended_comment(history_text, new_text, is_ok_checked):
     if history_text.strip(): return f"{history_text.strip()}\n{added_str}" 
     return added_str
 
-# --- BỘ NHẬN DIỆN THÔNG MINH (Tránh bắt lỗi các câu trung lập như "đã xem") ---
+def normalize_btv_names(name_str):
+    if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
+    clean_str = re.sub(r'\(.*?\)', '', str(name_str))
+    clean_str = re.sub(r'\[.*?\]', '', clean_str)
+    parts = re.split(r'[,;]', clean_str)
+    normalized_parts = []
+    for p in parts:
+        p = p.strip().title()
+        if p: normalized_parts.append(p)
+    if not normalized_parts: return "Chưa phân công"
+    return ", ".join(list(dict.fromkeys(normalized_parts)))
+
+# --- LOGIC NỘI SUY TIẾN ĐỘ THEO CHUỖI ƯU TIÊN NGẶT NGHÈO ---
 def get_smart_status(group_df):
     tcsx_cmts = " ".join(group_df['TCSX'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     ldp_cmts = " ".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
@@ -221,35 +233,47 @@ def get_smart_status(group_df):
     
     has_link = len(link_duyet) > 5
     
-    # Kiểm tra từ khóa ĐÃ ĐƯỢC DUYỆT / OK
+    # 1. Nhận diện OK
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b', tcsx_cmts)
     ldp_ok = re.search(r'\bok\b|\bokie\b|\bokay\b', ldp_cmts)
     
-    # Kiểm tra từ khóa BTV Báo Cáo Sửa xong
+    # 2. Nhận diện BTV Update
     btv_keywords = ["đã sửa", "đã update", "upd", "đã chỉnh", "đã thay", "e đã", "em đã", "đã xong", "đã bổ sung", "đã cắt"]
     btv_fixed = any(kw in all_cmts for kw in btv_keywords)
     
-    # Kiểm tra từ khóa CẦN SỬA THỰC SỰ (Tránh các câu như "đã xem")
+    # 3. Lọc comment trung lập (Tránh hiểu lầm là Cần sửa)
     neutral_phrases = ["đã xem", "xem rồi", "good", "được", "tks", "cảm ơn", "nhé", "em nhé", "ok", "okie"]
-    is_pure_neutral = any(p in all_cmts for p in neutral_phrases) and not any(w in all_cmts for w in ["sửa", "lỗi", "thiếu", "chưa", "sai"])
+    tcsx_is_pure_neutral = any(p in tcsx_cmts for p in neutral_phrases) and not any(w in tcsx_cmts for w in ["sửa", "lỗi", "thiếu", "chưa", "sai", "thêm"])
+    ldp_is_pure_neutral = any(p in ldp_cmts for p in neutral_phrases) and not any(w in ldp_cmts for w in ["sửa", "lỗi", "thiếu", "chưa", "sai", "thêm"])
     
-    # Logic xác định trạng thái
-    needs_fix = False
-    if not tcsx_ok and len(tcsx_cmts) > 2 and not is_pure_neutral: needs_fix = True
-    if not ldp_ok and len(ldp_cmts) > 2 and not is_pure_neutral: needs_fix = True
-    if "sửa" in status: needs_fix = True
-
+    # --- CHUỖI ƯU TIÊN ---
+    # Ưu tiên 1: Sếp chốt hoặc Status báo đã đăng
     if ldp_ok or "đã duyệt" in status or "đã đăng" in status or "posted" in status: 
         return "✅ Đã duyệt"
-    if btv_fixed and needs_fix: 
-        return "🔄 BTV đã sửa"
-    if needs_fix: 
+    
+    # Ưu tiên 2: LĐP chê (Comment dài, không OK, không Trung lập)
+    if not ldp_ok and len(ldp_cmts) > 2 and not ldp_is_pure_neutral:
+        if btv_fixed: return "🔄 BTV đã sửa"
         return "🔴 Cần sửa"
+        
+    # Ưu tiên 3: LĐP chưa ý kiến, TCSX chê
+    if not tcsx_ok and len(tcsx_cmts) > 2 and not tcsx_is_pure_neutral:
+        if btv_fixed: return "🔄 BTV đã sửa"
+        return "🔴 Cần sửa"
+        
+    # Status báo sửa
+    if "sửa" in status: 
+        return "🔴 Cần sửa"
+        
+    # Ưu tiên 4: LĐP chưa ý kiến, TCSX đã OK hoặc Trạng thái báo Gửi LĐP
     if tcsx_ok or "lđp" in status: 
         return "⏳ Chờ LĐP duyệt"
+        
+    # Ưu tiên 5: Có Link hoặc Trạng thái Gửi TCSX
     if has_link or "tcsx" in status: 
         return "👀 Chờ TCSX duyệt"
     
+    # Mặc định
     return "📝 BTV đang hoàn thiện"
 
 def format_title_name(text):
@@ -285,18 +309,6 @@ def format_time_col(t):
             return t
         return t.strftime("%H:%M:%S")
     except: return str(t)
-
-def normalize_btv_names(name_str):
-    if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
-    clean_str = re.sub(r'\(.*?\)', '', str(name_str))
-    clean_str = re.sub(r'\[.*?\]', '', clean_str)
-    parts = re.split(r'[,;]', clean_str)
-    normalized_parts = []
-    for p in parts:
-        p = p.strip().title()
-        if p: normalized_parts.append(p)
-    if not normalized_parts: return "Chưa phân công"
-    return ", ".join(list(dict.fromkeys(normalized_parts)))
 
 def dinh_dang_dep(wks):
     wks.merge_cells('A1:N1')
@@ -352,7 +364,6 @@ else:
         weather_info, advice_msg = get_weather_and_advice()
         st.markdown(f"---\n**🌤️ HÀ NỘI:** {weather_info}\n\n💡 **LỜI KHUYÊN:** {advice_msg}\n---")
         
-        # NÚT LÀM MỚI DỮ LIỆU ĐỂ CẬP NHẬT REAL-TIME TỪ SHEET KHÔNG CẦN F5
         if st.button("🔄 LÀM MỚI DỮ LIỆU (REAL-TIME)", type="primary"): clear_cache_and_rerun()
         
         with st.expander("🔐 ĐỔI MẬT KHẨU"):
@@ -471,11 +482,19 @@ else:
             df_content = safe_read_values(wks_today)
             
             if not df_content.empty:
-                # ================= BẢO TOÀN 100% DỮ LIỆU (KHÔNG LỌC MẤT NỘI DUNG CUỐI) =================
+                # ================= LỌC RÁC & CHUẨN HÓA DỮ LIỆU =================
                 df_context = df_content.copy()
                 
-                # Chỉ xử lý lấp đầy ô gộp để hiển thị nhóm chuẩn
-                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill().fillna("Chưa có tên")
+                # CHỈ VỨT BỎ DÒNG RÁC HOÀN TOÀN TRỐNG CỘT NỀN TẢNG
+                df_context = df_context[df_context['NỀN TẢNG'].astype(str).str.strip() != ""]
+
+                # Xử lý Lấp Đầy Ô Gộp
+                df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill()
+                
+                # DIỆT GỐC BÀI "CHƯA CÓ TÊN"
+                df_context = df_context.dropna(subset=['NỘI DUNG_GROUP'])
+                df_context = df_context[df_context['NỘI DUNG_GROUP'].astype(str).str.strip() != "Chưa có tên"]
+                
                 df_context['NHÂN SỰ'] = df_context['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("Chưa phân công")
                 df_context['NHÂN SỰ_NORM'] = df_context['NHÂN SỰ'].apply(normalize_btv_names)
                 df_context['NGUỒN'] = df_context['NGUỒN'].replace('', pd.NA).ffill().fillna("")
@@ -504,7 +523,6 @@ else:
                 
                 if not df_summary.empty:
                     st.write("")
-                    # 1. METRIC SỐ TO
                     btv_list = [b for b in df_summary['BTV'].unique() if b not in ["Chưa Phân Công", "Chưa phân công", ""]]
                     if btv_list:
                         btv_cols = st.columns(len(btv_list))
@@ -512,9 +530,9 @@ else:
                             b_df = df_summary[df_summary['BTV'] == b]
                             total_b = len(b_df)
                             done_b = len(b_df[b_df['Tiến độ'] == "✅ Đã duyệt"])
+                            
                             btv_cols[i].metric(label=b, value=f"{done_b}/{total_b}", delta="Bài đã duyệt", delta_color="normal" if done_b > 0 else "off")
 
-                        # 2. BIỂU ĐỒ BAR NGANG
                         st.write("")
                         fig_btv = px.histogram(df_summary, y="BTV", color="Tiến độ", orientation='h', 
                                                color_discrete_map={
@@ -676,9 +694,9 @@ else:
                                     row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
                                     wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
-                            except Exception as e: st.error(str(e))
+                            except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ================= CÁC TAB KHÁC (GIỮ NGUYÊN) =================
+    # ================= CÁC TAB KHÁC =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
         st.info("Upload file Excel 'Khung Vietnam Today' để hệ thống tự động bóc tách chương trình và xuất Lịch Phát Sóng (LPS). Các slot Đệm, Thời tiết, Trailer sẽ tự động được lọc bỏ.")
