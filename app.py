@@ -320,6 +320,8 @@ def get_smart_status(group_df):
     
     has_link = len(link_duyet) > 5
     
+    if any(s in status for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]): return "✅ Đã duyệt"
+    
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', tcsx_cmts)
     ldp_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', ldp_cmts)
     
@@ -332,7 +334,7 @@ def get_smart_status(group_df):
     tcsx_is_pure_neutral = any(p in tcsx_cmts for p in neutral_phrases) and not any(w in tcsx_cmts for w in negative_keywords)
     ldp_is_pure_neutral = any(p in ldp_cmts for p in neutral_phrases) and not any(w in ldp_cmts for w in negative_keywords)
     
-    if ldp_ok or "đã duyệt" in status or "đã đăng" in status or "posted" in status: return "✅ Đã duyệt"
+    if ldp_ok: return "✅ Đã duyệt"
     if btv_fixed: return "🔄 BTV đã sửa"
     if not ldp_ok and len(ldp_cmts.strip()) > 2 and not ldp_is_pure_neutral: return "🔴 Cần sửa"
     if not tcsx_ok and len(tcsx_cmts.strip()) > 2 and not tcsx_is_pure_neutral: return "🔴 Cần sửa"
@@ -521,10 +523,21 @@ else:
             is_shift_tcsx = False
             try:
                 roster_names_current = wks_today.row_values(3)[1:]
-                if len(roster_names_current) > 1 and curr_name == str(roster_names_current[1]).strip(): is_shift_ldp = True
-                if len(roster_names_current) > 4 and curr_name == str(roster_names_current[4]).strip(): is_shift_tcsx = True
+                
+                ldp_in_sheet = str(roster_names_current[1]).strip().lower() if len(roster_names_current) > 1 else ""
+                tcsx_in_sheet = str(roster_names_current[4]).strip().lower() if len(roster_names_current) > 4 else ""
+                curr_lower = curr_name.lower()
+                
+                if ldp_in_sheet and (ldp_in_sheet in curr_lower or curr_lower in ldp_in_sheet): is_shift_ldp = True
+                if tcsx_in_sheet and (tcsx_in_sheet in curr_lower or curr_lower in tcsx_in_sheet): is_shift_tcsx = True
             except: pass
-            if role == 'LanhDao': is_shift_ldp = True 
+            
+            # Phân quyền đè tuyệt đối từ CSDL (Bypass Role)
+            if role == 'LanhDao': 
+                is_shift_ldp = True
+                is_shift_tcsx = True
+            if role == 'ToChucSanXuat': 
+                is_shift_tcsx = True
 
             with st.expander("👥 THÔNG TIN EKIP TRỰC SỐ", expanded=False):
                 try:
@@ -802,10 +815,9 @@ else:
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ================= TAB TẠO LPS TỰ ĐỘNG =================
+    # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
-       
         
         tom_date = get_vn_time().date() + timedelta(days=1)
         col_d, col_s = st.columns([1, 2])
