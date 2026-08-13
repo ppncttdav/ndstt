@@ -36,8 +36,6 @@ st.markdown("""
 SHEET_MAIN = "HeThongQuanLy" 
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B3v7MV_XFjHXj_v9UZXK0ZI/edit?gid=1107365160#gid=1107365160"
-
-# KHAI BÁO CÁC ĐƯỜNG LINK
 LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=387062810#gid=387062810"
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
@@ -164,6 +162,19 @@ def get_cached_schedule(url, sheet_id):
         wks = next((w for w in sh.worksheets() if str(w.id) == sheet_id), sh.get_worksheet(0))
         return wks.get_all_values()
     except: return None
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_public_gsheet_as_excel(url):
+    try:
+        sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+        if not sheet_id_match: return None
+        sheet_id = sheet_id_match.group(1)
+        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+        res = requests.get(export_url, timeout=10)
+        if res.status_code == 200:
+            return res.content
+    except: pass
+    return None
 
 def clear_cache_and_rerun(): st.cache_data.clear(); st.rerun()
 
@@ -791,10 +802,10 @@ else:
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
-    # ================= TAB TẠO LPS TỰ ĐỘNG (THÔNG MINH HƠN, QUÉT RANGE NGÀY THÁNG) =================
+    # ================= TAB TẠO LPS TỰ ĐỘNG (BYPASS PUBLIC EXCEL) =================
     with tabs[1]:
         st.header("📺 CÔNG CỤ XUẤT LỊCH PHÁT SÓNG TỰ ĐỘNG")
-        st.info("Hệ thống tự động quét file Khung Vietnam Today, nhận diện khoảng thời gian của các Tab để tự động bóc tách LPS chính xác nhất.")
+        st.info("Hệ thống tự động tải ngầm file Khung Vietnam Today bằng đường link Public, tự nhận diện Tab chứa ngày phát sóng để bóc tách LPS cực kỳ chính xác.")
         
         tom_date = get_vn_time().date() + timedelta(days=1)
         col_d, col_s = st.columns([1, 2])
@@ -803,8 +814,8 @@ else:
         excel_bytes = get_public_gsheet_as_excel(LINK_KHUNG_LPS)
         
         if not excel_bytes:
-            st.error("⚠️ Không thể tải dữ liệu Khung. Vui lòng kiểm tra lại đường link.")
-            uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung thay thế", type=["xlsx", "xls"])
+            st.error("⚠️ Không thể tải dữ liệu tự động từ đường link Khung. Vui lòng tải file lên thủ công.")
+            uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung", type=["xlsx", "xls"])
             if uploaded_file: excel_bytes = uploaded_file.getvalue()
             
         if excel_bytes:
@@ -812,16 +823,14 @@ else:
                 xls = pd.ExcelFile(io.BytesIO(excel_bytes))
                 sheet_names = xls.sheet_names
                 
-                # THUẬT TOÁN ĐỌC KHOẢNG THỜI GIAN TRONG TÊN TAB (VD: 10.08-16.08)
+                # THUẬT TOÁN ĐỌC KHOẢNG NGÀY TRONG TÊN TAB (VD: 10.08-16.08.2026)
                 target_ts = int(target_date_lps.strftime("%Y%m%d"))
                 best_idx = 0
                 
                 for idx, title in enumerate(sheet_names):
-                    # Tìm các cặp ngày tháng năm trong tên tab (VD: 10.08 hoặc 16.08.2026)
                     dates_in_title = re.findall(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', title)
                     if len(dates_in_title) >= 2:
                         try:
-                            # Lấy ngày bắt đầu và kết thúc của tuần trong tên tab
                             d1, m1, y1 = dates_in_title[0]
                             d2, m2, y2 = dates_in_title[1]
                             y1 = int(y1) if y1 else target_date_lps.year
@@ -837,7 +846,7 @@ else:
                                 break
                         except: pass
                 
-                selected_sheet = col_s.selectbox("📍 Đã tự động chọn Tab Khung phù hợp với ngày (Có thể đổi):", sheet_names, index=best_idx)
+                selected_sheet = col_s.selectbox("📍 Đã tự động chọn Tab Khung phù hợp (Có thể đổi):", sheet_names, index=best_idx)
                 
                 df_khung = pd.read_excel(xls, sheet_name=selected_sheet, header=None)
                 
@@ -956,7 +965,7 @@ else:
                             except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
                             wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
 
-    with tabs[3]:
+    with tabs[4]:
         st.caption("QUẢN LÝ TIẾN ĐỘ DỰ ÁN TOÀN PHÒNG.")
         with st.expander("➕ TẠO ĐẦU VIỆC MỚI", expanded=False):
             c1, c2 = st.columns(2)
@@ -1011,7 +1020,7 @@ else:
                                         st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
-    with tabs[4]:
+    with tabs[5]:
         if role == 'LanhDao':
             with st.form("new_da"):
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
@@ -1020,7 +1029,7 @@ else:
                         sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
-    with tabs[5]:
+    with tabs[6]:
         st.header("📅 LỊCH LÀM VIỆC & DEADLINE")
         if not df_cv.empty:
             task_list = []
@@ -1039,14 +1048,14 @@ else:
                 st.divider()
                 st.dataframe(df_gantt[['Task', 'Finish', 'Assignee', 'Status']], use_container_width=True)
 
-    with tabs[6]:
+    with tabs[7]:
         tk = st.selectbox("TK GỬI:", range(10), format_func=lambda x:f"TK {x}")
         to = st.multiselect("ĐẾN:", df_users['Email'].tolist())
         sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
         if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
     if role == 'LanhDao':
-        with tabs[7]:
+        with tabs[8]:
             st.header("📊 DASHBOARD TỔNG QUAN")
             if not df_cv.empty:
                 col1, col2 = st.columns(2)
@@ -1057,5 +1066,5 @@ else:
                     all_staff = []; [all_staff.extend([n.strip() for n in s.split(',')]) for s in df_cv['NguoiPhuTrach']]
                     staff_counts = pd.Series(all_staff).value_counts().reset_index(); staff_counts.columns = ['BTV', 'Số việc']
                     fig_bar = px.bar(staff_counts, x='BTV', y='Số việc', title='NĂNG SUẤT NHÂN SỰ', color='BTV'); st.plotly_chart(fig_bar, use_container_width=True)
-        with tabs[8]:
+        with tabs[9]:
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
