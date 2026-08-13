@@ -84,7 +84,7 @@ def check_quyen(curr_name, role, task_row, df_duan):
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=2).json()
+        res = requests.get(url, timeout=1).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         condition = "CÓ MÂY"; advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
@@ -135,11 +135,13 @@ def safe_read_records(wks):
         except: time.sleep(0.2)
     return pd.DataFrame()
 
+# Nâng cấp hàm đọc do thay đổi cấu trúc Headers merge
 def safe_read_values(wks):
     for i in range(2):
         try: 
             data = wks.get_all_values()
-            if len(data) > 4: return pd.DataFrame(data[4:], columns=data[3])
+            # Vì Header chiếm đến 5 dòng (merge 4&5), dữ liệu thực bắt đầu từ index 5
+            if len(data) > 5: return pd.DataFrame(data[5:], columns=CONTENT_HEADER)
             return pd.DataFrame(columns=CONTENT_HEADER)
         except: time.sleep(0.2)
     return pd.DataFrame(columns=CONTENT_HEADER)
@@ -164,7 +166,6 @@ def load_du_lieu_app():
         return df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# HÀM BỊ THIẾU GÂY LỖI NAMEERROR ĐÃ ĐƯỢC KHÔI PHỤC
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_public_gsheet_as_excel(url):
     try:
@@ -215,13 +216,11 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     d_str_02 = f"{target_date_obj.day:02d}"
     m = target_date_obj.month
     
-    # ÉP XÓA SẠCH KHOẢNG TRẮNG ĐỂ CHỐNG LỖI TYPO
     month_str1 = f"tháng{m}"
     month_str2 = f"tháng{m:02d}"
     
     month_row_idx = -1
     for r in range(len(df)-1, -1, -1):
-        # Gộp toàn bộ dòng và xóa khoảng trắng
         row_joined = "".join([str(x).lower().strip() for x in df.iloc[r].values if str(x).lower() != 'nan'])
         if month_str1 in row_joined or month_str2 in row_joined:
             month_row_idx = r
@@ -277,7 +276,6 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     target_col = -1
     header_row = -1
     
-    # BỎ GIỚI HẠN 100 DÒNG, QUÉT TOÀN BỘ FILE EXCEL ĐỂ TÌM NGÀY
     for r in range(len(df)):
         for c in range(len(df.columns)):
             val = str(df.iloc[r, c]).strip().lower()
@@ -434,30 +432,6 @@ def get_priority_score(status):
     if "✅ Đã duyệt" in status: return 6
     return 7
 
-def format_title_name(text):
-    text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
-    text = text.title()
-    replacements = { " Of ": " of ", " At ": " at ", " A ": " a ", " An ": " an ", " The ": " the ", " In ": " in ", " On ": " on ", " To ": " to ", " And ": " and " }
-    for old, new in replacements.items(): text = text.replace(old, new)
-    return text
-
-def parse_khung_cell(cell_val):
-    if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
-    lines = [line.strip() for line in str(cell_val).split('\n') if line.strip()]
-    if not lines: return "", ""
-    title = lines[0]
-    title = re.sub(r'\(.*?\)', '', title) 
-    title = re.sub(r'\s*\d+\'?m?\s*$', '', title) 
-    title = re.sub(r'\s*\d+\s*$', '', title) 
-    title = title.split('/')[0].strip() 
-    title = format_title_name(title)
-    desc = ""
-    if len(lines) > 1:
-        for line in lines[1:]:
-            if not line.startswith('(') and "PL" not in line and "PM" not in line:
-                desc = line.split('/')[0].strip(); break
-    return title, desc
-
 def format_time_col(t):
     if pd.isna(t): return ""
     try:
@@ -468,17 +442,23 @@ def format_time_col(t):
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
+# --- THUẬT TOÁN ĐỊNH DẠNG CHUẨN XÁC YÊU CẦU ---
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
-    row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
-    row2 = ["DANH SÁCH TRỰC:"] + ROLES_HEADER + [""]*5
-    row3 = ["NHÂN SỰ:"] + roster_vals + [""]*5
-    row4 = CONTENT_HEADER
     
-    wks.update('A1:N4', [row1, row2, row3, row4])
+    # Chuẩn bị dữ liệu để Batch Update
+    row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
+    row2 = ROLES_HEADER + [""]*6
+    row3 = roster_vals + [""]*6
+    row4 = CONTENT_HEADER
+    row5 = [""]*14  # Dòng trống để gộp với row4 tạo độ dày cho Header
+    
+    # 1. Update Text
+    wks.update('A1:N5', [row1, row2, row3, row4, row5])
     
     requests = []
     
+    # 2. Gộp ô Tiêu đề (A1:N1)
     requests.append({
         "mergeCells": {
             "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
@@ -486,56 +466,65 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
+    # 3. Gộp ô Hàng Tiêu đề bảng (Dòng 4 và 5)
+    for c in range(14):
+        requests.append({
+            "mergeCells": {
+                "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 5, "startColumnIndex": c, "endColumnIndex": c+1},
+                "mergeType": "MERGE_ALL"
+            }
+        })
+        
+    # 4. Format Tiêu Đề (Chữ Đỏ, Bold, Căn giữa)
     fmt_title = {
-        "backgroundColor": {"red": 0.0, "green": 1.0, "blue": 1.0},
-        "textFormat": {"bold": True, "fontSize": 14},
-        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"
+        "textFormat": {"bold": True, "fontSize": 14, "foregroundColor": {"red": 1.0, "green": 0.0, "blue": 0.0}},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+        "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}
     }
     requests.append({
         "repeatCell": {
             "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
-            "cell": {"userEnteredFormat": fmt_title}, "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)"
+            "cell": {"userEnteredFormat": fmt_title}, 
+            "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)"
         }
     })
     
+    # 5. Format Roles & Names (Bold, Căn giữa, Có Border)
     fmt_roles = {
-        "backgroundColor": {"red": 0.8, "green": 1.0, "blue": 1.0},
         "textFormat": {"bold": True},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
-        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+        "borders": {
+            "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
+            "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
+        }
     }
     requests.append({
         "repeatCell": {
-            "range": {"sheetId": wks.id, "startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 0, "endColumnIndex": 14},
-            "cell": {"userEnteredFormat": fmt_roles}, "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
+            "range": {"sheetId": wks.id, "startRowIndex": 1, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 8},
+            "cell": {"userEnteredFormat": fmt_roles}, 
+            "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
         }
     })
     
-    fmt_names = {
-        "textFormat": {"bold": True},
-        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
-        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
-    }
-    requests.append({
-        "repeatCell": {
-            "range": {"sheetId": wks.id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 14},
-            "cell": {"userEnteredFormat": fmt_names}, "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
-        }
-    })
-    
+    # 6. Format Headers của Bảng (Nền xám nhạt, Bold, Border)
     fmt_header = {
-        "backgroundColor": {"red": 1.0, "green": 1.0, "blue": 0.0},
+        "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
         "textFormat": {"bold": True},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
-        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+        "borders": {
+            "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
+            "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
+        }
     }
     requests.append({
         "repeatCell": {
-            "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 4, "startColumnIndex": 0, "endColumnIndex": 14},
-            "cell": {"userEnteredFormat": fmt_header}, "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
+            "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 5, "startColumnIndex": 0, "endColumnIndex": 14},
+            "cell": {"userEnteredFormat": fmt_header}, 
+            "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
         }
     })
     
+    # 7. Chỉnh độ rộng cột chuẩn
     col_widths = [40, 300, 100, 100, 130, 50, 80, 120, 150, 150, 80, 100, 150, 350]
     for c_idx, w in enumerate(col_widths):
         requests.append({
@@ -547,6 +536,17 @@ def dinh_dang_dep(wks, roster_vals):
         
     try:
         wks.spreadsheet.batch_update({"requests": requests})
+    except: pass
+    
+    # 8. THÊM DROPDOWNS TỰ ĐỘNG (Data Validation) CHO CÁC CỘT TỪ DÒNG 6 ĐẾN 100
+    try:
+        validation_dinh_dang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_DINH_DANG), showCustomUi=True)
+        validation_nen_tang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_NEN_TANG), showCustomUi=True)
+        validation_status = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_STATUS_TRUCSO), showCustomUi=True)
+        
+        set_data_validation_for_cell_range(wks, 'C6:C100', validation_dinh_dang)
+        set_data_validation_for_cell_range(wks, 'D6:D100', validation_nen_tang)
+        set_data_validation_for_cell_range(wks, 'E6:E100', validation_status)
     except: pass
 
 def dinh_dang_dong_moi(wks, row_idx):
@@ -563,6 +563,7 @@ def dinh_dang_dong_moi(wks, row_idx):
         }]
         wks.spreadsheet.batch_update({"requests": req})
     except: pass
+
 
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'dang_nhap' not in st.session_state: 
@@ -670,9 +671,10 @@ else:
                             roster_vals.append(val if val != "--" else "")
                     
                     if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
-                        with st.spinner("Đang tạo vỏ trực số bằng Batch Update Siêu Tốc..."):
+                        with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
                             try:
-                                w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20)
+                                # LỆNH ÉP SHEET MỚI LÊN INDEX 0 (ĐẦU TIÊN CỦA DANH SÁCH TAB EXCEL)
+                                w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, roster_vals)
                                 st.cache_data.clear()
@@ -927,7 +929,8 @@ else:
                                         final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
                                         final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
                                         
-                                        first_sheet_row = first_row_idx + 5
+                                        # Do có thay đổi cấu trúc bảng (thêm dòng trống dòng 5), dòng bắt đầu nhập dữ liệu bị tịnh tiến xuống dòng 6
+                                        first_sheet_row = first_row_idx + 6
                                         wks_today.update_cell(first_sheet_row, 2, e_nd)     
                                         wks_today.update_cell(first_sheet_row, 7, e_ng)     
                                         wks_today.update_cell(first_sheet_row, 8, e_ns)     
@@ -936,7 +939,7 @@ else:
                                         wks_today.update_cell(first_sheet_row, 14, merged_link_duyet_update)
                                         
                                         for idx, update_data in platform_updates.items():
-                                            sheet_row = idx + 5
+                                            sheet_row = idx + 6
                                             wks_today.update_cell(sheet_row, 5, update_data['STATUS']) 
                                             wks_today.update_cell(sheet_row, 11, update_data['TIME'].strftime("%H:%M:%S") if update_data['TIME'] else "") 
                                             wks_today.update_cell(sheet_row, 12, update_data['DATE'].strftime("%d/%m/%Y")) 
@@ -963,7 +966,7 @@ else:
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
                         with st.spinner("Đang lưu..."):
                             try:
-                                all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 4) + 1
+                                all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 5) + 1
                                 plats = ts_nentang if ts_nentang else [""]
                                 merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
                                 for p in plats:
@@ -1050,7 +1053,7 @@ else:
                                 exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
                                 title_lower = title.lower()
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
