@@ -325,7 +325,8 @@ def dinh_dang_dong_moi(wks, row_idx):
 
 # ================= 2. AUTH & GIAO DIỆN (CÓ AUTO-LOGIN BẢO MẬT F5) =================
 if 'dang_nhap' not in st.session_state: 
-    st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
+    st.session_state['dang_nhap'] = False
+    st.session_state['user_info'] = {}
 
 df_users = load_tai_khoan()
 list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
@@ -335,7 +336,6 @@ if "session_user" in st.query_params and "token" in st.query_params and not st.s
     saved_username = st.query_params["session_user"]
     saved_token = st.query_params["token"]
     
-    # Kiểm tra Token có khớp với Chữ ký băm của Username không
     if saved_token == generate_secure_token(saved_username):
         u_row = df_users[df_users['TenDangNhap'].astype(str) == saved_username]
         if not u_row.empty:
@@ -345,19 +345,21 @@ if "session_user" in st.query_params and "token" in st.query_params and not st.s
 if not st.session_state['dang_nhap']:
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
     with st.form("login"):
-        user = st.text_input("Tên đăng nhập"); pwd = st.text_input("Mật khẩu", type="password")
+        user = st.text_input("Tên đăng nhập")
+        pwd = st.text_input("Mật khẩu", type="password")
         if st.form_submit_button("ĐĂNG NHẬP"):
             if not df_users.empty:
                 u_row = df_users[(df_users['TenDangNhap'].astype(str)==user) & (df_users['MatKhau'].astype(str)==pwd)]
                 if not u_row.empty:
-                    st.session_state['dang_nhap'] = True; st.session_state['user_info'] = u_row.iloc[0].to_dict()
+                    st.session_state['dang_nhap'] = True
+                    st.session_state['user_info'] = u_row.iloc[0].to_dict()
                     
-                    # Cấp Chìa khóa Token và nhét vào URL để chống F5
                     st.query_params["session_user"] = user
                     st.query_params["token"] = generate_secure_token(user)
                     
                     sh_main = ket_noi_sheet(SHEET_MAIN)
-                    ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success"); clear_cache_and_rerun()
+                    ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success")
+                    clear_cache_and_rerun()
                 else: st.error("Sai thông tin đăng nhập!")
             else: st.error("Lỗi kết nối CSDL Tài khoản.")
 else:
@@ -514,21 +516,16 @@ else:
                 df_summary = pd.DataFrame(summary_data)
                 
                 if not df_summary.empty:
-                    st.markdown("##### 📊 BẢNG THEO DÕI & TIẾN ĐỘ CÁ NHÂN (Cập nhật trực tiếp)")
-                    
-                    # 1. TẦNG 1: THỐNG KÊ TỔNG QUAN
-                    st.markdown("**1. TỔNG QUAN TIẾN ĐỘ TRONG NGÀY:**")
-                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
                     m1.metric("📌 Tổng bài", len(df_summary))
                     m2.metric("📝 Đang làm", len(df_summary[df_summary["Tiến độ"] == "📝 BTV đang hoàn thiện"]))
                     m3.metric("👀 Chờ TCSX", len(df_summary[df_summary["Tiến độ"] == "👀 Chờ TCSX duyệt"]))
                     m4.metric("⏳ Chờ LĐP", len(df_summary[df_summary["Tiến độ"] == "⏳ Chờ LĐP duyệt"]))
-                    m5.metric("🔴 Đang sửa", len(df_summary[df_summary["Tiến độ"].isin(["🔴 Cần sửa", "🔄 BTV đã sửa"])]))
-                    m6.metric("✅ Đã chốt", len(df_summary[df_summary["Tiến độ"] == "✅ Đã duyệt"]))
+                    m5.metric("🔴 Cần sửa", len(df_summary[df_summary["Tiến độ"] == "🔴 Cần sửa"]))
+                    m6.metric("🔄 BTV đã sửa", len(df_summary[df_summary["Tiến độ"] == "🔄 BTV đã sửa"]))
+                    m7.metric("✅ Đã chốt", len(df_summary[df_summary["Tiến độ"] == "✅ Đã duyệt"]))
                     
                     st.write("")
-                    # 2. TẦNG 2: THỐNG KÊ CÁ NHÂN
-                    st.markdown("**2. BÁO CÁO NHÂN SỰ:**")
                     btv_list = [b for b in df_summary['BTV'].unique() if b not in ["Chưa Phân Công", "Chưa phân công", ""]]
                     if btv_list:
                         btv_cols = st.columns(len(btv_list))
@@ -552,19 +549,16 @@ else:
                         st.plotly_chart(fig_btv, use_container_width=True)
 
                     st.write("")
-                    filter_opt = st.pills("Bộ lọc tin bài:", ["Tất cả", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả")
+                    filter_opt = st.pills("Bộ lọc", ["Tất cả", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
                     
                     df_show = df_summary.copy()
                     if filter_opt != "Tất cả": df_show = df_show[df_show["Tiến độ"] == filter_opt]
                     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-            # Thực thi Fragment (Đã ngầm và mượt)
             real_time_dashboard_and_table()
             st.divider()
 
-            # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT =================
-            st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
-            
+            # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT (FORM TĨNH) =================
             df_content_static = safe_read_values(wks_today)
             if not df_content_static.empty:
                 df_context_st = df_content_static.copy()
@@ -922,7 +916,7 @@ else:
                                         rn = cell.row
                                         w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
                                         w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
-                                        st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
+                                        st.success("ĐĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
     with tabs[5]:
