@@ -64,8 +64,7 @@ OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
 OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Scheduled", "Posted", "Hủy"]
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 
-# --- 3. TIÊU ĐỀ CỘT CHUẨN (14 CỘT - GIỮ THEO FORM EXCEL CŨ) ---
-# Vì file Excel bạn gửi không chứa cột TEXT CỦA TIN riêng biệt, mà nó được gộp vào LINK DUYỆT.
+# --- 3. TIÊU ĐỀ CỘT CHUẨN MỚI NHẤT (14 CỘT) ---
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
 
 # --- TỪ ĐIỂN HIỂN THỊ ---
@@ -209,7 +208,7 @@ def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
             format_cell_range(wks_stats, f"A{last_row}:I{last_row}", CellFormat(backgroundColor=Color(1, 1, 0)))
     except: pass
 
-# --- CÁC HÀM XỬ LÝ LỊCH PHÁT SÓNG ---
+# --- CÁC HÀM XỬ LÝ LỊCH PHÁT SÓNG & ĐỒNG BỘ ---
 def format_title_name(text):
     text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
     text = text.title()
@@ -244,13 +243,10 @@ def format_time_col(t):
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
-# --- THUẬT TOÁN ĐỒNG BỘ: TÁCH / GỘP TEXT & LINK ---
 def split_text_link(merged_text):
-    if pd.isna(merged_text) or not str(merged_text).strip():
-        return "", ""
+    if pd.isna(merged_text) or not str(merged_text).strip(): return "", ""
     text = str(merged_text)
     urls = re.findall(r'(https?://[^\s]+|drive\.google\.com[^\s]+)', text)
-    
     if urls:
         link = urls[-1]
         caption = text.replace(link, "").strip()
@@ -259,12 +255,24 @@ def split_text_link(merged_text):
     return text, ""
 
 def merge_text_link(caption, link):
-    caption = str(caption).strip()
-    link = str(link).strip()
+    caption = str(caption).strip(); link = str(link).strip()
     if caption and link: return f"{caption}\n\n{link}"
     if caption: return caption
     if link: return link
     return ""
+
+def build_appended_comment(history_text, new_text, is_ok_checked):
+    """Hàm xử lý cộng dồn comment (Append)"""
+    parts = []
+    if is_ok_checked: parts.append("OK")
+    if new_text.strip(): parts.append(new_text.strip())
+    
+    added_str = ", ".join(parts)
+    if not added_str: return history_text # Không nhập gì thì giữ nguyên
+    
+    if history_text.strip(): 
+        return f"{history_text.strip()}\n{added_str}" # Nối dòng mới
+    return added_str
 
 # --- FORMATTING EXCEL ---
 def dinh_dang_dep(wks):
@@ -377,12 +385,24 @@ else:
         try: wks_today = sh_trucso.worksheet(tab_name_current); tab_exists = True
         except gspread.WorksheetNotFound: tab_exists = False
 
+        # --- KIỂM TRA QUYỀN ĐỘNG (Dựa vào Tên trong Ca Trực) ---
+        is_shift_ldp = False
+        is_shift_tcsx = False
+        if tab_exists:
+            try:
+                roster_names_current = wks_today.row_values(3)[1:]
+                if len(roster_names_current) > 0 and curr_name == str(roster_names_current[0]).strip(): is_shift_ldp = True
+                if len(roster_names_current) > 1 and curr_name == str(roster_names_current[1]).strip(): is_shift_tcsx = True
+                if len(roster_names_current) > 4 and curr_name == str(roster_names_current[4]).strip(): is_shift_tcsx = True
+            except: pass
+        # Lãnh đạo chung của hệ thống vẫn có quyền LĐP
+        if role == 'LanhDao': is_shift_ldp = True 
+
         if is_shift_admin and not use_archive:
             with st.expander("⚙️ QUẢN LÝ VỎ / EKIP TRỰC (DÀNH CHO QUẢN TRỊ)", expanded=not tab_exists):
                 if not tab_exists:
                     if target_date >= today_vn:
                         st.warning(f"CHƯA CÓ SỔ TRỰC NGÀY {date_str_display}.")
-                        
                         auto_tcsx, auto_btv = lay_nhan_su_tu_lich_phuc_tap(target_date)
                         default_roster = [""] * len(ROLES_HEADER)
                         if auto_tcsx: default_roster[3] = auto_tcsx[0]
@@ -390,7 +410,6 @@ else:
                         if len(auto_btv) > 0: default_roster[2] = auto_btv[0] 
                         if len(auto_btv) > 1: default_roster[6] = auto_btv[1] 
                         if len(auto_btv) > 2: default_roster[7] = auto_btv[2] 
-
                         with st.form("init_roster"):
                             cols = st.columns(3); roster_vals = []
                             for i, r_t in enumerate(ROLES_HEADER):
@@ -399,7 +418,6 @@ else:
                                     if default_roster[i] in list_nv: def_idx = list_nv.index(default_roster[i]) + 1
                                     val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, index=def_idx, key=f"cr_{i}")
                                     roster_vals.append(val if val != "--" else "")
-                            
                             if st.form_submit_button("🚀 TẠO VỎ TRỰC MỚI"):
                                 with st.spinner("Đang tạo vỏ và cập nhật thống kê..."):
                                     try:
@@ -484,10 +502,6 @@ else:
                 ts_status = c4.selectbox("TRẠNG THÁI", OPTS_STATUS_TRUCSO)
                 ts_nhansu = c5.multiselect("BTV THỰC HIỆN", list_nv, default=[curr_name] if curr_name in list_nv else None)
                 
-                c_tcsx, c_ldp = st.columns(2)
-                ts_tcsx = c_tcsx.text_input("TCSX (Ý KIẾN / DUYỆT)")
-                ts_ldp = c_ldp.text_input("LĐP (Ý KIẾN / DUYỆT)")
-                
                 c6, c7, c8 = st.columns(3)
                 ts_nguon = c6.text_input("NGUỒN")
                 ts_giodang = c7.time_input("GIỜ ĐĂNG DỰ KIẾN", value=None)
@@ -508,7 +522,7 @@ else:
                             merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
                             
                             for p in plats:
-                                row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), ts_tcsx, ts_ldp, ts_giodang.strftime("%H:%M:%S") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp, merged_link_duyet]
+                                row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", ts_nguon, ", ".join(ts_nhansu), "", "", ts_giodang.strftime("%H:%M:%S") if ts_giodang else "", ts_ngaydang.strftime("%d/%m/%Y"), ts_linksp, merged_link_duyet]
                                 wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
                             st.success("ĐÃ LƯU!"); st.rerun()
                         except Exception as e: st.error(f"Lỗi: {e}")
@@ -523,7 +537,6 @@ else:
                 st.markdown("##### 📋 BẢNG THEO DÕI NHANH (MÔ PHỎNG EXCEL)")
                 st.caption("Giao diện xem lướt đã được rút gọn để dễ kiểm soát. Các ô trống thể hiện cấu trúc gộp bài bên Excel.")
                 
-                # CHỈ HIỂN THỊ ĐÚNG CÁC CỘT BẠN YÊU CẦU
                 cols_to_keep = ['STT', 'NỘI DUNG', 'NỀN TẢNG', 'STATUS', 'NGUỒN', 'NHÂN SỰ', 'TCSX', 'LĐP', 'LINK DUYỆT']
                 df_display = df_content[[c for c in cols_to_keep if c in df_content.columns]]
                 
@@ -541,9 +554,9 @@ else:
 
                 st.divider()
 
-                # ================= GIAO DIỆN 2: KHU VỰC DUYỆT BÀI (DETAIL VIEW) =================
+                # ================= GIAO DIỆN 2: KHU VỰC DUYỆT BÀI (DETAIL VIEW - CHUẨN CMS) =================
                 st.markdown("##### 🛠️ KHU VỰC DUYỆT VÀ CHỈNH SỬA TỔNG THỂ")
-                st.info("💡 Lãnh đạo và TCSX chỉ cần chọn Tên bài. Hệ thống sẽ tự động gán nhận xét vào toàn bộ các dòng của bài đó, đồng thời cho phép cập nhật Trạng thái riêng biệt cho từng nền tảng mạng xã hội.")
+                st.info("💡 Hệ thống đã tự động gom nhóm bài viết. Các Sếp gõ nhận xét và bấm [✅ DUYỆT OK], chữ 'OK' sẽ tự động chèn vào nhận xét và lưu xuống Google Sheet.")
                 
                 # TẠO NHÓM ĐỂ HIỂN THỊ THEO "SẢN PHẨM" THAY VÌ "TỪNG DÒNG"
                 df_context = df_content.copy()
@@ -570,9 +583,9 @@ else:
                         
                         col_global, col_specific = st.columns([1.5, 1])
                         
-                        # --- CỘT TRÁI: DỮ LIỆU TỔNG QUAN (Chỉ ghi vào dòng 1) ---
+                        # --- CỘT TRÁI: DỮ LIỆU TỔNG QUAN ---
                         with col_global:
-                            st.markdown("**:blue[1. THÔNG TIN CHUNG (Duyệt 1 lần cho cả cụm)]**")
+                            st.markdown("**:blue[1. THÔNG TIN CHUNG (Áp dụng cho cả bài)]**")
                             e_nd = st.text_area("Tên bài / Nội dung chính", value=first_row_data['NỘI DUNG_GROUP'], height=68)
                             
                             c_dd, c_ns, c_nguon = st.columns(3)
@@ -583,12 +596,34 @@ else:
                             e_ns = c_ns.text_input("BTV Thực hiện", value=first_row_data['NHÂN SỰ'])
                             
                             st.markdown("---")
-                            e_tcsx = st.text_input("TCSX (Nhận xét / Phê duyệt)", value=first_row_data.get('TCSX', ''))
-                            e_ldp = st.text_input("Lãnh đạo phòng (Nhận xét / Phê duyệt)", value=first_row_data.get('LĐP', ''))
-                            
-                            st.markdown("---")
                             e_texttin = st.text_area("Nội dung duyệt chữ (Caption, Hashtag...)", value=current_text, height=150)
                             e_ld = st.text_input("🔗 Link duyệt (Link Drive bài/video)", value=current_link)
+                            
+                            st.markdown("---")
+                            st.markdown("**:green[3. KHU VỰC THẢO LUẬN & PHÊ DUYỆT]**")
+                            col_tcsx, col_ldp = st.columns(2)
+                            
+                            # Lấy lịch sử cmt
+                            history_tcsx = first_row_data.get('TCSX', '')
+                            history_ldp = first_row_data.get('LĐP', '')
+                            
+                            with col_tcsx:
+                                st.caption("🗣️ Ý KIẾN TỔ CHỨC SẢN XUẤT:")
+                                st.info(history_tcsx if str(history_tcsx).strip() else "Chưa có nhận xét.")
+                                e_tcsx_new = ""
+                                e_tcsx_ok = False
+                                if is_shift_tcsx:
+                                    e_tcsx_new = st.text_input("Nhập ý kiến mới (TCSX):", key="in_tcsx")
+                                    e_tcsx_ok = st.checkbox("✅ DUYỆT OK (Thêm chữ OK)", key="chk_tcsx")
+                            
+                            with col_ldp:
+                                st.caption("👑 Ý KIẾN LÃNH ĐẠO PHÒNG:")
+                                st.info(history_ldp if str(history_ldp).strip() else "Chưa có nhận xét.")
+                                e_ldp_new = ""
+                                e_ldp_ok = False
+                                if is_shift_ldp:
+                                    e_ldp_new = st.text_input("Nhập ý kiến mới (LĐP):", key="in_ldp")
+                                    e_ldp_ok = st.checkbox("🚀 DUYỆT OK (Thêm chữ OK)", key="chk_ldp")
 
                         # --- CỘT PHẢI: DỮ LIỆU ĐỘC LẬP TỪNG NỀN TẢNG ---
                         with col_specific:
@@ -626,25 +661,30 @@ else:
                                     'LINK_SP': lsp_val
                                 }
 
-                        # --- XỬ LÝ LƯU GỘP/TÁCH LÊN GOOGLE SHEET ---
+                        # --- XỬ LÝ LƯU LÊN GOOGLE SHEET ---
                         st.markdown("<br>", unsafe_allow_html=True)
                         submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
                         with submit_col2:
                             if st.form_submit_button("💾 LƯU PHÊ DUYỆT CHO SẢN PHẨM NÀY", use_container_width=True, type="primary"):
                                 with st.spinner("Đang cập nhật dữ liệu xuống Google Sheet..."):
-                                    # Cập nhật thông tin Chung vào DUY NHẤT dòng đầu tiên (Giữ đúng cấu trúc Gộp ô của Excel)
-                                    first_sheet_row = first_row_idx + 5
+                                    # 1. Gộp Text & Link
                                     merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
                                     
+                                    # 2. Xử lý Logic Nối (Append) Comment
+                                    final_tcsx = build_appended_comment(history_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else history_tcsx
+                                    final_ldp = build_appended_comment(history_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else history_ldp
+                                    
+                                    # 3. Cập nhật thông tin Chung vào DUY NHẤT dòng đầu tiên
+                                    first_sheet_row = first_row_idx + 5
                                     wks_today.update_cell(first_sheet_row, 2, e_nd)     # Cột B: NỘI DUNG
                                     wks_today.update_cell(first_sheet_row, 3, e_dd)     # Cột C: ĐỊNH DẠNG
                                     wks_today.update_cell(first_sheet_row, 7, e_ng)     # Cột G: NGUỒN
                                     wks_today.update_cell(first_sheet_row, 8, e_ns)     # Cột H: NHÂN SỰ
-                                    wks_today.update_cell(first_sheet_row, 9, e_tcsx)   # Cột I: TCSX
-                                    wks_today.update_cell(first_sheet_row, 10, e_ldp)   # Cột J: LĐP
-                                    wks_today.update_cell(first_sheet_row, 14, merged_link_duyet_update) # Cột N: LINK DUYỆT (Gộp Text+Link)
+                                    wks_today.update_cell(first_sheet_row, 9, final_tcsx) # Cột I: TCSX (Cột Độc Lập)
+                                    wks_today.update_cell(first_sheet_row, 10, final_ldp) # Cột J: LĐP (Cột Độc Lập)
+                                    wks_today.update_cell(first_sheet_row, 14, merged_link_duyet_update) # Cột N: LINK DUYỆT
                                     
-                                    # Cập nhật thông tin Nền tảng (Status, Giờ, Link SP) cho TỪNG DÒNG
+                                    # 4. Cập nhật thông tin Nền tảng cho TỪNG DÒNG
                                     for idx, update_data in platform_updates.items():
                                         sheet_row = idx + 5
                                         wks_today.update_cell(sheet_row, 5, update_data['STATUS']) # Cột E: STATUS
