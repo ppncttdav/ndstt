@@ -56,11 +56,11 @@ def match_nv(name, list_nv):
     if not name or str(name).strip() == "": return ""
     n_lower = str(name).lower().strip()
     
-    # 1. Ưu tiên khớp chính xác
+    # Ưu tiên 1: Khớp chuẩn 100%
     for nv in list_nv:
         if n_lower == str(nv).lower().strip(): return nv
         
-    # 2. Khớp tương đối (Bỏ qua nếu tên gõ quá ngắn để tránh nhầm lẫn)
+    # Ưu tiên 2: Khớp chữ lồng nhau (Fuzzy match)
     if len(n_lower) >= 2:
         for nv in list_nv:
             nv_lower = str(nv).lower().strip()
@@ -70,16 +70,11 @@ def match_nv(name, list_nv):
 
 def get_lanh_dao_ban(d_obj):
     wd = d_obj.weekday()
-    if wd in [0, 1]: return "Lê Hoàng Linh"
-    elif wd in [2, 4]: return "Nguyễn Phương Hà"
-    elif wd in [3, 5]: return "Nguyễn Phương Liên"
-    elif wd == 6: return "Trần Thu Hà"
+    if wd in [0, 1]: return "Lê Hoàng Linh" # Thứ 2, 3
+    elif wd in [2, 4]: return "Nguyễn Phương Hà" # Thứ 4, 6
+    elif wd in [3, 5]: return "Nguyễn Phương Liên" # Thứ 5, 7
+    elif wd == 6: return "Trần Thu Hà" # CN
     return ""
-
-def check_quyen(curr_name, role, task_row, df_duan):
-    if role == 'LanhDao': return 2
-    if curr_name in str(task_row.get('NguoiPhuTrach', '')): return 1
-    return 0
 
 @st.cache_data(ttl=3600)
 def get_weather_and_advice():
@@ -165,16 +160,6 @@ def load_du_lieu_app():
         return df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=3600)
-def get_cached_schedule(url, sheet_id):
-    try:
-        client = get_gspread_client_cached()
-        if not client: return None
-        sh = client.open_by_url(url)
-        wks = next((w for w in sh.worksheets() if str(w.id) == sheet_id), sh.get_worksheet(0))
-        return wks.get_all_values()
-    except: return None
-
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_public_gsheet_as_excel(url):
     try:
@@ -194,26 +179,44 @@ def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
     try: sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
     except: pass
 
-# --- THUẬT TOÁN ĐỌC RIÊNG LỊCH LĐP ---
-def get_ldp_from_excel(excel_bytes, target_date_obj, list_nv):
-    d_str = str(target_date_obj.day)
+# --- THUẬT TOÁN ĐỌC LỊCH THÔNG MINH BẰNG "TỌA ĐỘ KÉP" ---
+def get_roster_from_excel(excel_bytes, target_date_obj, role_type, list_nv):
+    d = target_date_obj.day
     m = target_date_obj.month
+    y = target_date_obj.year
+    d_str = str(d)
+    d_str_02 = f"{d:02d}"
+    
+    date_patterns = [
+        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}",
+        f"{y}-{m:02d}-{d:02d}", f"{d:02d}.{m:02d}", f"{d}.{m}"
+    ]
+    
+    month_str1 = f"tháng {m}"
+    month_str2 = f"tháng {m:02d}"
+    
+    res_ldp = []
+    res_tcsx = []
+    res_btv = []
     
     try:
         xls = pd.ExcelFile(io.BytesIO(excel_bytes))
         target_sheet = xls.sheet_names[0]
+        # Bộ lọc Tab chống đi lạc
         for sn in xls.sheet_names:
-            if "LĐP" in sn.upper():
+            sn_up = sn.upper()
+            if role_type == "LDP" and "LĐP" in sn_up:
                 target_sheet = sn
                 break
+            elif role_type != "LDP" and ("SỐ" in sn_up or "TRỰC" in sn_up) and "LĐP" not in sn_up:
+                target_sheet = sn
+                break
+                
         df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
         
-        # 1. ĐỊNH VỊ ĐÚNG DÒNG CỦA THÁNG
+        # 1. Tìm vị trí (tọa độ) của "THÁNG" hiện tại (Quét từ dưới lên để lấy tháng mới nhất)
         month_row_idx = -1
-        month_str1 = f"tháng {m}"
-        month_str2 = f"tháng {m:02d}"
-        
-        for r in range(len(df)):
+        for r in range(len(df)-1, -1, -1):
             row_joined = " ".join([str(x).lower().strip() for x in df.iloc[r].values])
             if month_str1 in row_joined or month_str2 in row_joined:
                 month_row_idx = r
@@ -224,118 +227,88 @@ def get_ldp_from_excel(excel_bytes, target_date_obj, list_nv):
         target_col = -1
         header_row = -1
         
-        # 2. TÌM CỘT NGÀY TRONG PHẠM VI THÁNG ĐÓ
-        for r in range(month_row_idx, min(month_row_idx + 10, len(df))):
-            row_vals = [str(x).strip() for x in df.iloc[r].values]
-            # Làm sạch hậu tố .0 của Excel
-            row_vals_clean = [v[:-2] if v.endswith('.0') else v for v in row_vals]
-            
-            if d_str in row_vals_clean:
-                if "1" in row_vals_clean or "15" in row_vals_clean or str((target_date_obj.day % 28) + 1) in row_vals_clean:
-                    target_col = row_vals_clean.index(d_str)
-                    header_row = r
-                    break
-                    
-        if target_col != -1 and header_row != -1:
-            for r in range(header_row + 1, len(df)):
-                row_joined = " ".join([str(x).lower() for x in df.iloc[r].values])
-                if "tháng" in row_joined and str(m) not in row_joined:
-                    break # Sang tháng khác thì dừng
-                    
-                val = str(df.iloc[r, target_col]).lower().strip()
-                if "số" in val or "trực" in val or val == "x" or "ts" in val:
-                    name = ""
-                    # Quét các cột đầu tiên để lấy tên
-                    for c in [1, 2, 0, 3]:
-                        if c < len(df.columns):
-                            n = str(df.iloc[r, c]).strip()
-                            if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
-                                name = n
-                                break
-                    if name:
-                        matched = match_nv(name, list_nv)
-                        if matched: return matched
-    except: pass
-    return ""
-
-# --- THUẬT TOÁN ĐỌC RIÊNG LỊCH BTV/TCSX ---
-def get_btv_tcsx_from_excel(excel_bytes, target_date_obj, list_nv):
-    d = target_date_obj.day
-    m = target_date_obj.month
-    y = target_date_obj.year
-    date_patterns = [
-        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}",
-        f"{y}-{m:02d}-{d:02d}", f"{d:02d}.{m:02d}", f"{d}.{m}"
-    ]
-    res_tcsx = ""
-    res_btv = []
-    
-    try:
-        xls = pd.ExcelFile(io.BytesIO(excel_bytes))
-        target_sheet = xls.sheet_names[0]
-        # Khóa chặt: Phải là Tab Trực/Số và KHÔNG ĐƯỢC CÓ CHỮ LĐP
-        for sn in xls.sheet_names:
-            if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
-                target_sheet = sn
-                break
-        
-        df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
-        target_col = -1
-        header_row = -1
-        
-        # Quét sâu toàn bộ file để tìm dòng chứa Ngày
-        for r in range(len(df)):
+        # 2. Quét các dòng lân cận dưới "Tháng" để chốt cột Ngày
+        for r in range(month_row_idx, min(month_row_idx + 15, len(df))):
             for c in range(len(df.columns)):
                 val = str(df.iloc[r, c]).strip().lower()
+                if val.endswith('.0'): val = val[:-2]
+                
+                # Check số nguyên (đặc sản của lịch LĐP)
+                if val == d_str or val == d_str_02:
+                    # Kiểm định: Ô bên cạnh hoặc ô trước đó phải là số ngày nối tiếp
+                    if c + 1 < len(df.columns):
+                        next_val = str(df.iloc[r, c+1]).strip().lower()
+                        if next_val.endswith('.0'): next_val = next_val[:-2]
+                        if next_val == str((d % 28) + 1) or next_val == f"{(d%28)+1:02d}":
+                            target_col = c
+                            header_row = r
+                            break
+                
+                # Check pattern đầy đủ (đặc sản của lịch Số)
                 if any(p in val for p in date_patterns) and "tháng" not in val:
                     target_col = c
                     header_row = r
                     break
             if target_col != -1: break
             
-        if target_col != -1:
+        # Fallback khẩn cấp cho Lịch Số nếu Tháng và Ngày nằm lệch quá xa
+        if target_col == -1:
+            for r in range(len(df)-1, -1, -1):
+                for c in range(len(df.columns)):
+                    val = str(df.iloc[r, c]).strip().lower()
+                    if any(p in val for p in date_patterns) and "tháng" not in val:
+                        target_col = c; header_row = r; break
+                if target_col != -1: break
+
+        # 3. Quét nhân sự từ ngày đã chốt
+        if target_col != -1 and header_row != -1:
             for r in range(header_row + 1, len(df)):
+                row_joined = " ".join([str(x).lower().strip() for x in df.iloc[r].values[:10] if str(x).strip() and str(x).lower().strip() != 'nan'])
+                if "tháng" in row_joined and str(m) not in row_joined:
+                    break # Đi lố sang tháng khác, phanh lại!
+                    
                 val = str(df.iloc[r, target_col]).lower().strip()
                 if not val or val == 'nan': continue
                 
                 name = ""
+                # Mò tên ở các cột A, B, C, D
                 for c in [1, 2, 0, 3]:
                     if c < len(df.columns):
                         n = str(df.iloc[r, c]).strip()
-                        if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
+                        if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower() and "họ và" not in n.lower():
                             name = n
                             break
-                
+                            
                 if name:
                     matched = match_nv(name, list_nv)
                     if matched:
-                        if "tcsx" in val:
-                            res_tcsx = matched
-                        elif "số" in val or "btv" in val or "trực" in val or val == "x":
-                            if "hỗ trợ" not in val and "ht" not in val: # Lọc bỏ nhân sự Hỗ Trợ
-                                if matched not in res_btv:
-                                    res_btv.append(matched)
+                        if role_type == "LDP":
+                            if "số" in val or "trực" in val or val == "x" or "ts" in val or "họp" in val:
+                                if matched not in res_ldp: res_ldp.append(matched)
+                        else:
+                            if "tcsx" in val:
+                                if matched not in res_tcsx: res_tcsx.append(matched)
+                            elif "số" in val or "btv" in val or "trực" in val or val == "x":
+                                if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val:
+                                    if matched not in res_btv: res_btv.append(matched)
     except: pass
-    return res_tcsx, res_btv
+    
+    return ", ".join(res_ldp), ", ".join(res_tcsx), res_btv
 
 def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
-    ldp, tcsx, ht = "", "", ""
+    ldp, tcsx = "", ""
     btv_list = []
     errors = []
     
     excel_bytes_ldp = get_public_gsheet_as_excel(LINK_LICH_LDP)
-    if not excel_bytes_ldp:
-        errors.append("⚠️ Không tải được Lịch LĐP. Vui lòng kiểm tra quyền Public của link.")
-    else:
-        ldp = get_ldp_from_excel(excel_bytes_ldp, target_date_obj, list_nv)
+    if not excel_bytes_ldp: errors.append("⚠️ Không tải được Lịch LĐP.")
+    else: ldp, _, _ = get_roster_from_excel(excel_bytes_ldp, target_date_obj, "LDP", list_nv)
         
     excel_bytes_btv = get_public_gsheet_as_excel(LINK_LICH_BTV_TCSX)
-    if not excel_bytes_btv:
-        errors.append("⚠️ Không tải được Lịch BTV/TCSX. Vui lòng kiểm tra quyền Public của link.")
-    else:
-        tcsx, btv_list = get_btv_tcsx_from_excel(excel_bytes_btv, target_date_obj, list_nv)
+    if not excel_bytes_btv: errors.append("⚠️ Không tải được Lịch BTV/TCSX.")
+    else: _, tcsx, btv_list = get_roster_from_excel(excel_bytes_btv, target_date_obj, "BTV", list_nv)
         
-    return ldp, tcsx, btv_list, ht, errors
+    return ldp, tcsx, btv_list, errors
 
 def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
     try:
@@ -569,13 +542,14 @@ else:
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
             if is_shift_admin:
-                auto_ldp, auto_tcsx, auto_btv, auto_ht, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
+                # 🚀 KÍCH HOẠT SIÊU AI QUÉT LỊCH MỚI
+                auto_ldp, auto_tcsx, auto_btv, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
                 
                 if scan_errors:
                     for err in scan_errors: st.warning(err)
                     
                 default_roster = [""] * 8
-                # Map chính xác 8 vị trí (Để trống vị trí 4 và 6)
+                # Lắp ráp chính xác 8 vị trí
                 default_roster[0] = match_nv(get_lanh_dao_ban(target_date), list_nv)
                 default_roster[1] = auto_ldp if auto_ldp else "--"
                 default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
@@ -1108,6 +1082,7 @@ else:
                             e_st = ce2.selectbox("TRẠNG THÁI", OPTS_TRANG_THAI_VIEC, index=OPTS_TRANG_THAI_VIEC.index(r_dat.get('TrangThai','Đã giao')) if r_dat.get('TrangThai') in OPTS_TRANG_THAI_VIEC else 0)
                             e_nt = ce2.text_area("GHI CHÚ", r_dat.get('GhiChu',''))
                             if st.form_submit_button("CẬP NHẬT"):
+                                float_time = time.time()
                                 with st.spinner("Đang cập nhật..."):
                                     w = sh_main.worksheet("CongViec")
                                     cell = w.find(r_dat['TenViec']) 
