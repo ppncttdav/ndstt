@@ -135,12 +135,10 @@ def safe_read_records(wks):
         except: time.sleep(0.2)
     return pd.DataFrame()
 
-# Nâng cấp hàm đọc do thay đổi cấu trúc Headers merge
 def safe_read_values(wks):
     for i in range(2):
         try: 
             data = wks.get_all_values()
-            # Vì Header chiếm đến 5 dòng (merge 4&5), dữ liệu thực bắt đầu từ index 5
             if len(data) > 5: return pd.DataFrame(data[5:], columns=CONTENT_HEADER)
             return pd.DataFrame(columns=CONTENT_HEADER)
         except: time.sleep(0.2)
@@ -342,7 +340,9 @@ def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
         cell_found = wks_stats.find(date_str)
         if cell_found:
             r = cell_found.row
-            for i, val in enumerate(row_data): wks_stats.update_cell(r, i+1, val)
+            # THAY VÌ LOOP, SỬ DỤNG BATCH UPDATE ĐỂ TIẾT KIỆM API CALLS
+            cells = [gspread.Cell(r, i+1, val) for i, val in enumerate(row_data)]
+            wks_stats.update_cells(cells)
             format_cell_range(wks_stats, f"A{r}:I{r}", CellFormat(backgroundColor=Color(1, 1, 1)))
         else:
             wks_stats.append_row(row_data)
@@ -442,23 +442,18 @@ def format_time_col(t):
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
-# --- THUẬT TOÁN ĐỊNH DẠNG CHUẨN XÁC YÊU CẦU ---
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
     
-    # Chuẩn bị dữ liệu để Batch Update
     row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
     row2 = ROLES_HEADER + [""]*6
     row3 = roster_vals + [""]*6
     row4 = CONTENT_HEADER
-    row5 = [""]*14  # Dòng trống để gộp với row4 tạo độ dày cho Header
+    row5 = [""]*14  
     
-    # 1. Update Text
     wks.update('A1:N5', [row1, row2, row3, row4, row5])
-    
     requests = []
     
-    # 2. Gộp ô Tiêu đề (A1:N1)
     requests.append({
         "mergeCells": {
             "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
@@ -466,7 +461,6 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # 3. Gộp ô Hàng Tiêu đề bảng (Dòng 4 và 5)
     for c in range(14):
         requests.append({
             "mergeCells": {
@@ -475,7 +469,6 @@ def dinh_dang_dep(wks, roster_vals):
             }
         })
         
-    # 4. Format Tiêu Đề (Chữ Đỏ, Bold, Căn giữa)
     fmt_title = {
         "textFormat": {"bold": True, "fontSize": 14, "foregroundColor": {"red": 1.0, "green": 0.0, "blue": 0.0}},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
@@ -489,7 +482,6 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # 5. Format Roles & Names (Bold, Căn giữa, Có Border)
     fmt_roles = {
         "textFormat": {"bold": True},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
@@ -506,7 +498,6 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # 6. Format Headers của Bảng (Nền xám nhạt, Bold, Border)
     fmt_header = {
         "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
         "textFormat": {"bold": True},
@@ -524,8 +515,7 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # 7. Chỉnh độ rộng cột chuẩn
-    col_widths = [40, 300, 100, 100, 130, 50, 80, 120, 150, 150, 80, 100, 150, 350]
+    col_widths = [40, 250, 100, 120, 120, 60, 100, 120, 120, 100, 80, 90, 150, 250]
     for c_idx, w in enumerate(col_widths):
         requests.append({
             "updateDimensionProperties": {
@@ -538,7 +528,6 @@ def dinh_dang_dep(wks, roster_vals):
         wks.spreadsheet.batch_update({"requests": requests})
     except: pass
     
-    # 8. THÊM DROPDOWNS TỰ ĐỘNG (Data Validation) CHO CÁC CỘT TỪ DÒNG 6 ĐẾN 100
     try:
         validation_dinh_dang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_DINH_DANG), showCustomUi=True)
         validation_nen_tang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_NEN_TANG), showCustomUi=True)
@@ -549,11 +538,11 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'E6:E100', validation_status)
     except: pass
 
-def dinh_dang_dong_moi(wks, row_idx):
+def dinh_dang_dong_moi(wks, start_row, end_row):
     try:
         req = [{
             "repeatCell": {
-                "range": {"sheetId": wks.id, "startRowIndex": row_idx - 1, "endRowIndex": row_idx, "startColumnIndex": 0, "endColumnIndex": 14},
+                "range": {"sheetId": wks.id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 14},
                 "cell": {"userEnteredFormat": {
                     "wrapStrategy": "WRAP", "verticalAlignment": "TOP",
                     "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
@@ -652,7 +641,6 @@ else:
                     for err in scan_errors: st.warning(err)
                     
                 default_roster = [""] * 8
-                # Lắp ráp chính xác 8 vị trí
                 default_roster[0] = match_nv(get_lanh_dao_ban(target_date), list_nv)
                 default_roster[1] = auto_ldp if auto_ldp else "--"
                 default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
@@ -671,9 +659,8 @@ else:
                             roster_vals.append(val if val != "--" else "")
                     
                     if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
-                        with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
+                        with st.spinner("Đang tạo vỏ trực số bằng Batch Update Siêu Tốc..."):
                             try:
-                                # LỆNH ÉP SHEET MỚI LÊN INDEX 0 (ĐẦU TIÊN CỦA DANH SÁCH TAB EXCEL)
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, roster_vals)
@@ -924,29 +911,34 @@ else:
                             submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
                             with submit_col2:
                                 if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", use_container_width=True, type="primary"):
-                                    with st.spinner("Đang đồng bộ dữ liệu..."):
+                                    with st.spinner("Đang đồng bộ dữ liệu siêu tốc..."):
                                         merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
                                         final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
                                         final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
                                         
-                                        # Do có thay đổi cấu trúc bảng (thêm dòng trống dòng 5), dòng bắt đầu nhập dữ liệu bị tịnh tiến xuống dòng 6
                                         first_sheet_row = first_row_idx + 6
-                                        wks_today.update_cell(first_sheet_row, 2, e_nd)     
-                                        wks_today.update_cell(first_sheet_row, 7, e_ng)     
-                                        wks_today.update_cell(first_sheet_row, 8, e_ns)     
-                                        wks_today.update_cell(first_sheet_row, 9, final_tcsx) 
-                                        wks_today.update_cell(first_sheet_row, 10, final_ldp) 
-                                        wks_today.update_cell(first_sheet_row, 14, merged_link_duyet_update)
+                                        
+                                        # BATCH UPDATE API (Chỉ mất 0.5s thay vì 2 phút)
+                                        cells_to_update = [
+                                            gspread.Cell(first_sheet_row, 2, e_nd),
+                                            gspread.Cell(first_sheet_row, 7, e_ng),
+                                            gspread.Cell(first_sheet_row, 8, e_ns),
+                                            gspread.Cell(first_sheet_row, 9, final_tcsx),
+                                            gspread.Cell(first_sheet_row, 10, final_ldp),
+                                            gspread.Cell(first_sheet_row, 14, merged_link_duyet_update)
+                                        ]
                                         
                                         for idx, update_data in platform_updates.items():
                                             sheet_row = idx + 6
-                                            wks_today.update_cell(sheet_row, 5, update_data['STATUS']) 
-                                            wks_today.update_cell(sheet_row, 11, update_data['TIME'].strftime("%H:%M:%S") if update_data['TIME'] else "") 
-                                            wks_today.update_cell(sheet_row, 12, update_data['DATE'].strftime("%d/%m/%Y")) 
-                                            wks_today.update_cell(sheet_row, 13, update_data['LINK_SP']) 
+                                            cells_to_update.append(gspread.Cell(sheet_row, 5, update_data['STATUS']))
+                                            cells_to_update.append(gspread.Cell(sheet_row, 11, update_data['TIME'].strftime("%H:%M:%S") if update_data['TIME'] else ""))
+                                            cells_to_update.append(gspread.Cell(sheet_row, 12, update_data['DATE'].strftime("%d/%m/%Y")))
+                                            cells_to_update.append(gspread.Cell(sheet_row, 13, update_data['LINK_SP']))
                                             if idx != first_row_idx:
-                                                wks_today.update_cell(sheet_row, 9, "")
-                                                wks_today.update_cell(sheet_row, 10, "") 
+                                                cells_to_update.append(gspread.Cell(sheet_row, 9, ""))
+                                                cells_to_update.append(gspread.Cell(sheet_row, 10, ""))
+                                        
+                                        wks_today.update_cells(cells_to_update)
                                         
                                         st.cache_data.clear()
                                         st.success("✅ Cập nhật thành công!"); time.sleep(1); st.rerun()
@@ -966,12 +958,23 @@ else:
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
                         with st.spinner("Đang lưu..."):
                             try:
-                                all_rows = wks_today.get_all_values(); start_stt = max(0, len(all_rows) - 5) + 1
+                                all_rows = wks_today.get_all_values()
+                                start_stt = max(0, len(all_rows) - 5) + 1
                                 plats = ts_nentang if ts_nentang else [""]
                                 merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
+                                rows_to_add = []
                                 for p in plats:
                                     row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
-                                    wks_today.append_row(row); last_row_idx = len(wks_today.get_all_values()); dinh_dang_dong_moi(wks_today, last_row_idx); start_stt += 1
+                                    rows_to_add.append(row)
+                                    start_stt += 1
+                                
+                                start_row_to_format = len(all_rows) + 1
+                                wks_today.append_rows(rows_to_add)
+                                end_row_to_format = len(all_rows) + len(rows_to_add)
+                                
+                                # Chạy lệnh định dạng hàng loạt
+                                dinh_dang_dong_moi(wks_today, start_row_to_format, end_row_to_format)
+                                
                                 st.cache_data.clear()
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
@@ -1101,12 +1104,16 @@ else:
                 with st.spinner("Đang lưu..."):
                     try:
                         all_values = wks_canhan.get_all_values()
+                        cells = []
                         for i, row in edited_df.iterrows():
                             for idx, sheet_row in enumerate(all_values):
                                 if idx == 0: continue
                                 if sheet_row[0] == curr_name and sheet_row[1] == row['TenViec'] and sheet_row[2] == row['Ngay']:
-                                    wks_canhan.update_cell(idx + 1, 4, "TRUE" if row['Xong'] else "FALSE")
-                                    wks_canhan.update_cell(idx + 1, 5, row['GhiChu']); break
+                                    cells.append(gspread.Cell(idx + 1, 4, "TRUE" if row['Xong'] else "FALSE"))
+                                    cells.append(gspread.Cell(idx + 1, 5, row['GhiChu']))
+                                    break
+                        if cells:
+                            wks_canhan.update_cells(cells)
                         st.success("Đã cập nhật!"); clear_cache_and_rerun()
                     except Exception as e: st.error(f"Lỗi: {e}")
         else: st.info(f"Bạn chưa có việc cá nhân nào trong {view_mode.lower()}.")
@@ -1188,8 +1195,15 @@ else:
                                     cell = w.find(r_dat['TenViec']) 
                                     if cell:
                                         rn = cell.row
-                                        w.update_cell(rn,1,e_ten); w.update_cell(rn,3,e_dl); w.update_cell(rn,4,e_ng)
-                                        w.update_cell(rn,5,e_st); w.update_cell(rn,6,e_lk); w.update_cell(rn,7,e_nt)
+                                        cells = [
+                                            gspread.Cell(rn, 1, e_ten),
+                                            gspread.Cell(rn, 3, e_dl),
+                                            gspread.Cell(rn, 4, e_ng),
+                                            gspread.Cell(rn, 5, e_st),
+                                            gspread.Cell(rn, 6, e_lk),
+                                            gspread.Cell(rn, 7, e_nt)
+                                        ]
+                                        w.update_cells(cells)
                                         st.success("ĐÃ CẬP NHẬT!"); clear_cache_and_rerun()
             st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
