@@ -144,7 +144,6 @@ def safe_read_records(wks):
         except: time.sleep(0.2)
     return pd.DataFrame()
 
-# BẢN VÁ LỖI CỐT LÕI: Ép gọt chuẩn 14 cột, chống Crash do file Sheet có cột thừa
 def safe_read_values(wks):
     for i in range(2):
         try: 
@@ -153,7 +152,6 @@ def safe_read_values(wks):
                 num_cols = len(CONTENT_HEADER)
                 clean_data = []
                 for row in data[5:]:
-                    # Chém bỏ cột thừa, đắp thêm khoảng trắng nếu thiếu cột
                     padded_row = row[:num_cols] + [''] * max(0, num_cols - len(row))
                     clean_data.append(padded_row)
                 return pd.DataFrame(clean_data, columns=CONTENT_HEADER)
@@ -485,6 +483,7 @@ def format_time_col(t):
 
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
+    
     row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
     row2 = ROLES_HEADER + [""]*6
     row3 = roster_vals + [""]*6
@@ -492,6 +491,7 @@ def dinh_dang_dep(wks, roster_vals):
     row5 = [""]*14  
     
     wks.update('A1:N5', [row1, row2, row3, row4, row5])
+    
     requests = []
     
     requests.append({
@@ -698,7 +698,7 @@ else:
                             roster_vals.append(val if val != "--" else "")
                     
                     if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
-                        with st.spinner("Đang tạo vỏ trực số bằng Batch Update Siêu Tốc..."):
+                        with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
                             try:
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
@@ -748,8 +748,25 @@ else:
                 df_content = safe_read_values(wks_today)
                 if df_content.empty: return
                 
-                df_context = df_content.copy()
+                # --- THUẬT TOÁN "CHẶT BẢNG": Tách phần Vỏ trực và phần Seeding ---
+                split_idx = -1
+                for i, row in df_content.iterrows():
+                    nd = str(row.get('NỘI DUNG', '')).strip().upper()
+                    nt = str(row.get('NỀN TẢNG', '')).strip().upper()
+                    dd = str(row.get('ĐỊNH DẠNG', '')).strip().upper()
+                    if nd == 'NỘI DUNG' and ('PHỤ TRÁCH' in nt or 'LINK' in dd):
+                        split_idx = i
+                        break
                 
+                if split_idx != -1:
+                    df_main = df_content.iloc[:split_idx].copy()
+                    df_seeding = df_content.iloc[split_idx+1:].copy()
+                else:
+                    df_main = df_content.copy()
+                    df_seeding = pd.DataFrame()
+                
+                # Xử lý phần Bảng Chính
+                df_context = df_main.copy()
                 def is_valid_row(row):
                     stt = str(row.get('STT', ''))
                     nd = str(row.get('NỘI DUNG', ''))
@@ -830,15 +847,50 @@ else:
                     if current_filter != "Tất cả": df_show = df_show[df_show["Tiến độ"] == current_filter]
                     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
+                # Xử lý phần Bảng Seeding (Nếu có)
+                seeding_clean = []
+                if not df_seeding.empty:
+                    for _, r in df_seeding.iterrows():
+                        task = str(r.get('NỘI DUNG', '')).strip()
+                        if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
+                        seeding_clean.append({
+                            "STT": str(r.get('STT', '')).replace('nan', '').strip(),
+                            "Nhiệm vụ": task,
+                            "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
+                            "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
+                            "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
+                            "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
+                        })
+                if seeding_clean:
+                    st.markdown("---")
+                    st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
+                    st.dataframe(pd.DataFrame(seeding_clean), use_container_width=True, hide_index=True)
+
             real_time_dashboard_and_table(filter_opt)
             st.divider()
 
             # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT =================
             st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
+            st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cần sửa/Chờ duyệt' được đẩy lên đầu)")
             
             df_content_static = safe_read_values(wks_today)
             if not df_content_static.empty:
-                df_context_st = df_content_static.copy()
+                # --- TÁCH BẢNG CHO KHU VỰC SỬA ---
+                split_idx_st = -1
+                for i, row in df_content_static.iterrows():
+                    nd = str(row.get('NỘI DUNG', '')).strip().upper()
+                    nt = str(row.get('NỀN TẢNG', '')).strip().upper()
+                    dd = str(row.get('ĐỊNH DẠNG', '')).strip().upper()
+                    if nd == 'NỘI DUNG' and ('PHỤ TRÁCH' in nt or 'LINK' in dd):
+                        split_idx_st = i
+                        break
+                        
+                if split_idx_st != -1:
+                    df_main_st = df_content_static.iloc[:split_idx_st].copy()
+                else:
+                    df_main_st = df_content_static.copy()
+                    
+                df_context_st = df_main_st.copy()
                 
                 def is_valid_row_st(row):
                     stt = str(row.get('STT', ''))
@@ -874,9 +926,9 @@ else:
                     st.info("📭 Không có bài viết nào thuộc nhóm lọc này. Hãy chọn Tất cả để xem lại.")
                 else:
                     if len(dropdown_options) == 1:
-                        sel_label = st.selectbox("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC:", dropdown_options)
+                        sel_label = st.selectbox("CHỌN BÀI:", dropdown_options, label_visibility="collapsed")
                     else:
-                        sel_label = st.selectbox("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cần sửa/Chờ duyệt' được đẩy lên đầu):", ["-- Chọn bài viết --"] + dropdown_options)
+                        sel_label = st.selectbox("CHỌN BÀI:", ["-- Chọn bài viết --"] + dropdown_options, label_visibility="collapsed")
                     
                     if sel_label and sel_label != "-- Chọn bài viết --":
                         sel_product = prod_mapping[sel_label]
@@ -1110,7 +1162,7 @@ else:
                                 exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
                                 title_lower = title.lower()
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
