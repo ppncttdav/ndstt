@@ -48,6 +48,15 @@ def generate_secure_token(username):
 def get_vn_time():
     return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
 
+def clear_cache_and_rerun(): 
+    st.cache_data.clear()
+    st.rerun()
+
+def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
+    try: 
+        sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
+    except: pass
+
 def get_short_name(full_name):
     if not full_name or full_name == "--" or str(full_name).strip() == "": return "..."
     parts = full_name.strip().split()
@@ -84,7 +93,7 @@ def check_quyen(curr_name, role, task_row, df_duan):
 def get_weather_and_advice():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&current_weather=true&timezone=Asia%2FBangkok"
-        res = requests.get(url, timeout=2).json()
+        res = requests.get(url, timeout=1).json()
         temp = res['current_weather']['temperature']
         wcode = res['current_weather']['weathercode']
         condition = "CÓ MÂY"; advice = "CHÚC BẠN MỘT NGÀY LÀM VIỆC NĂNG SUẤT!"
@@ -135,13 +144,22 @@ def safe_read_records(wks):
         except: time.sleep(0.2)
     return pd.DataFrame()
 
+# BẢN VÁ LỖI CỐT LÕI: Ép gọt chuẩn 14 cột, chống Crash do file Sheet có cột thừa
 def safe_read_values(wks):
     for i in range(2):
         try: 
             data = wks.get_all_values()
-            if len(data) > 5: return pd.DataFrame(data[5:], columns=CONTENT_HEADER)
+            if len(data) > 5: 
+                num_cols = len(CONTENT_HEADER)
+                clean_data = []
+                for row in data[5:]:
+                    # Chém bỏ cột thừa, đắp thêm khoảng trắng nếu thiếu cột
+                    padded_row = row[:num_cols] + [''] * max(0, num_cols - len(row))
+                    clean_data.append(padded_row)
+                return pd.DataFrame(clean_data, columns=CONTENT_HEADER)
             return pd.DataFrame(columns=CONTENT_HEADER)
-        except: time.sleep(0.2)
+        except Exception as e: 
+            time.sleep(0.2)
     return pd.DataFrame(columns=CONTENT_HEADER)
 
 @st.cache_data(ttl=1800)
@@ -431,7 +449,6 @@ def get_priority_score(status):
     if "✅ Đã duyệt" in status: return 6
     return 7
 
-# --- HÀM HỖ TRỢ XỬ LÝ LPS ĐÃ ĐƯỢC KHÔI PHỤC ---
 def format_title_name(text):
     text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
     text = text.title()
@@ -732,8 +749,16 @@ else:
                 if df_content.empty: return
                 
                 df_context = df_content.copy()
+                
                 def is_valid_row(row):
-                    return str(row.get('STT', '')).strip() != "" or str(row.get('NỘI DUNG', '')).strip() != "" or str(row.get('NỀN TẢNG', '')).strip() != ""
+                    stt = str(row.get('STT', ''))
+                    nd = str(row.get('NỘI DUNG', ''))
+                    nt = str(row.get('NỀN TẢNG', ''))
+                    stt = "" if stt.lower() in ['nan', '<na>', 'none'] else stt.strip()
+                    nd = "" if nd.lower() in ['nan', '<na>', 'none'] else nd.strip()
+                    nt = "" if nt.lower() in ['nan', '<na>', 'none'] else nt.strip()
+                    return stt != "" or nd != "" or nt != ""
+                    
                 df_context = df_context[df_context.apply(is_valid_row, axis=1)]
 
                 df_context['NỘI DUNG_GROUP'] = df_context['NỘI DUNG'].replace('', pd.NA).ffill()
@@ -814,7 +839,16 @@ else:
             df_content_static = safe_read_values(wks_today)
             if not df_content_static.empty:
                 df_context_st = df_content_static.copy()
-                def is_valid_row_st(row): return str(row.get('STT', '')).strip() != "" or str(row.get('NỘI DUNG', '')).strip() != "" or str(row.get('NỀN TẢNG', '')).strip() != ""
+                
+                def is_valid_row_st(row):
+                    stt = str(row.get('STT', ''))
+                    nd = str(row.get('NỘI DUNG', ''))
+                    nt = str(row.get('NỀN TẢNG', ''))
+                    stt = "" if stt.lower() in ['nan', '<na>', 'none'] else stt.strip()
+                    nd = "" if nd.lower() in ['nan', '<na>', 'none'] else nd.strip()
+                    nt = "" if nt.lower() in ['nan', '<na>', 'none'] else nt.strip()
+                    return stt != "" or nd != "" or nt != ""
+                    
                 df_context_st = df_context_st[df_context_st.apply(is_valid_row_st, axis=1)]
                 df_context_st['NỘI DUNG_GROUP'] = df_context_st['NỘI DUNG'].replace('', pd.NA).ffill()
                 df_context_st = df_context_st.dropna(subset=['NỘI DUNG_GROUP'])
@@ -1076,7 +1110,7 @@ else:
                                 exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
                                 title_lower = title.lower()
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
