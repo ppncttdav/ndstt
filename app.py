@@ -14,7 +14,7 @@ import re
 import io
 import hashlib
 import concurrent.futures
-import google.generativeai as genai
+import json
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -42,35 +42,22 @@ LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (DEEP CACHING & TỰ DÒ MODEL) ---
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (REST API TRỰC TIẾP - BYPASS LỖI SDK) ---
 @st.cache_data(ttl=86400, show_spinner=False)
 def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
-        # Tích hợp mã API định dạng mới (AQ.) của bạn
+        # API Key định dạng mới AQ. của bạn
         api_key = "AQ.Ab8RN6IRxnzG7H6lQUC27ZVxA0NrtdjKTMua5Lwg9A34oGuFwg"
         
-        # BẢN VÁ LỖI CỐT LÕI: Ép chạy trên giao thức REST để tránh lỗi 401 ACCESS_TOKEN_TYPE_UNSUPPORTED
-        genai.configure(api_key=api_key, transport="rest")
+        # Bắn lệnh thẳng lên máy chủ Google bằng REST API, vứt bỏ thư viện bị lỗi
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
         
-        available_models = [
-            m.name for m in genai.list_models() 
-            if 'generateContent' in m.supported_generation_methods
-        ]
+        headers = {
+            "Content-Type": "application/json"
+        }
         
-        if not available_models:
-            return "⚠️ API Key không có quyền truy cập vào bất kỳ model tạo văn bản nào."
-
-        chosen_model = None
-        for m_name in available_models:
-            if 'flash' in m_name.lower():
-                chosen_model = m_name
-                break
-        if not chosen_model:
-            chosen_model = available_models[0]
-
-        model = genai.GenerativeModel(chosen_model)
         prompt = f"""
         Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình quốc gia, vô cùng khắt khe, cầu toàn và soi lỗi cực giỏi.
         Nhiệm vụ của bạn là rà soát đoạn nội dung tin tức/bài đăng MXH dưới đây.
@@ -85,10 +72,25 @@ def call_gemini_ai(text):
         NỘI DUNG CẦN RÀ SOÁT:
         {text}
         """
-        response = model.generate_content(prompt)
-        return response.text
+        
+        data = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=15)
+        
+        if response.status_code == 200:
+            result_json = response.json()
+            try:
+                answer = result_json['candidates'][0]['content']['parts'][0]['text']
+                return answer
+            except:
+                return "⚠️ AI trả về dữ liệu trống hoặc không đúng định dạng."
+        else:
+            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): {response.text}"
+            
     except Exception as e:
-        return f"⚠️ Lỗi kết nối AI: {str(e)}"
+        return f"⚠️ Lỗi kết nối mạng nội bộ: {str(e)}"
 
 def generate_secure_token(username):
     secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
@@ -1040,7 +1042,7 @@ else:
                                 e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                 
                                 st.markdown("---")
-                                if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                 e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                 e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                 
