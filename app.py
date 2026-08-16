@@ -48,10 +48,11 @@ def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
-        # Tích hợp trực tiếp mã API định dạng mới của bạn
-        api_key = "AQ.Ab8RN6IpriyggsxNz2n5HcVZop35g4H1EyfPr7iZ5NPAed35nA"
+        # Tích hợp mã API định dạng mới (AQ.) của bạn
+        api_key = "AQ.Ab8RN6IRxnzG7H6lQUC27ZVxA0NrtdjKTMua5Lwg9A34oGuFwg"
         
-        genai.configure(api_key=api_key)
+        # BẢN VÁ LỖI CỐT LÕI: Ép chạy trên giao thức REST để tránh lỗi 401 ACCESS_TOKEN_TYPE_UNSUPPORTED
+        genai.configure(api_key=api_key, transport="rest")
         
         available_models = [
             m.name for m in genai.list_models() 
@@ -87,7 +88,7 @@ def call_gemini_ai(text):
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"⚠️ Lỗi kết nối AI (Vui lòng kiểm tra lại cấu hình): {str(e)}"
+        return f"⚠️ Lỗi kết nối AI: {str(e)}"
 
 def generate_secure_token(username):
     secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
