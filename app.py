@@ -14,6 +14,7 @@ import re
 import io
 import hashlib
 import concurrent.futures
+import google.generativeai as genai
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -40,6 +41,32 @@ LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B
 LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=387062810#gid=387062810"
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
+
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (CÓ DEEP CACHING) ---
+@st.cache_data(ttl=86400, show_spinner=False)
+def call_gemini_ai(text):
+    if not text or len(text.strip()) < 10: return ""
+    try:
+        genai.configure(api_key="AQ.Ab8RN6IpriyggsxNz2n5HcVZop35g4H1EyfPr7iZ5NPAed35nA")
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""
+        Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình, vô cùng khắt khe và cầu toàn.
+        Nhiệm vụ của bạn là rà soát đoạn nội dung tin tức/bài đăng MXH dưới đây.
+        Hãy chỉ ra MỌI rủi ro và sai sót theo các tiêu chí sau:
+        1. RỦI RO CHÍNH TRỊ, NGOẠI GIAO, CHỦ QUYỀN (đây là yếu tố tử huyệt, soi thật kỹ mọi danh xưng, lãnh thổ).
+        2. Sự thiếu logic, thông tin mâu thuẫn, tính xác thực của dữ kiện.
+        3. Vi phạm bản quyền, nhạy cảm văn hóa, tôn giáo.
+        4. Sai sót chính tả, ngữ pháp, diễn đạt lủng củng.
+
+        Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, phản biện mạnh mẽ. Tuyệt đối không khen ngợi dài dòng. Nếu bài viết không có lỗi, chỉ cần báo "Nội dung an toàn, đủ điều kiện xuất bản".
+
+        NỘI DUNG CẦN RÀ SOÁT:
+        {text}
+        """
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"⚠️ Lỗi kết nối AI (Vui lòng kiểm tra lại API Key): {str(e)}"
 
 def generate_secure_token(username):
     secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
@@ -490,6 +517,7 @@ def dinh_dang_dep(wks, roster_vals):
     row5 = [""]*14  
     
     wks.update('A1:N5', [row1, row2, row3, row4, row5])
+    
     requests = []
     
     requests.append({
@@ -590,6 +618,7 @@ def dinh_dang_dong_moi(wks, start_row, end_row):
         }]
         wks.spreadsheet.batch_update({"requests": req})
     except: pass
+
 
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'dang_nhap' not in st.session_state: 
@@ -936,6 +965,24 @@ else:
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
                         
+                        # --- TÍNH NĂNG AI PHẢN BIỆN (DEEP CACHING) ---
+                        with st.expander("🤖 AI PHẢN BIỆN & CẢNH BÁO RỦI RO", expanded=True):
+                            st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
+                            
+                            c_ai1, c_ai2 = st.columns([1, 1])
+                            auto_scan = c_ai1.checkbox("🔄 Bật Tự động quét lỗi (Auto-Scan) khi bài có thay đổi", value=True)
+                            btn_scan = c_ai2.button("⚡ QUÉT THỦ CÔNG")
+                            
+                            if btn_scan or (auto_scan and current_text.strip()):
+                                if not current_text or len(current_text.strip()) < 5:
+                                    st.warning("Không có nội dung Text để rà soát!")
+                                else:
+                                    with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
+                                        ai_feedback = call_gemini_ai(current_text)
+                                        if ai_feedback:
+                                            st.markdown(ai_feedback)
+                        # -----------------------------------------------------------
+                        
                         with st.form("edit_group_form"):
                             col_left, col_right = st.columns([1.2, 1])
                             
@@ -1160,7 +1207,8 @@ else:
                                 # --- NÂNG CẤP MÀNG LỌC DANH SÁCH ĐEN (BLACKLIST) ---
                                 exclude_keywords = [
                                     "weather forecast", "đệm", "filler", "trailer", 
-                                    "amazing", "block", "promo", "tài trợ", "quảng cáo", "ident"
+                                    "amazing", "block", "promo", "tài trợ", "quảng cáo", "ident",
+                                    "thời tiết", "weather", "bản tin thời tiết"
                                 ]
                                 title_lower = title.lower()
                                 
