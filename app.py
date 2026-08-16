@@ -48,10 +48,11 @@ def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
+        # Tích hợp trực tiếp mã API định dạng mới của bạn
         api_key = "AQ.Ab8RN6IpriyggsxNz2n5HcVZop35g4H1EyfPr7iZ5NPAed35nA"
+        
         genai.configure(api_key=api_key)
         
-        # Tự động lấy danh sách tất cả model mà API Key này được phép dùng
         available_models = [
             m.name for m in genai.list_models() 
             if 'generateContent' in m.supported_generation_methods
@@ -60,7 +61,6 @@ def call_gemini_ai(text):
         if not available_models:
             return "⚠️ API Key không có quyền truy cập vào bất kỳ model tạo văn bản nào."
 
-        # Ưu tiên chọn model dòng Flash mới nhất, nếu không thì lấy model khả dụng đầu tiên
         chosen_model = None
         for m_name in available_models:
             if 'flash' in m_name.lower():
@@ -79,7 +79,7 @@ def call_gemini_ai(text):
         3. Vi phạm bản quyền, nhạy cảm văn hóa, tôn giáo, phân biệt chủng tộc.
         4. Sai sót chính tả, ngữ pháp, diễn đạt lủng củng.
 
-        Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, phản biện mạnh mẽ để BTV phải sửa. Tuyệt đối không khen ngợi dài dòng. Nếu bài viết hoàn hảo 100%, chỉ cần báo "Nội dung an toàn, đủ điều kiện xuất bản".
+        Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, phản biện mạnh mẽ để BTV phải sửa. Tuyệt đối không khen ngợi dài dòng. Nếu bài viết hoàn hảo 100%, chỉ cần báo đúng 1 câu: "Nội dung an toàn, đủ điều kiện xuất bản".
 
         NỘI DUNG CẦN RÀ SOÁT:
         {text}
@@ -87,7 +87,7 @@ def call_gemini_ai(text):
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"⚠️ Lỗi kết nối AI (Vui lòng kiểm tra lại cấu trúc API Key của bạn): {str(e)}"
+        return f"⚠️ Lỗi kết nối AI (Vui lòng kiểm tra lại cấu hình): {str(e)}"
 
 def generate_secure_token(username):
     secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
@@ -122,7 +122,6 @@ def match_nv(name, list_nv):
                 return nv
     return name.title()
 
-# --- NÂNG CẤP: ÉP LỌC BỎ RÁC BTV GHI CHÚ VÀO CỘT NHÂN SỰ ---
 def normalize_btv_names_strict(name_str, list_nv):
     if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
     raw_str = str(name_str).lower()
@@ -175,7 +174,7 @@ ROLES_HEADER = [
 
 OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
 OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Web + App", "Instagram"]
-OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Scheduled", "Posted", "Hủy"]
+OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Cảnh báo rủi ro", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Scheduled", "Posted", "Hủy"]
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
 
@@ -467,6 +466,7 @@ def get_smart_status(group_df):
     has_link = len(link_duyet) > 5
     
     if any(s in status for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]): return "✅ Đã duyệt"
+    if "rủi ro" in status: return "🚨 Cảnh báo rủi ro"
     
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', tcsx_cmts)
     ldp_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', ldp_cmts)
@@ -490,6 +490,7 @@ def get_smart_status(group_df):
     return "📝 BTV đang hoàn thiện"
 
 def get_priority_score(status):
+    if "🚨 Cảnh báo" in status: return 0
     if "🔴 Cần sửa" in status: return 1
     if "🔄 BTV đã sửa" in status: return 2
     if "⏳ Chờ LĐP" in status: return 3
@@ -789,7 +790,7 @@ else:
 
             st.write("")
 
-            filter_opt = st.pills("Bộ lọc", ["Tất cả", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
+            filter_opt = st.pills("Bộ lọc", ["Tất cả", "🚨 Cảnh báo rủi ro", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
 
             # ================= LỒNG KÍNH PHÂN MẢNH =================
             @st.fragment(run_every="10s")
@@ -881,6 +882,7 @@ else:
                                                color_discrete_map={
                                                    "✅ Đã duyệt": "#28a745",
                                                    "🔴 Cần sửa": "#dc3545",
+                                                   "🚨 Cảnh báo rủi ro": "#ff0000",
                                                    "🔄 BTV đã sửa": "#007bff",
                                                    "👀 Chờ TCSX duyệt": "#ffc107",
                                                    "⏳ Chờ LĐP duyệt": "#fd7e14",
@@ -921,14 +923,21 @@ else:
                 if seeding_clean:
                     st.markdown("---")
                     st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
-                    st.dataframe(pd.DataFrame(seeding_clean), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(seeding_clean), 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
+                        }
+                    )
 
             real_time_dashboard_and_table(filter_opt)
             st.divider()
 
             # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT =================
             st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
-            st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cần sửa/Chờ duyệt' được đẩy lên đầu)")
+            st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cảnh báo rủi ro', 'Cần sửa' được đẩy lên đầu)")
             
             df_content_static = safe_read_values(wks_today)
             if not df_content_static.empty:
@@ -994,21 +1003,29 @@ else:
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
                         
+                        # --- TÍNH NĂNG AI PHẢN BIỆN ---
                         with st.expander("🤖 AI PHẢN BIỆN & CẢNH BÁO RỦI RO", expanded=True):
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
                             
                             c_ai1, c_ai2 = st.columns([1, 1])
-                            auto_scan = c_ai1.checkbox("🔄 Bật Tự động quét lỗi (Auto-Scan) khi bài có thay đổi", value=True)
+                            auto_scan = c_ai1.checkbox("🔄 Tự động quét lỗi bài này", value=True)
                             btn_scan = c_ai2.button("⚡ QUÉT THỦ CÔNG")
                             
                             if btn_scan or (auto_scan and current_text.strip()):
                                 if not current_text or len(current_text.strip()) < 5:
-                                    st.warning("Không có đủ nội dung Text để rà soát!")
+                                    st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
                                 else:
                                     with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
                                         ai_feedback = call_gemini_ai(current_text)
                                         if ai_feedback:
-                                            st.markdown(ai_feedback)
+                                            if "nội dung an toàn" in ai_feedback.lower() and "đủ điều kiện" in ai_feedback.lower():
+                                                st.success("✅ " + ai_feedback)
+                                            elif "lỗi kết nối" in ai_feedback.lower() or "cảnh báo" in ai_feedback.lower() or "vui lòng" in ai_feedback.lower():
+                                                st.warning(ai_feedback)
+                                            else:
+                                                st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
+                                                st.markdown(ai_feedback)
+                        # ---------------------------------
                         
                         with st.form("edit_group_form"):
                             col_left, col_right = st.columns([1.2, 1])
@@ -1228,7 +1245,7 @@ else:
                                 exclude_keywords = [
                                     "weather forecast", "đệm", "filler", "trailer", 
                                     "amazing", "block", "promo", "tài trợ", "quảng cáo", "ident",
-                                    "thời tiết", "weather", "bản tin thời tiết"
+                                    "thời tiết", "weather", "bản tin thời tiết", "thoi tiet"
                                 ]
                                 title_lower = title.lower()
                                 
