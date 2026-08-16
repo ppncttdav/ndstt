@@ -483,7 +483,6 @@ def format_time_col(t):
 
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
-    
     row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
     row2 = ROLES_HEADER + [""]*6
     row3 = roster_vals + [""]*6
@@ -491,7 +490,6 @@ def dinh_dang_dep(wks, roster_vals):
     row5 = [""]*14  
     
     wks.update('A1:N5', [row1, row2, row3, row4, row5])
-    
     requests = []
     
     requests.append({
@@ -1159,10 +1157,16 @@ else:
                             title, desc = parse_khung_cell(content_val)
                             formatted_time = format_time_col(time_val)
                             if title:
-                                exclude_keywords = ["weather forecast", "đệm", "filler", "trailer"]
+                                # --- NÂNG CẤP MÀNG LỌC DANH SÁCH ĐEN (BLACKLIST) ---
+                                exclude_keywords = [
+                                    "weather forecast", "đệm", "filler", "trailer", 
+                                    "amazing", "block", "promo", "tài trợ", "quảng cáo", "ident"
+                                ]
                                 title_lower = title.lower()
+                                
+                                # Chỉ đưa vào LPS nếu tiêu đề KHÔNG chứa bất kỳ từ khóa rác nào
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
