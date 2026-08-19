@@ -42,7 +42,7 @@ LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (BYPASS LỖI AQ. TOÀN CẦU CỦA GOOGLE) ---
 @st.cache_data(ttl=86400, show_spinner=False)
 def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
@@ -108,8 +108,9 @@ def clear_cache_and_rerun():
     st.cache_data.clear()
     st.rerun()
 
-def ghi_nhat_ky(sh_main, nguoi_dung, hanh_dong, chi_tiet):
+def ghi_nhat_ky(nguoi_dung, hanh_dong, chi_tiet):
     try: 
+        sh_main = ket_noi_sheet(SHEET_MAIN)
         sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
     except: pass
 
@@ -118,25 +119,12 @@ def get_short_name(full_name):
     parts = full_name.strip().split()
     return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
-def match_nv(name, list_nv):
-    if not name or str(name).strip() == "": return ""
-    n_lower = str(name).lower().strip()
-    for nv in list_nv:
-        if n_lower == str(nv).lower().strip(): return nv
-    if len(n_lower) >= 2:
-        for nv in list_nv:
-            nv_lower = str(nv).lower().strip()
-            if n_lower in nv_lower or nv_lower in n_lower: 
-                return nv
-    return name.title()
-
 def normalize_btv_names_strict(name_str, list_nv):
     if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
     raw_str = str(name_str).lower()
     found_names = []
     
     sorted_nv = sorted(list_nv, key=len, reverse=True)
-    
     for nv in sorted_nv:
         nv_lower = nv.lower()
         parts = nv_lower.split()
@@ -151,6 +139,18 @@ def normalize_btv_names_strict(name_str, list_nv):
             
     if not found_names: return "Chưa phân công"
     return ", ".join(found_names)
+
+def match_nv(name, list_nv):
+    if not name or str(name).strip() == "": return ""
+    n_lower = str(name).lower().strip()
+    for nv in list_nv:
+        if n_lower == str(nv).lower().strip(): return nv
+    if len(n_lower) >= 2:
+        for nv in list_nv:
+            nv_lower = str(nv).lower().strip()
+            if n_lower in nv_lower or nv_lower in n_lower: 
+                return nv
+    return name.title()
 
 def get_lanh_dao_ban(d_obj):
     wd = d_obj.weekday()
@@ -220,21 +220,35 @@ def safe_read_records(wks):
         except: time.sleep(0.2)
     return pd.DataFrame()
 
-def safe_read_values(wks):
-    for i in range(2):
-        try: 
+# --- SIÊU TỐI ƯU TỐC ĐỘ: NHÉT TOÀN BỘ FILE VÀO RAM ---
+@st.cache_data(ttl=15, show_spinner=False)
+def fetch_vo_truc_so(tab_name):
+    sh = ket_noi_sheet(LINK_VO_TRUC_SO)
+    if not sh: return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+    try:
+        wks = sh.worksheet(tab_name)
+    except:
+        return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+        
+    for _ in range(2):
+        try:
             data = wks.get_all_values()
+            roster_names = data[2][1:] if len(data) > 2 else []
+            r_roles = data[1][1:] if len(data) > 1 else []
+            
             if len(data) > 5: 
                 num_cols = len(CONTENT_HEADER)
                 clean_data = []
                 for row in data[5:]:
                     padded_row = row[:num_cols] + [''] * max(0, num_cols - len(row))
                     clean_data.append(padded_row)
-                return pd.DataFrame(clean_data, columns=CONTENT_HEADER)
-            return pd.DataFrame(columns=CONTENT_HEADER)
-        except Exception as e: 
+                df = pd.DataFrame(clean_data, columns=CONTENT_HEADER)
+            else:
+                df = pd.DataFrame(columns=CONTENT_HEADER)
+            return True, df, roster_names, r_roles
+        except: 
             time.sleep(0.2)
-    return pd.DataFrame(columns=CONTENT_HEADER)
+    return True, pd.DataFrame(columns=CONTENT_HEADER), [], []
 
 @st.cache_data(ttl=1800)
 def load_tai_khoan():
@@ -419,8 +433,9 @@ def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
         
     return ldp, tcsx, btv_list, ht, errors
 
-def tu_dong_cap_nhat_thong_ke(sh_trucso, date_str, roster):
+def tu_dong_cap_nhat_thong_ke(date_str, roster):
     try:
+        sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
         try: wks_stats = sh_trucso.worksheet("ThongKe")
         except: 
             wks_stats = sh_trucso.add_worksheet("ThongKe", 1000, 20)
@@ -657,6 +672,18 @@ def dinh_dang_dong_moi(wks, start_row, end_row):
         wks.spreadsheet.batch_update({"requests": req})
     except: pass
 
+def update_wks_canhan(action_type, data):
+    sh_main = ket_noi_sheet(SHEET_MAIN)
+    try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+    except: 
+        wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+        wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+        
+    if action_type == "update":
+        wks_canhan.update_cells(data)
+    elif action_type == "append":
+        wks_canhan.append_row(data)
+
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'dang_nhap' not in st.session_state: 
     st.session_state['dang_nhap'] = False
@@ -674,8 +701,7 @@ if not st.session_state['dang_nhap']:
                 if not u_row.empty:
                     st.session_state['dang_nhap'] = True
                     st.session_state['user_info'] = u_row.iloc[0].to_dict()
-                    sh_main = ket_noi_sheet(SHEET_MAIN)
-                    ghi_nhat_ky(sh_main, u_row.iloc[0]['HoTen'], "Đăng nhập", "Success")
+                    ghi_nhat_ky(u_row.iloc[0]['HoTen'], "Đăng nhập", "Success")
                     clear_cache_and_rerun()
                 else: st.error("Sai thông tin đăng nhập!")
             else: st.error("Lỗi kết nối CSDL Tài khoản.")
@@ -684,7 +710,6 @@ else:
     list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
     df_duan, df_cv, df_cn, df_log = load_du_lieu_app()
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
-    sh_main = ket_noi_sheet(SHEET_MAIN)
     u_info = st.session_state['user_info']; curr_name = u_info['HoTen']; curr_username = str(u_info['TenDangNhap']); role = u_info.get('VaiTro', 'NhanVien')
     
     with st.sidebar:
@@ -700,6 +725,7 @@ else:
                     elif new_p != cfm_p: st.error("Mật khẩu không khớp!")
                     elif not new_p: st.error("Không để trống!")
                     else:
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         wks_acc = sh_main.worksheet("TaiKhoan"); cell = wks_acc.find(curr_username)
                         if cell: 
                             wks_acc.update_cell(cell.row, 2, new_p); st.session_state['user_info']['MatKhau'] = new_p; 
@@ -710,7 +736,6 @@ else:
             st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
-    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO) 
     
     list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS", "✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
@@ -727,11 +752,9 @@ else:
         with c_nav2: st.header(f"📝 VỎ TRỰC SỐ NGÀY: {date_str_display}")
 
         is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat'])
-        tab_exists = False
-        try: 
-            wks_today = sh_trucso.worksheet(tab_name_current)
-            tab_exists = True
-        except: tab_exists = False
+        
+        # --- ĐÂY LÀ NHÁT CHÉM GIÚP WEB NẢY RA TRONG 0.01 GIÂY ---
+        tab_exists, df_content_static, roster_names_current, r_roles_current = fetch_vo_truc_so(tab_name_current)
 
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
@@ -764,9 +787,10 @@ else:
                     if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
                         with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
                             try:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
-                                tu_dong_cap_nhat_thong_ke(sh_trucso, date_str_display, roster_vals)
+                                tu_dong_cap_nhat_thong_ke(date_str_display, roster_vals)
                                 st.cache_data.clear()
                                 st.success("ĐÃ TẠO XONG VỎ TRỰC SỐ!"); time.sleep(1); st.rerun()
                             except Exception as e: st.error(str(e))
@@ -774,7 +798,6 @@ else:
             is_shift_ldp = False
             is_shift_tcsx = False
             try:
-                roster_names_current = wks_today.row_values(3)[1:]
                 ldp_in_sheet = str(roster_names_current[1]).strip().lower() if len(roster_names_current) > 1 else ""
                 tcsx_in_sheet = str(roster_names_current[4]).strip().lower() if len(roster_names_current) > 4 else ""
                 curr_lower = curr_name.lower()
@@ -791,25 +814,24 @@ else:
 
             with st.expander("👥 THÔNG TIN EKIP TRỰC SỐ", expanded=False):
                 try:
-                    r_names = wks_today.row_values(3)[1:]; r_roles = wks_today.row_values(2)[1:]
                     c1, c2, c3, c4 = st.columns(4)
                     cols_1 = [c1, c2, c3, c4]
                     for i in range(4):
-                        if i < len(r_names): cols_1[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles[i]}</p><b>{r_names[i]}</b>", unsafe_allow_html=True)
+                        if i < len(roster_names_current): cols_1[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[i]}</p><b>{roster_names_current[i]}</b>", unsafe_allow_html=True)
                     st.write("---"); c5, c6, c7, c8 = st.columns(4); cols_2 = [c5, c6, c7, c8]
                     for i in range(4):
                         idx = i + 4
-                        if idx < len(r_names): cols_2[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles[idx]}</p><b>{r_names[idx]}</b>", unsafe_allow_html=True)
+                        if idx < len(roster_names_current): cols_2[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[idx]}</p><b>{roster_names_current[idx]}</b>", unsafe_allow_html=True)
                 except: pass
 
             st.write("")
 
             filter_opt = st.pills("Bộ lọc", ["Tất cả", "🚨 Cảnh báo rủi ro", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
 
-            # ================= LỒNG KÍNH PHÂN MẢNH =================
+            # ================= LỒNG KÍNH PHÂN MẢNH THỜI GIAN THỰC =================
             @st.fragment(run_every="10s")
             def real_time_dashboard_and_table(current_filter):
-                df_content = safe_read_values(wks_today)
+                _, df_content, _, _ = fetch_vo_truc_so(tab_name_current)
                 if df_content.empty: return
                 
                 split_idx = -1
@@ -953,7 +975,6 @@ else:
             st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
             st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cảnh báo rủi ro', 'Cần sửa' được đẩy lên đầu)")
             
-            df_content_static = safe_read_values(wks_today)
             if not df_content_static.empty:
                 split_idx_st = -1
                 for i, row in df_content_static.iterrows():
@@ -1034,7 +1055,7 @@ else:
                                         if ai_feedback:
                                             if "nội dung an toàn" in ai_feedback.lower() and "đủ điều kiện" in ai_feedback.lower():
                                                 st.success("✅ " + ai_feedback)
-                                            elif "lỗi kết nối" in ai_feedback.lower() or "cảnh báo" in ai_feedback.lower() or "vui lòng" in ai_feedback.lower():
+                                            elif "lỗi" in ai_feedback.lower() and "máy chủ google" in ai_feedback.lower():
                                                 st.warning(ai_feedback)
                                             else:
                                                 st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
@@ -1122,6 +1143,8 @@ else:
                                         final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
                                         
                                         first_sheet_row = first_row_idx + 6
+                                        sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                        wks_today = sh_trucso.worksheet(tab_name_current)
                                         
                                         cells_to_update = [
                                             gspread.Cell(first_sheet_row, 2, e_nd),
@@ -1162,6 +1185,8 @@ else:
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
                         with st.spinner("Đang lưu..."):
                             try:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
                                 start_stt = max(0, len(all_rows) - 5) + 1
                                 plats = ts_nentang if ts_nentang else [""]
@@ -1290,9 +1315,6 @@ else:
     # ================= CÁC TAB KHÁC =================
     with tabs[2]:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
-        try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-        except: 
-            wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
         col_view, col_date = st.columns([1, 2])
         view_mode = col_view.radio("Xem theo:", ["Hôm nay", "Tuần này", "Tháng này"], horizontal=True)
         today = date.today()
@@ -1311,6 +1333,12 @@ else:
             if st.button("💾 CẬP NHẬT CHECKLIST"):
                 with st.spinner("Đang lưu..."):
                     try:
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
+                        try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+                        except: 
+                            wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+                            wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+                        
                         all_values = wks_canhan.get_all_values()
                         cells = []
                         for i, row in edited_df.iterrows():
@@ -1334,7 +1362,7 @@ else:
                 if st.form_submit_button("THÊM"):
                     if n_ten:
                         with st.spinner("Đang thêm..."):
-                            wks_canhan.append_row([curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
+                            update_wks_canhan("append", [curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
                             st.success("Xong!"); clear_cache_and_rerun()
         with c_add2:
             st.markdown("#### 📥 LẤY TỪ VIỆC CHUNG")
@@ -1348,9 +1376,8 @@ else:
                             t_name = sel.split(" (")[0]; row = my_tasks_cv[my_tasks_cv['TenViec'] == t_name].iloc[0]
                             try: dl = row['Deadline'].split(" ")[1]
                             except: dl = today.strftime("%d/%m/%Y")
-                            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-                            except: wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5); wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
-                            wks_canhan.append_row([curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"]); st.success("Xong!"); clear_cache_and_rerun()
+                            update_wks_canhan("append", [curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"])
+                            st.success("Xong!"); clear_cache_and_rerun()
 
     with tabs[3]:
         st.caption("QUẢN LÝ TIẾN ĐỘ DỰ ÁN TOÀN PHÒNG.")
@@ -1368,6 +1395,7 @@ else:
                 with st.spinner("Đang lưu..."):
                     try:
                         dl_fmt = f"{tv_time.strftime('%H:%M:%S')} {tv_date.strftime('%d/%m/%Y')}"
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
                         ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
                         if opt_nv and tv_nguoi:
@@ -1399,6 +1427,7 @@ else:
                             if st.form_submit_button("CẬP NHẬT"):
                                 float_time = time.time()
                                 with st.spinner("Đang cập nhật..."):
+                                    sh_main = ket_noi_sheet(SHEET_MAIN)
                                     w = sh_main.worksheet("CongViec")
                                     cell = w.find(r_dat['TenViec']) 
                                     if cell:
@@ -1421,6 +1450,7 @@ else:
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
                 if st.form_submit_button("TẠO DỰ ÁN"): 
                     with st.spinner("Đang tạo..."):
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
