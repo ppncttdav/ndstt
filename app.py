@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from oauth2client.service_accounts import ServiceAccountCredentials
+from oauth2client.service_account import ServiceAccountCredentials
 import streamlit.components.v1 as components
 import urllib.parse
 from datetime import datetime, date, timedelta
