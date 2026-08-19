@@ -42,16 +42,17 @@ LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (BYPASS LỖI AQ. TOÀN CẦU CỦA GOOGLE) ---
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (REST API CHUẨN MỰC NHẤT) ---
 @st.cache_data(ttl=86400, show_spinner=False)
 def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
-        # Đã tích hợp trực tiếp mã API siêu sạch từ dự án mới của bạn
+        # API Key sạch từ dự án mới
         api_key = "AQ.Ab8RN6JyKj_wWBAWH7e8tJAUCQlNh8h5mcptZ7tCrs_zEPi9uw"
         
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+        # Bắn thẳng bằng đường dẫn có chứa ?key= (chuẩn xác nhất)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
         
         prompt = f"""
         Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình quốc gia, vô cùng khắt khe, cầu toàn và soi lỗi cực giỏi.
@@ -72,21 +73,11 @@ def call_gemini_ai(text):
             "contents": [{"parts": [{"text": prompt}]}]
         }
         
-        headers_api = {
-            "x-goog-api-key": api_key,
+        headers = {
             "Content-Type": "application/json"
         }
         
-        # Thử dán nhãn x-goog-api-key trước
-        response = requests.post(url, headers=headers_api, json=data, timeout=15)
-        
-        # Nếu Google đá văng vì lỗi 401 (Lỗi cấu hình AQ. của Google), lập tức ngụy trang thành Bearer Token
-        if response.status_code == 401:
-            headers_bearer = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            response = requests.post(url, headers=headers_bearer, json=data, timeout=15)
+        response = requests.post(url, headers=headers, json=data, timeout=15)
         
         if response.status_code == 200:
             result_json = response.json()
@@ -96,10 +87,10 @@ def call_gemini_ai(text):
             except:
                 return "⚠️ AI trả về dữ liệu trống hoặc không đúng định dạng."
         else:
-            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): {response.text}"
+            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): Vui lòng đợi thêm 3-5 phút để Google kích hoạt chìa khóa mới của bạn.\nChi tiết lỗi: {response.text}"
             
     except Exception as e:
-        return f"⚠️ Lỗi kết nối mạng nội bộ: {str(e)}"
+        return f"⚠️ Lỗi kết nối mạng: {str(e)}"
 
 def generate_secure_token(username):
     secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
@@ -1398,6 +1389,7 @@ else:
                 with st.spinner("Đang lưu..."):
                     try:
                         dl_fmt = f"{tv_time.strftime('%H:%M:%S')} {tv_date.strftime('%d/%m/%Y')}"
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
                         ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
                         if opt_nv and tv_nguoi:
@@ -1429,6 +1421,7 @@ else:
                             if st.form_submit_button("CẬP NHẬT"):
                                 float_time = time.time()
                                 with st.spinner("Đang cập nhật..."):
+                                    sh_main = ket_noi_sheet(SHEET_MAIN)
                                     w = sh_main.worksheet("CongViec")
                                     cell = w.find(r_dat['TenViec']) 
                                     if cell:
@@ -1451,6 +1444,7 @@ else:
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
                 if st.form_submit_button("TẠO DỰ ÁN"): 
                     with st.spinner("Đang tạo..."):
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
