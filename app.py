@@ -50,7 +50,7 @@ VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 def get_vn_time(): return datetime.now(VN_TZ)
 def get_vn_today(): return get_vn_time().date()
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
+# --- LÕI AI ĐƯỢC ÉP XUNG NGƯỢC (CHỐNG LỖI 429 RATE LIMIT) ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -67,7 +67,8 @@ def init_ai_engine():
     return {
         "cache": {},
         "queue": set(),
-        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        # Khóa cứng 1 luồng xử lý duy nhất để không vượt quá 15 RPM của Google Free Tier
+        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=1)
     }
 
 AI_ENGINE = init_ai_engine()
@@ -104,20 +105,21 @@ def _call_api(text, api_key, model_name, today_str):
         "Content-Type": "application/json",
     }
     try:
-        # Nâng timeout lên 45s để chống rớt kết nối
-        response = requests.post(url, headers=headers, json=payload, timeout=45)
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        if response.status_code == 429:
+            return "⚠️ Băng thông AI đang quá tải tạm thời (Giới hạn tài khoản miễn phí). Vui lòng đợi khoảng 1 phút rồi Quét lại."
         if response.status_code != 200: 
-            return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code}): {response.text}"
+            return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code})."
         result = response.json()
         answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
-    except requests.exceptions.Timeout:
-        return "⚠️ Yêu cầu xử lý AI bị quá thời gian (Timeout). Vui lòng thử lại bằng nút Quét Lại."
     except Exception as e:
         return f"⚠️ Không kết nối được hệ thống AI: {e}"
 
 def _bg_task(text, api_key, model_name, today_str, text_hash):
     try:
+        # Ngủ 4.5 giây trước khi gọi để đảm bảo nhịp điệu không vượt 13-14 request/phút
+        time.sleep(4.5)
         ans = _call_api(text, api_key, model_name, today_str)
         AI_ENGINE["cache"][text_hash] = ans
     except Exception: pass
@@ -881,6 +883,7 @@ else:
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
             if is_shift_admin:
+                
                 with st.spinner("⚡ Đang kết nối siêu tốc đa luồng để phân tích Lịch..."):
                     auto_ldp, auto_tcsx, auto_btv, auto_ht, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
                 
@@ -1012,7 +1015,7 @@ else:
                         "Nền tảng": ", ".join(plats)
                     })
 
-                    # BÍ MẬT QUÉT NGẦM: Tìm bài chưa quét và thả vào luồng chạy nền (15s/lần)
+                    # BÍ MẬT QUÉT NGẦM: Thả bài vào luồng chờ, chỉ 1 luồng xử lý
                     first_row_bg = group.iloc[0]
                     curr_txt, _ = split_text_link(first_row_bg.get('LINK DUYỆT', ''))
                     queue_bg_scan(curr_txt)
@@ -1178,7 +1181,6 @@ else:
                             else:
                                 text_hash = hashlib.md5(current_text.encode('utf-8')).hexdigest()
                                 
-                                # Nếu người dùng ép buộc quét lại
                                 if btn_scan:
                                     with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
                                         api_key = get_ai_api_key()
@@ -1194,7 +1196,6 @@ else:
                                             with st.container(height=350):
                                                 st.markdown(ans)
                                 
-                                # Chế độ tự động, ưu tiên kéo từ Cache (Mở là có ngay trong 0.001s)
                                 elif auto_scan:
                                     if text_hash in AI_ENGINE["cache"]:
                                         ans = AI_ENGINE["cache"][text_hash]
@@ -1374,24 +1375,28 @@ else:
                 xls = pd.ExcelFile(io.BytesIO(excel_bytes))
                 sheet_names = xls.sheet_names
                 
-                target_ts = int(target_date_lps.strftime("%Y%m%d"))
                 best_idx = 0
                 
                 for idx, title in enumerate(sheet_names):
-                    dates_in_title = re.findall(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', title)
-                    if len(dates_in_title) >= 2:
+                    # Tìm tất cả cụm ngày tháng (dd.mm hoặc dd/mm)
+                    dates = re.findall(r'(\d{1,2})[./](\d{1,2})', title)
+                    if len(dates) >= 1:
                         try:
-                            d1, m1, y1 = dates_in_title[0]
-                            d2, m2, y2 = dates_in_title[1]
-                            y1 = int(y1) if y1 else target_date_lps.year
-                            if y1 < 100: y1 += 2000
-                            y2 = int(y2) if y2 else y1
-                            if y2 < 100: y2 += 2000
+                            d1, m1 = int(dates[0][0]), int(dates[0][1])
+                            if len(dates) >= 2:
+                                d2, m2 = int(dates[1][0]), int(dates[1][1])
+                            else:
+                                d2, m2 = d1, m1 # Nếu chỉ ghi 1 ngày
+
+                            # Dùng năm của ngày mục tiêu làm chuẩn để tránh lỗi gõ sai năm trên tên sheet
+                            y_target = target_date_lps.year
+                            start_date = datetime(y_target, m1, d1).date()
                             
-                            start_date = int(datetime(y1, int(m1), int(d1)).strftime("%Y%m%d"))
-                            end_date = int(datetime(y2, int(m2), int(d2)).strftime("%Y%m%d"))
+                            # Nếu tháng kết thúc nhỏ hơn tháng bắt đầu (vắt qua năm mới)
+                            y_end = y_target + 1 if m2 < m1 else y_target
+                            end_date = datetime(y_end, m2, d2).date()
                             
-                            if start_date <= target_ts <= end_date:
+                            if start_date <= target_date_lps <= end_date:
                                 best_idx = idx
                                 break
                         except: pass
