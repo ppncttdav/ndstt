@@ -14,7 +14,7 @@ import re
 import io
 import hashlib
 import concurrent.futures
-import google.generativeai as genai
+import json
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -48,7 +48,9 @@ def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
-        api_key = "AQ.Ab8RN6IRxnzG7H6lQUC27ZVxA0NrtdjKTMua5Lwg9A34oGuFwg"
+        # Đã tích hợp trực tiếp mã API siêu sạch từ dự án mới của bạn
+        api_key = "AQ.Ab8RN6JyKj_wWBAWH7e8tJAUCQlNh8h5mcptZ7tCrs_zEPi9uw"
+        
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
         
         prompt = f"""
@@ -75,8 +77,10 @@ def call_gemini_ai(text):
             "Content-Type": "application/json"
         }
         
+        # Thử dán nhãn x-goog-api-key trước
         response = requests.post(url, headers=headers_api, json=data, timeout=15)
         
+        # Nếu Google đá văng vì lỗi 401 (Lỗi cấu hình AQ. của Google), lập tức ngụy trang thành Bearer Token
         if response.status_code == 401:
             headers_bearer = {
                 "Authorization": f"Bearer {api_key}",
@@ -92,7 +96,7 @@ def call_gemini_ai(text):
             except:
                 return "⚠️ AI trả về dữ liệu trống hoặc không đúng định dạng."
         else:
-            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): Vui lòng đợi Google khắc phục lỗi máy chủ hệ thống đối với API Key định dạng AQ. Error: {response.text}"
+            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): {response.text}"
             
     except Exception as e:
         return f"⚠️ Lỗi kết nối mạng nội bộ: {str(e)}"
@@ -753,7 +757,6 @@ else:
 
         is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat'])
         
-        # --- ĐÂY LÀ NHÁT CHÉM GIÚP WEB NẢY RA TRONG 0.01 GIÂY ---
         tab_exists, df_content_static, roster_names_current, r_roles_current = fetch_vo_truc_so(tab_name_current)
 
         if not tab_exists:
@@ -1395,7 +1398,6 @@ else:
                 with st.spinner("Đang lưu..."):
                     try:
                         dl_fmt = f"{tv_time.strftime('%H:%M:%S')} {tv_date.strftime('%d/%m/%Y')}"
-                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
                         ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
                         if opt_nv and tv_nguoi:
@@ -1427,7 +1429,6 @@ else:
                             if st.form_submit_button("CẬP NHẬT"):
                                 float_time = time.time()
                                 with st.spinner("Đang cập nhật..."):
-                                    sh_main = ket_noi_sheet(SHEET_MAIN)
                                     w = sh_main.worksheet("CongViec")
                                     cell = w.find(r_dat['TenViec']) 
                                     if cell:
@@ -1450,7 +1451,6 @@ else:
                 d_n = st.text_input("TÊN DỰ ÁN"); d_m = st.text_area("MÔ TẢ"); d_l = st.multiselect("PHỤ TRÁCH", list_nv)
                 if st.form_submit_button("TẠO DỰ ÁN"): 
                     with st.spinner("Đang tạo..."):
-                        sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
         st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
