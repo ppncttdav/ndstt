@@ -2,21 +2,21 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import streamlit.components.v1 as components
 import urllib.parse
 from datetime import datetime, date, timedelta
 import pytz
 import requests
 import plotly.express as px
 import time
+import random
 import re
 import io
 import hashlib
-import hmac
-import secrets
-import logging
-import os
 import concurrent.futures
 import json
+import logging
+import os
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -45,149 +45,78 @@ LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHk
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
 # --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
-
-AI_MODEL = st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))
-AI_API_KEY = st.secrets.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
-
-logger = logging.getLogger("vietnam_today")
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-
-
-def get_ai_api_key():
-    key = str(AI_API_KEY or "").strip()
-    if not key:
-        return ""
-    return key
-
-
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=200)
+@st.cache_data(ttl=86400, show_spinner=False)
 def call_gemini_ai(text):
     text = str(text or "").strip()
-    if len(text) < 10:
+    if len(text) < 10: 
         return ""
-
-    api_key = get_ai_api_key()
-    if not api_key:
-        return "⚠️ Chưa cấu hình GEMINI_API_KEY trong st.secrets hoặc biến môi trường."
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{AI_MODEL}:generateContent"
-    prompt = f"""
-Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản.
-Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây.
-
-Kiểm tra theo thứ tự:
-1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
-2. Logic, mâu thuẫn, dữ kiện thiếu căn cứ hoặc diễn đạt có thể gây hiểu sai.
-3. Bản quyền, nhạy cảm văn hóa/tôn giáo, phân biệt đối xử.
-4. Chính tả, ngữ pháp, diễn đạt.
-
-Yêu cầu: phản biện thẳng, gạch đầu dòng, chỉ ra câu/ý cần sửa và đề xuất cách sửa ngắn gọn. Không bịa dữ kiện để “lấp chỗ trống”.
-Nếu không phát hiện vấn đề đáng kể, trả đúng: "Nội dung an toàn, đủ điều kiện xuất bản".
-
-NỘI DUNG CẦN RÀ SOÁT:
-{text}
-"""
-
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1800},
-    }
-    headers = {
-        "x-goog-api-key": api_key,
-        "Content-Type": "application/json",
-    }
-
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
-        if response.status_code != 200:
-            logger.warning("Gemini API returned %s", response.status_code)
-            return f"⚠️ Gemini trả về lỗi HTTP {response.status_code}."
-        result = response.json()
-        answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
-    except requests.RequestException as exc:
-        logger.exception("Gemini request failed")
-        return f"⚠️ Không kết nối được Gemini: {exc}"
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        logger.exception("Gemini response parsing failed")
-        return f"⚠️ Không đọc được phản hồi từ Gemini: {exc}"
+        # CƠ CHẾ KÉP: Lấy từ Secrets (bảo mật), nếu không có thì lấy mã cứng (tiện lợi)
+        fallback_key = "AQ.Ab8RN6JyKj_wWBAWH7e8tJAUCQlNh8h5mcptZ7tCrs_zEPi9uw"
+        api_key = st.secrets.get("gemini_api_key", fallback_key)
+        
+        # SỬA LỖI ẢO TƯỞNG MODEL: Quay về model chuẩn của Google
+        model_name = st.secrets.get("gemini_model", "gemini-1.5-flash-latest")
+        
+        if not api_key:
+            return "⚠️ Chưa cấu hình GEMINI_API_KEY trong hệ thống."
 
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        
+        prompt = f"""
+        Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình quốc gia, vô cùng khắt khe, cầu toàn và soi lỗi cực giỏi.
+        Nhiệm vụ của bạn là rà soát đoạn nội dung tin tức/bài đăng MXH dưới đây.
+        Hãy chỉ ra MỌI rủi ro và sai sót theo các tiêu chí sau:
+        1. RỦI RO CHÍNH TRỊ, NGOẠI GIAO, CHỦ QUYỀN (đây là yếu tố tử huyệt, soi thật kỹ mọi danh xưng, lãnh thổ, quan điểm).
+        2. Sự thiếu logic, thông tin mâu thuẫn, tính xác thực của dữ kiện.
+        3. Vi phạm bản quyền, nhạy cảm văn hóa, tôn giáo, phân biệt chủng tộc.
+        4. Sai sót chính tả, ngữ pháp, diễn đạt lủng củng.
 
-def _scrypt_hash(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    n, r, p = 2**14, 8, 1
-    derived = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=64)
-    return f"scrypt${n}${r}${p}${salt.hex()}${derived.hex()}"
+        Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, phản biện mạnh mẽ để BTV phải sửa. Tuyệt đối không khen ngợi dài dòng. Nếu bài viết hoàn hảo 100%, chỉ cần báo đúng 1 câu: "Nội dung an toàn, đủ điều kiện xuất bản".
 
-
-def verify_password(password: str, stored: str) -> bool:
-    stored = str(stored or "")
-    if stored.startswith("scrypt$"):
-        try:
-            _, n, r, p, salt_hex, hash_hex = stored.split("$", 5)
-            derived = hashlib.scrypt(
-                password.encode("utf-8"),
-                salt=bytes.fromhex(salt_hex),
-                n=int(n), r=int(r), p=int(p), dklen=64,
-            )
-            return hmac.compare_digest(derived.hex(), hash_hex)
-        except (ValueError, TypeError):
-            return False
-    # Hỗ trợ chuyển đổi dữ liệu cũ: nếu sheet còn plaintext thì verify một lần,
-    # sau đó caller sẽ tự động nâng cấp sang scrypt.
-    return hmac.compare_digest(str(password), stored)
-
-
-def check_password_and_upgrade(password: str, stored: str):
-    ok = verify_password(password, stored)
-    needs_upgrade = ok and not str(stored or "").startswith("scrypt$")
-    return ok, needs_upgrade
-
+        NỘI DUNG CẦN RÀ SOÁT:
+        {text}
+        """
+        
+        data = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=15)
+        
+        if response.status_code == 200:
+            result_json = response.json()
+            try:
+                answer = result_json['candidates'][0]['content']['parts'][0]['text']
+                return answer
+            except:
+                return "⚠️ AI trả về dữ liệu trống hoặc không đúng định dạng."
+        else:
+            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): {response.text}"
+            
+    except Exception as e:
+        return f"⚠️ Lỗi kết nối hệ thống AI: {str(e)}"
 
 def generate_secure_token(username):
-    # Giữ API tương thích với code cũ nhưng dùng HMAC-SHA256 thay MD5.
-    secret_salt = st.secrets.get("url_salt", os.getenv("URL_SALT", ""))
-    if not secret_salt:
-        secret_salt = secrets.token_urlsafe(32)
-    return hmac.new(
-        str(secret_salt).encode("utf-8"),
-        str(username).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+    secret_salt = st.secrets.get("url_salt", "VietnamToday_Secure_2026_!@#")
+    return hashlib.md5((str(username) + secret_salt).encode()).hexdigest()
 
 def get_vn_time():
-    return datetime.now(VN_TZ)
+    return datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
 
-def get_vn_today():
-    return get_vn_time().date()
-
-def clear_app_caches():
-    for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules, get_public_gsheet_as_excel):
-        try:
-            fn.clear()
-        except Exception:
-            pass
-
-def clear_cache_and_rerun():
-    clear_app_caches()
-    try:
-        st.rerun()
-    except Exception:
-        st.experimental_rerun()
+def clear_cache_and_rerun(): 
+    st.cache_data.clear()
+    st.rerun()
 
 def ghi_nhat_ky(nguoi_dung, hanh_dong, chi_tiet):
-    try:
+    try: 
         sh_main = ket_noi_sheet(SHEET_MAIN)
-        wks = sh_main.worksheet("NhatKy")
-        wks.append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, str(chi_tiet)[:5000]])
-    except Exception:
-        logger.exception("Không ghi được nhật ký: %s / %s", hanh_dong, nguoi_dung)
+        sh_main.worksheet("NhatKy").append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, chi_tiet])
+    except: pass
 
 def get_short_name(full_name):
     if not full_name or full_name == "--" or str(full_name).strip() == "": return "..."
@@ -235,18 +164,9 @@ def get_lanh_dao_ban(d_obj):
     elif wd == 6: return "Trần Thu Hà"
     return ""
 
-def _parse_assignees(value):
-    return {x.strip().casefold() for x in re.split(r"[,;\n]+", str(value or "")) if x.strip()}
-
-def has_name_access(curr_name, assignees_text):
-    target = str(curr_name or "").strip().casefold()
-    return target and target in _parse_assignees(assignees_text)
-
-def check_quyen(curr_name, role, task_row, df_duan=None):
-    if role in {"LanhDao", "Admin"}:
-        return 2
-    if has_name_access(curr_name, task_row.get("NguoiPhuTrach", "")):
-        return 1
+def check_quyen(curr_name, role, task_row, df_duan):
+    if role == 'LanhDao': return 2
+    if curr_name in str(task_row.get('NguoiPhuTrach', '')): return 1
     return 0
 
 @st.cache_data(ttl=3600)
@@ -262,10 +182,7 @@ def get_weather_and_advice():
         elif wcode in [51, 53, 55, 61, 63, 65]: condition = "CÓ MƯA 🌧️"; advice = "TRỜI MƯA, ĐƯỜNG TRƠN. CÁC BTV ĐI LẠI CẨN THẬN!"
         elif wcode >= 95: condition = "GIÔNG BÃO ⛈️"; advice = "THỜI TIẾT XẤU. HẠN CHẾ RA NGOÀI."
         return f"{temp}°C - {condition}", advice
-    except requests.RequestException:
-        return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
-    except (KeyError, TypeError, ValueError):
-        return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
+    except: return "--°C", "LUÔN GIỮ VỮNG ĐAM MÊ NGHỀ BÁO NHÉ!"
 
 ROLES_HEADER = [
     "LÃNH ĐẠO BAN", "TRỰC THƯ KÝ TÒA SOẠN", "TRỰC QUẢN TRỊ MXH + VIDEO BIÊN TẬP",
@@ -284,58 +201,27 @@ VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Tr
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
 # ================= 1. BACKEND & XỬ LÝ DỮ LIỆU =================
-@st.cache_resource(ttl=3600, show_spinner=False)
+@st.cache_resource(ttl=3600)
 def get_gspread_client_cached():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
-        if "gcp_service_account" in st.secrets:
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-        else:
-            creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
+        if "gcp_service_account" in st.secrets: creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+        else: creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
         return gspread.authorize(creds)
-    except (OSError, KeyError, ValueError, gspread.exceptions.APIError):
-        logger.exception("Không khởi tạo được Google Sheets client")
-        return None
+    except Exception as e: return None
 
 def ket_noi_sheet(sheet_name_or_url):
     client = get_gspread_client_cached()
-    if not client:
-        return None
+    if not client: return None
     try:
-        return client.open_by_url(sheet_name_or_url) if str(sheet_name_or_url).startswith("http") else client.open(sheet_name_or_url)
-    except gspread.exceptions.GSpreadException:
-        logger.exception("Không mở được spreadsheet: %s", sheet_name_or_url)
-        return None
+        if "http" in sheet_name_or_url: return client.open_by_url(sheet_name_or_url)
+        else: return client.open(sheet_name_or_url)
+    except: st.stop()
 
-def safe_read_records(wks, retries=3, delay=0.4):
-    for attempt in range(retries):
-        try:
-            return pd.DataFrame(wks.get_all_records())
-        except gspread.exceptions.GSpreadException:
-            if attempt == retries - 1:
-                logger.exception("Không đọc được worksheet %s", getattr(wks, "title", "?"))
-            else:
-                time.sleep(delay * (attempt + 1))
-    return pd.DataFrame()
-
-def safe_read_records_with_row(wks, retries=3, delay=0.4):
-    for attempt in range(retries):
-        try:
-            values = wks.get_all_values()
-            if not values:
-                return pd.DataFrame()
-            headers = values[0]
-            rows = []
-            for sheet_row, raw in enumerate(values[1:], start=2):
-                row = {headers[i] if i < len(headers) else f"Column_{i+1}": raw[i] if i < len(raw) else "" for i in range(len(headers))}
-                row["_sheet_row"] = sheet_row
-                rows.append(row)
-            return pd.DataFrame(rows)
-        except gspread.exceptions.GSpreadException:
-            if attempt == retries - 1:
-                logger.exception("Không đọc được worksheet %s", getattr(wks, "title", "?"))
-            else:
-                time.sleep(delay * (attempt + 1))
+def safe_read_records(wks):
+    for i in range(2):
+        try: return pd.DataFrame(wks.get_all_records())
+        except: time.sleep(0.2)
     return pd.DataFrame()
 
 # --- SIÊU TỐI ƯU TỐC ĐỘ: NHÉT TOÀN BỘ FILE VÀO RAM ---
@@ -368,22 +254,22 @@ def fetch_vo_truc_so(tab_name):
             time.sleep(0.2)
     return True, pd.DataFrame(columns=CONTENT_HEADER), [], []
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=1800)
 def load_tai_khoan():
     try:
         sh = ket_noi_sheet(SHEET_MAIN)
-        return safe_read_records_with_row(sh.worksheet("TaiKhoan"))
+        return safe_read_records(sh.worksheet("TaiKhoan"))
     except: return pd.DataFrame()
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=600)
 def load_du_lieu_app():
     try:
         sh = ket_noi_sheet(SHEET_MAIN)
-        df_d = safe_read_records_with_row(sh.worksheet("DuAn"))
-        df_c = safe_read_records_with_row(sh.worksheet("CongViec"))
-        try: df_cn = safe_read_records_with_row(sh.worksheet("ViecCaNhan"))
+        df_d = safe_read_records(sh.worksheet("DuAn"))
+        df_c = safe_read_records(sh.worksheet("CongViec"))
+        try: df_cn = safe_read_records(sh.worksheet("ViecCaNhan"))
         except: df_cn = pd.DataFrame()
-        try: df_nk = safe_read_records_with_row(sh.worksheet("NhatKy"))
+        try: df_nk = safe_read_records(sh.worksheet("NhatKy"))
         except: df_nk = pd.DataFrame()
         return df_d, df_c, df_cn, df_nk
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -398,8 +284,7 @@ def get_public_gsheet_as_excel(url):
         res = requests.get(export_url, timeout=15)
         if res.status_code == 200:
             return res.content
-    except Exception:
-        logger.exception("Đã xảy ra lỗi không mong muốn")
+    except: pass
     return None
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -420,9 +305,8 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
                             target_sheet = sn; break
                 df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
                 return kw, df
-        except Exception:
-            logger.exception("Không đọc được lịch %s", kw)
-            return kw, pd.DataFrame()
+        except: pass
+        return kw, pd.DataFrame()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
@@ -574,8 +458,7 @@ def tu_dong_cap_nhat_thong_ke(date_str, roster):
             wks_stats.append_row(row_data)
             last_row = len(wks_stats.get_all_values())
             format_cell_range(wks_stats, f"A{last_row}:I{last_row}", CellFormat(backgroundColor=Color(1, 1, 1)))
-    except Exception:
-        logger.exception("Đã xảy ra lỗi không mong muốn")
+    except: pass
 
 def split_text_link(merged_text):
     if pd.isna(merged_text) or not str(merged_text).strip(): return "", ""
@@ -766,8 +649,7 @@ def dinh_dang_dep(wks, roster_vals):
         
     try:
         wks.spreadsheet.batch_update({"requests": requests})
-    except Exception:
-        logger.exception("Đã xảy ra lỗi không mong muốn")
+    except: pass
     
     try:
         validation_dinh_dang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_DINH_DANG), showCustomUi=True)
@@ -777,8 +659,7 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'C6:C100', validation_dinh_dang)
         set_data_validation_for_cell_range(wks, 'D6:D100', validation_nen_tang)
         set_data_validation_for_cell_range(wks, 'E6:E100', validation_status)
-    except Exception:
-        logger.exception("Đã xảy ra lỗi không mong muốn")
+    except: pass
 
 def dinh_dang_dong_moi(wks, start_row, end_row):
     try:
@@ -793,8 +674,7 @@ def dinh_dang_dong_moi(wks, start_row, end_row):
             }
         }]
         wks.spreadsheet.batch_update({"requests": req})
-    except Exception:
-        logger.exception("Đã xảy ra lỗi không mong muốn")
+    except: pass
 
 def update_wks_canhan(action_type, data):
     sh_main = ket_noi_sheet(SHEET_MAIN)
@@ -809,12 +689,11 @@ def update_wks_canhan(action_type, data):
         wks_canhan.append_row(data)
 
 # ================= 2. AUTH & GIAO DIỆN =================
-if 'authenticated' not in st.session_state:
-    st.session_state['authenticated'] = False
+if 'dang_nhap' not in st.session_state: 
+    st.session_state['dang_nhap'] = False
     st.session_state['user_info'] = {}
-    st.session_state['username'] = ''
 
-if not st.session_state['authenticated']:
+if not st.session_state['dang_nhap']:
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
     with st.form("login"):
         user = st.text_input("Tên đăng nhập")
@@ -822,32 +701,13 @@ if not st.session_state['authenticated']:
         if st.form_submit_button("ĐĂNG NHẬP"):
             df_users = load_tai_khoan()
             if not df_users.empty:
-                matches = df_users[df_users['TenDangNhap'].astype(str).str.strip().eq(str(user).strip())]
-                authenticated_row = None
-                migrate_hash = False
-                if not matches.empty:
-                    candidate = matches.iloc[0]
-                    ok, migrate_hash = check_password_and_upgrade(pwd, candidate.get('MatKhau', ''))
-                    if ok:
-                        authenticated_row = candidate
-                if authenticated_row is not None:
-                    if migrate_hash and authenticated_row.get('_sheet_row'):
-                        try:
-                            sh_main = ket_noi_sheet(SHEET_MAIN)
-                            sh_main.worksheet('TaiKhoan').update_cell(int(authenticated_row['_sheet_row']), 2, _scrypt_hash(pwd))
-                            load_tai_khoan.clear()
-                        except Exception:
-                            logger.exception('Không nâng cấp được mật khẩu legacy')
-                    st.session_state['authenticated'] = True
-                    safe_user = authenticated_row.to_dict()
-                    safe_user.pop('MatKhau', None)
-                    safe_user.pop('_sheet_row', None)
-                    st.session_state['user_info'] = safe_user
-                    st.session_state['username'] = str(user).strip()
-                    ghi_nhat_ky(authenticated_row['HoTen'], "Đăng nhập", "Success")
+                u_row = df_users[(df_users['TenDangNhap'].astype(str)==user) & (df_users['MatKhau'].astype(str)==pwd)]
+                if not u_row.empty:
+                    st.session_state['dang_nhap'] = True
+                    st.session_state['user_info'] = u_row.iloc[0].to_dict()
+                    ghi_nhat_ky(u_row.iloc[0]['HoTen'], "Đăng nhập", "Success")
                     clear_cache_and_rerun()
-                else:
-                    st.error("Sai thông tin đăng nhập!")
+                else: st.error("Sai thông tin đăng nhập!")
             else: st.error("Lỗi kết nối CSDL Tài khoản.")
 else:
     df_users = load_tai_khoan()
@@ -865,38 +725,21 @@ else:
             with st.form("change_pass_form"):
                 old_p = st.text_input("MẬT KHẨU CŨ", type="password"); new_p = st.text_input("MẬT KHẨU MỚI", type="password"); cfm_p = st.text_input("NHẬP LẠI", type="password")
                 if st.form_submit_button("LƯU"):
-                    # Re-read account row so password verification never relies on session data.
-                    account_df = load_tai_khoan()
-                    account_matches = account_df[account_df['TenDangNhap'].astype(str).str.strip().eq(curr_username)] if not account_df.empty else pd.DataFrame()
-                    stored_hash = account_matches.iloc[0].get('MatKhau', '') if not account_matches.empty else ''
-                    if not verify_password(old_p, stored_hash):
-                        st.error("Sai mật khẩu cũ!")
-                    elif new_p != cfm_p:
-                        st.error("Mật khẩu không khớp!")
-                    elif len(new_p) < 8:
-                        st.error("Mật khẩu mới phải có ít nhất 8 ký tự!")
+                    if old_p != str(u_info['MatKhau']): st.error("Sai mật khẩu cũ!")
+                    elif new_p != cfm_p: st.error("Mật khẩu không khớp!")
+                    elif not new_p: st.error("Không để trống!")
                     else:
-                        try:
-                            sh_main = ket_noi_sheet(SHEET_MAIN)
-                            row_no = int(account_matches.iloc[0]['_sheet_row']) if not account_matches.empty else None
-                            if row_no:
-                                sh_main.worksheet("TaiKhoan").update_cell(row_no, 2, _scrypt_hash(new_p))
-                                load_tai_khoan.clear()
-                                st.success("Đổi mật khẩu thành công!")
-                                clear_cache_and_rerun()
-                            else:
-                                st.error("Không tìm thấy tài khoản để cập nhật.")
-                        except Exception as exc:
-                            logger.exception("Đổi mật khẩu thất bại")
-                            st.error(f"Không thể đổi mật khẩu: {exc}")
+                        sh_main = ket_noi_sheet(SHEET_MAIN)
+                        wks_acc = sh_main.worksheet("TaiKhoan"); cell = wks_acc.find(curr_username)
+                        if cell: 
+                            wks_acc.update_cell(cell.row, 2, new_p); st.session_state['user_info']['MatKhau'] = new_p; 
+                            st.success("Xong!"); clear_cache_and_rerun()
                             
         if st.button("ĐĂNG XUẤT"): 
-            st.session_state['authenticated'] = False; st.session_state['user_info'] = {}; st.session_state['username'] = ''
+            st.session_state['dang_nhap'] = False; st.session_state['user_info'] = {}
             st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
-    if not get_ai_api_key():
-        st.caption("ℹ️ AI phản biện đang tắt: chưa cấu hình GEMINI_API_KEY.")
     
     list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS", "✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL"]
     if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
@@ -951,7 +794,7 @@ else:
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(date_str_display, roster_vals)
-                                clear_app_caches()
+                                st.cache_data.clear()
                                 st.success("ĐÃ TẠO XONG VỎ TRỰC SỐ!"); time.sleep(1); st.rerun()
                             except Exception as e: st.error(str(e))
         elif tab_exists:
@@ -989,7 +832,7 @@ else:
             filter_opt = st.pills("Bộ lọc", ["Tất cả", "🚨 Cảnh báo rủi ro", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
 
             # ================= LỒNG KÍNH PHÂN MẢNH THỜI GIAN THỰC =================
-            @st.fragment(run_every="15s")
+            @st.fragment(run_every="10s")
             def real_time_dashboard_and_table(current_filter):
                 _, df_content, _, _ = fetch_vo_truc_so(tab_name_current)
                 if df_content.empty: return
@@ -1198,7 +1041,7 @@ else:
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
                         
-                        # --- TÍNH NĂNG AI PHẢN BIỆN ---
+                        # --- TÍNH NĂNG AI PHẢN BIỆN (ĐÃ SỬA LỖI UX) ---
                         with st.expander("🤖 AI PHẢN BIỆN & CẢNH BÁO RỦI RO", expanded=True):
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
                             
@@ -1213,10 +1056,11 @@ else:
                                     with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
                                         ai_feedback = call_gemini_ai(current_text)
                                         if ai_feedback:
-                                            if "nội dung an toàn" in ai_feedback.lower() and "đủ điều kiện" in ai_feedback.lower():
-                                                st.success("✅ " + ai_feedback)
-                                            elif "lỗi" in ai_feedback.lower() and "máy chủ google" in ai_feedback.lower():
+                                            # SỬA LỖI UX Ở ĐÂY: Nếu chuỗi trả về chứa cảnh báo cấu hình thì báo màu vàng
+                                            if ai_feedback.startswith("⚠️"):
                                                 st.warning(ai_feedback)
+                                            elif "nội dung an toàn" in ai_feedback.lower() and "đủ điều kiện" in ai_feedback.lower():
+                                                st.success("✅ " + ai_feedback)
                                             else:
                                                 st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
                                                 st.markdown(ai_feedback)
@@ -1284,7 +1128,7 @@ else:
                                         time_val = c_t.time_input("Giờ xuất bản", value=val_time, key=f"ti_{i}")
                                         
                                         try: curr_d_val = datetime.strptime(str(r.get('NGÀY ĐĂNG', '')), "%d/%m/%Y").date()
-                                        except (TypeError, ValueError): curr_d_val = get_vn_today()
+                                        except: curr_d_val = datetime.now().date()
                                         date_val = c_d.date_input("Ngày", value=curr_d_val, format="DD/MM/YYYY", key=f"da_{i}")
                                         
                                         lsp_val = st.text_input("Link Sản phẩm đã lên", value=r.get('LINK SẢN PHẨM', ''), key=f"lsp_{i}")
@@ -1327,7 +1171,7 @@ else:
                                         
                                         wks_today.update_cells(cells_to_update)
                                         
-                                        clear_app_caches()
+                                        st.cache_data.clear()
                                         st.success("✅ Cập nhật thành công!"); time.sleep(1); st.rerun()
 
             with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
@@ -1363,7 +1207,7 @@ else:
                                 
                                 dinh_dang_dong_moi(wks_today, start_row_to_format, end_row_to_format)
                                 
-                                clear_app_caches()
+                                st.cache_data.clear()
                                 st.success("ĐÃ THÊM MỚI!"); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
@@ -1477,7 +1321,7 @@ else:
         st.header(f"📝 CHECKLIST CỦA: {curr_name.upper()}")
         col_view, col_date = st.columns([1, 2])
         view_mode = col_view.radio("Xem theo:", ["Hôm nay", "Tuần này", "Tháng này"], horizontal=True)
-        today = get_vn_today()
+        today = date.today()
         my_tasks = [t for t in df_cn.to_dict('records') if str(t.get('User')) == curr_name]
         filtered_tasks = []
         for t in my_tasks:
@@ -1489,7 +1333,7 @@ else:
             except: pass
         if filtered_tasks:
             df_my_view = pd.DataFrame(filtered_tasks); df_my_view['Xong'] = df_my_view['TrangThai'].apply(lambda x: True if str(x).upper() == "TRUE" else False)
-            edited_df = st.data_editor(df_my_view[['TenViec', 'Ngay', 'GhiChu', 'Xong', '_sheet_row']], column_config={"Xong": st.column_config.CheckboxColumn("Hoàn thành", default=False), "_sheet_row": st.column_config.NumberColumn("ID", disabled=True, width="small"), "TenViec": st.column_config.TextColumn("Nội dung công việc", width="medium"), "Ngay": st.column_config.TextColumn("Ngày", disabled=True), "GhiChu": st.column_config.TextColumn("Ghi chú")}, hide_index=True, key="editor_checklist")
+            edited_df = st.data_editor(df_my_view[['TenViec', 'Ngay', 'GhiChu', 'Xong']], column_config={"Xong": st.column_config.CheckboxColumn("Hoàn thành", default=False), "TenViec": st.column_config.TextColumn("Nội dung công việc", width="medium"), "Ngay": st.column_config.TextColumn("Ngày", disabled=True), "GhiChu": st.column_config.TextColumn("Ghi chú")}, hide_index=True, key="editor_checklist")
             if st.button("💾 CẬP NHẬT CHECKLIST"):
                 with st.spinner("Đang lưu..."):
                     try:
@@ -1501,18 +1345,13 @@ else:
                         
                         all_values = wks_canhan.get_all_values()
                         cells = []
-                        # _sheet_row is preserved from the original worksheet and avoids
-                        # ambiguous matching when two tasks have the same title/date.
                         for i, row in edited_df.iterrows():
-                            source_row = None
-                            if i in df_my_view.index and '_sheet_row' in df_my_view.columns:
-                                try:
-                                    source_row = int(df_my_view.loc[i, '_sheet_row'])
-                                except (TypeError, ValueError):
-                                    source_row = None
-                            if source_row:
-                                cells.append(gspread.Cell(source_row, 4, "TRUE" if row['Xong'] else "FALSE"))
-                                cells.append(gspread.Cell(source_row, 5, row['GhiChu']))
+                            for idx, sheet_row in enumerate(all_values):
+                                if idx == 0: continue
+                                if sheet_row[0] == curr_name and sheet_row[1] == row['TenViec'] and sheet_row[2] == row['Ngay']:
+                                    cells.append(gspread.Cell(idx + 1, 4, "TRUE" if row['Xong'] else "FALSE"))
+                                    cells.append(gspread.Cell(idx + 1, 5, row['GhiChu']))
+                                    break
                         if cells:
                             wks_canhan.update_cells(cells)
                         st.success("Đã cập nhật!"); clear_cache_and_rerun()
@@ -1532,7 +1371,7 @@ else:
         with c_add2:
             st.markdown("#### 📥 LẤY TỪ VIỆC CHUNG")
             if not df_cv.empty:
-                my_tasks_cv = df_cv[df_cv['NguoiPhuTrach'].apply(lambda x: has_name_access(curr_name, x))]
+                my_tasks_cv = df_cv[df_cv['NguoiPhuTrach'].astype(str).str.contains(curr_name, case=False, na=False)]
                 if not my_tasks_cv.empty:
                     opts = [f"{r['TenViec']} ({r['Deadline']})" for i, r in my_tasks_cv.iterrows()]
                     sel = st.selectbox("Chọn việc:", opts)
@@ -1594,8 +1433,9 @@ else:
                                 with st.spinner("Đang cập nhật..."):
                                     sh_main = ket_noi_sheet(SHEET_MAIN)
                                     w = sh_main.worksheet("CongViec")
-                                    rn = int(r_dat.get('_sheet_row', 0) or 0)
-                                    if rn:
+                                    cell = w.find(r_dat['TenViec']) 
+                                    if cell:
+                                        rn = cell.row
                                         cells = [
                                             gspread.Cell(rn, 1, e_ten),
                                             gspread.Cell(rn, 3, e_dl),
@@ -1626,7 +1466,7 @@ else:
                 try:
                     dl_str = r['Deadline']; dl_dt = datetime.strptime(dl_str, "%H:%M:%S %d/%m/%Y")
                     start_dt = dl_dt - timedelta(days=2) 
-                    if role not in {'LanhDao', 'Admin'} and not has_name_access(curr_name, r['NguoiPhuTrach']): continue
+                    if role != 'LanhDao' and curr_name not in r['NguoiPhuTrach']: continue
                     task_list.append({"Task": r['TenViec'], "Start": start_dt, "Finish": dl_dt, "Assignee": r['NguoiPhuTrach'], "Status": r['TrangThai'], "Project": r['DuAn']})
                 except: continue
             if task_list:
