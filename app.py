@@ -50,7 +50,7 @@ VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 def get_vn_time(): return datetime.now(VN_TZ)
 def get_vn_today(): return get_vn_time().date()
 
-# --- LÕI AI ĐƯỢC THIẾT KẾ LẠI: SIÊU PHÂN LUỒNG & QUÉT NGẦM ---
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -64,11 +64,10 @@ def get_ai_api_key():
 
 @st.cache_resource
 def init_ai_engine():
-    # Bộ máy này chạy chung cho toàn bộ app, duy trì Cache siêu tốc và Luồng chạy nền
     return {
         "cache": {},
         "queue": set(),
-        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=3)
     }
 
 AI_ENGINE = init_ai_engine()
@@ -105,16 +104,19 @@ def _call_api(text, api_key, model_name, today_str):
         "Content-Type": "application/json",
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
-        if response.status_code != 200: return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code})."
+        # Nâng timeout lên 45s để chống rớt kết nối
+        response = requests.post(url, headers=headers, json=payload, timeout=45)
+        if response.status_code != 200: 
+            return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code}): {response.text}"
         result = response.json()
         answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
+    except requests.exceptions.Timeout:
+        return "⚠️ Yêu cầu xử lý AI bị quá thời gian (Timeout). Vui lòng thử lại bằng nút Quét Lại."
     except Exception as e:
         return f"⚠️ Không kết nối được hệ thống AI: {e}"
 
 def _bg_task(text, api_key, model_name, today_str, text_hash):
-    # Luồng chạy ngầm để lấy dữ liệu mà không làm đơ giao diện
     try:
         ans = _call_api(text, api_key, model_name, today_str)
         AI_ENGINE["cache"][text_hash] = ans
@@ -123,7 +125,6 @@ def _bg_task(text, api_key, model_name, today_str, text_hash):
         if text_hash in AI_ENGINE["queue"]: AI_ENGINE["queue"].remove(text_hash)
 
 def queue_bg_scan(text):
-    # Hàm này gài vào quá trình làm mới 15s để tự động nhận diện bài mới và nhét vào luồng chạy nền
     if not text or len(text.strip()) < 10: return
     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
     
@@ -131,7 +132,7 @@ def queue_bg_scan(text):
     
     api_key = get_ai_api_key()
     if not api_key: return
-    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.7-flash"))).strip()
+    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
     today_str = get_vn_time().strftime("%d/%m/%Y")
     
     AI_ENGINE["queue"].add(text_hash)
@@ -880,7 +881,6 @@ else:
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
             if is_shift_admin:
-                
                 with st.spinner("⚡ Đang kết nối siêu tốc đa luồng để phân tích Lịch..."):
                     auto_ldp, auto_tcsx, auto_btv, auto_ht, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
                 
@@ -1164,7 +1164,7 @@ else:
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
                         
-                        # --- TÍNH NĂNG AI PHẢN BIỆN (LOẠI BỎ CHỜ ĐỢI) ---
+                        # --- TÍNH NĂNG AI PHẢN BIỆN ---
                         st.markdown("**:robot_face: AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
                         with st.container(border=True):
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
@@ -1182,7 +1182,7 @@ else:
                                 if btn_scan:
                                     with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
                                         api_key = get_ai_api_key()
-                                        model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.7-flash"))).strip()
+                                        model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
                                         today_str = get_vn_time().strftime("%d/%m/%Y")
                                         ans = _call_api(current_text, api_key, model_name, today_str)
                                         AI_ENGINE["cache"][text_hash] = ans
@@ -1191,7 +1191,8 @@ else:
                                         elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower(): st.success("✅ " + ans)
                                         else:
                                             st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
-                                            st.markdown(ans)
+                                            with st.container(height=350):
+                                                st.markdown(ans)
                                 
                                 # Chế độ tự động, ưu tiên kéo từ Cache (Mở là có ngay trong 0.001s)
                                 elif auto_scan:
@@ -1201,10 +1202,10 @@ else:
                                         elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower(): st.success("✅ " + ans)
                                         else:
                                             st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
-                                            st.markdown(ans)
+                                            with st.container(height=350):
+                                                st.markdown(ans)
                                     else:
-                                        # Không bắt sếp ngồi đợi. Báo đang quét ngầm và ném việc vào hàng đợi.
-                                        st.warning("⏳ AI đang ngầm phân tích bài này (Quá trình diễn ra hoàn toàn tự động phía sau). Bạn cứ lướt xem các bài khác, kết quả sẽ tự xuất hiện sau vài giây, hoặc bấm nút QUÉT LẠI để ép xem ngay.")
+                                        st.warning("⏳ AI đang ngầm phân tích bài này phía sau. Bạn có thể lướt xem các bài khác, hoặc bấm nút 'QUÉT LẠI' để xem kết quả ngay.")
                                         queue_bg_scan(current_text)
                         # ---------------------------------
                         
