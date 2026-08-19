@@ -71,7 +71,7 @@ def call_gemini_ai(text):
         return "⚪ AI chưa được cấu hình — chưa thực hiện kiểm tra nội dung."
 
     # Lấy chuẩn model từ secrets, tôn trọng thiết kế của chuyên gia
-    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.7-flash"))).strip()
+    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))).strip()
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     
