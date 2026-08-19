@@ -50,7 +50,7 @@ VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 def get_vn_time(): return datetime.now(VN_TZ)
 def get_vn_today(): return get_vn_time().date()
 
-# --- LÕI AI ĐƯỢC THAY MÁU SANG GROQ (LLAMA 3.3) ---
+# --- LÕI AI GROQ (CHUẨN OPENAI COMPATIBLE) ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -67,30 +67,19 @@ def init_ai_engine():
     return {
         "cache": {},
         "queue": set(),
-        # Tăng luồng vì Groq phản hồi cực nhanh, không lo nghẽn cục bộ
-        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        # Tốc độ Groq cực cao và Rate Limit lớn (1000 RPM), mở 3 luồng quét ngầm song song
+        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=3)
     }
 
 AI_ENGINE = init_ai_engine()
 
-def call_groq_ai(text):
-    text = str(text or "").strip()
-    if len(text) < 10:
-        return ""
-
-    api_key = get_ai_api_key()
-    if not api_key:
-        return "⚪ AI chưa được cấu hình — chưa thực hiện kiểm tra nội dung."
-
-    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.2-70b-versatile"))).strip()
+def _call_api(text, api_key, model_name, today_str):
     url = "https://api.groq.com/openai/v1/chat/completions"
-    
-    today_str = get_vn_time().strftime("%d/%m/%Y")
     
     system_prompt = f"Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh đối ngoại, quốc tế của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản. LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản."
 
     user_prompt = f"""
-    Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây.
+    Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây...
 
     Kiểm tra theo thứ tự:
     1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
@@ -106,7 +95,7 @@ def call_groq_ai(text):
     NỘI DUNG CẦN RÀ SOÁT:
     {text}
     """
-
+    
     payload = {
         "model": model_name,
         "messages": [
@@ -116,41 +105,45 @@ def call_groq_ai(text):
         "temperature": 0.1,
         "max_tokens": 4096
     }
+    
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            if response.status_code == 429:
+                if attempt < 2:
+                    time.sleep(1.5 ** (attempt + 1))
+                    continue
+                return "⚠️ Băng thông AI đang bận. Vui lòng đợi chút rồi Quét lại."
+            if response.status_code != 200: 
+                return f"⚠️ Lỗi từ máy chủ Groq (HTTP {response.status_code}): {response.text}"
+            
+            result = response.json()
+            answer = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
+        except requests.exceptions.Timeout:
+            if attempt < 2: continue
+            return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
+        except Exception as e:
+            if attempt < 2: continue
+            return f"⚠️ Không kết nối được hệ thống AI Groq: {e}"
+            
+    return "⚠️ Quá giới hạn thử lại do nghẽn mạng."
 
+def _bg_task(text, api_key, model_name, today_str, text_hash):
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=25)
-        if response.status_code == 429:
-            return "⚠️ Băng thông AI đang bận. Vui lòng đợi chút rồi Quét lại."
-        if response.status_code != 200: 
-            return f"⚠️ Lỗi từ máy chủ Groq (HTTP {response.status_code}): {response.text}"
-        
-        result = response.json()
-        answer = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
-    except requests.exceptions.Timeout:
-        return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
-    except Exception as e:
-        return f"⚠️ Không kết nối được hệ thống AI Groq: {e}"
-
-def _bg_task(text, text_hash):
-    try:
-        # Nghỉ nhẹ 2 giây để điều tiết nhịp với giới hạn 30 req/phút của Groq Free Tier
-        time.sleep(2)
-        ans = call_groq_ai(text)
+        ans = _call_api(text, api_key, model_name, today_str)
         AI_ENGINE["cache"][text_hash] = ans
     except Exception: pass
     finally:
         if text_hash in AI_ENGINE["queue"]: AI_ENGINE["queue"].remove(text_hash)
 
 def queue_bg_scan(text, smart_status=""):
-    # Bỏ qua quét ngầm các bài đã hoàn tất
-    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]):
-        return
-
+    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]): return
     if not text or len(text.strip()) < 10: return
     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
     
@@ -159,8 +152,11 @@ def queue_bg_scan(text, smart_status=""):
     api_key = get_ai_api_key()
     if not api_key: return
     
+    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))).strip()
+    today_str = get_vn_time().strftime("%d/%m/%Y")
+    
     AI_ENGINE["queue"].add(text_hash)
-    AI_ENGINE["executor"].submit(_bg_task, text, text_hash)
+    AI_ENGINE["executor"].submit(_bg_task, text, api_key, model_name, today_str, text_hash)
 
 # --- BẢO MẬT & MẬT KHẨU ---
 def _scrypt_hash(password: str) -> str:
@@ -1210,7 +1206,7 @@ else:
                                 
                                 if btn_scan or (auto_scan and cache_key not in st.session_state):
                                     with st.spinner("🤖 AI đang phân tích văn bản..."):
-                                        ans = call_groq_ai(current_text)
+                                        ans = _call_api(current_text, get_ai_api_key(), str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))).strip(), get_vn_time().strftime("%d/%m/%Y"))
                                         st.session_state[cache_key] = ans
                                 
                                 if cache_key in st.session_state:
@@ -1237,7 +1233,7 @@ else:
                                 e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                 
                                 st.markdown("---")
-                                if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                 e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                 e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                 
@@ -1446,7 +1442,7 @@ else:
                                 ]
                                 title_lower = title.lower()
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
