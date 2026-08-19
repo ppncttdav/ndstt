@@ -46,7 +46,11 @@ LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
+VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+def get_vn_time(): return datetime.now(VN_TZ)
+def get_vn_today(): return get_vn_time().date()
+
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (CÓ CƠ CHẾ RETRY TỰ ĐỘNG) ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -56,11 +60,8 @@ logger.setLevel(logging.INFO)
 
 def get_ai_api_key():
     key = str(st.secrets.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))).strip()
-    if not key:
-        return ""
-    return key
+    return key if key else ""
 
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=200)
 def call_gemini_ai(text):
     text = str(text or "").strip()
     if len(text) < 10:
@@ -70,12 +71,9 @@ def call_gemini_ai(text):
     if not api_key:
         return "⚪ AI chưa được cấu hình — chưa thực hiện kiểm tra nội dung."
 
-    # Lấy chuẩn model từ secrets, tôn trọng thiết kế của chuyên gia
     model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
-
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     
-    # Lấy ngày hiện tại
     today_str = get_vn_time().strftime("%d/%m/%Y")
 
     prompt = f"""
@@ -85,44 +83,56 @@ def call_gemini_ai(text):
 
     Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây...
 
-Kiểm tra theo thứ tự:
-1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
-2. Logic, mâu thuẫn, dữ kiện thiếu căn cứ hoặc diễn đạt có thể gây hiểu sai.
-3. Bản quyền, nhạy cảm văn hóa/tôn giáo, phân biệt đối xử.
-4. Chính tả, ngữ pháp, diễn đạt lủng củng.
-5. Nội dung cập nhật bị muộn, cũ, hoặc thông tin đã có sự thay đổi.
-6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả?
+    Kiểm tra theo thứ tự:
+    1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
+    2. Logic, mâu thuẫn, dữ kiện thiếu căn cứ hoặc diễn đạt có thể gây hiểu sai.
+    3. Bản quyền, nhạy cảm văn hóa/tôn giáo, phân biệt đối xử.
+    4. Chính tả, ngữ pháp, diễn đạt lủng củng.
+    5. Nội dung cập nhật bị muộn, cũ, hoặc thông tin đã có sự thay đổi.
+    6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả?
 
-Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng.
-Nếu không phát hiện rủi ro nào đáng kể, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
+    Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng.
+    Nếu không phát hiện rủi ro nào đáng kể, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
 
-NỘI DUNG CẦN RÀ SOÁT:
-{text}
-"""
-
+    NỘI DUNG CẦN RÀ SOÁT:
+    {text}
+    """
+    
+    # Nâng maxOutputTokens lên 4096 để khắc phục triệt để lỗi cụt chữ (truncation)
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1800},
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096},
     }
     headers = {
         "x-goog-api-key": api_key,
         "Content-Type": "application/json",
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
-        if response.status_code != 200:
-            logger.warning("Gemini API returned %s", response.status_code)
-            return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code}): Vui lòng kiểm tra lại quyền truy cập của API Key."
-        result = response.json()
-        answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
-    except requests.RequestException as exc:
-        logger.exception("Gemini request failed")
-        return f"⚠️ Không kết nối được hệ thống AI: {exc}"
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        logger.exception("Gemini response parsing failed")
-        return f"⚠️ Lỗi xử lý dữ liệu từ AI: {exc}"
+    # Cơ chế Thử lại tự động (Retry with Exponential Backoff) khi gặp lỗi 429 hoặc quá tải
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=35)
+            if response.status_code == 429:
+                if attempt < 2:
+                    time.sleep(2 ** (attempt + 1)) # Chờ 2s, 4s rồi tự động gọi lại
+                    continue
+                return "⚠️ Băng thông AI đang bận (vượt quá giới hạn tần suất). Vui lòng đợi 30 giây rồi bấm Quét lại."
+            if response.status_code != 200: 
+                return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code}): {response.text}"
+            
+            result = response.json()
+            answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                continue
+            return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
+        except Exception as e:
+            if attempt < 2:
+                continue
+            return f"⚠️ Không kết nối được hệ thống AI: {e}"
+            
+    return "⚠️ Quá giới hạn thử lại do nghẽn mạng."
 
 # --- BẢO MẬT & MẬT KHẨU ---
 def _scrypt_hash(password: str) -> str:
@@ -159,35 +169,22 @@ def generate_secure_token(username):
         hashlib.sha256,
     ).hexdigest()
 
-VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
-
-def get_vn_time():
-    return datetime.now(VN_TZ)
-
-def get_vn_today():
-    return get_vn_time().date()
-
 def clear_app_caches():
     for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules, get_public_gsheet_as_excel):
-        try:
-            fn.clear()
-        except Exception:
-            pass
+        try: fn.clear()
+        except Exception: pass
 
 def clear_cache_and_rerun():
     clear_app_caches()
-    try:
-        st.rerun()
-    except Exception:
-        pass
+    try: st.rerun()
+    except Exception: pass
 
 def ghi_nhat_ky(nguoi_dung, hanh_dong, chi_tiet):
     try:
         sh_main = ket_noi_sheet(SHEET_MAIN)
         wks = sh_main.worksheet("NhatKy")
         wks.append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, str(chi_tiet)[:5000]])
-    except Exception:
-        logger.exception("Không ghi được nhật ký")
+    except Exception: logger.exception("Không ghi được nhật ký")
 
 def get_short_name(full_name):
     if not full_name or full_name == "--" or str(full_name).strip() == "": return "..."
@@ -198,20 +195,17 @@ def normalize_btv_names_strict(name_str, list_nv):
     if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
     raw_str = str(name_str).lower()
     found_names = []
-    
     sorted_nv = sorted(list_nv, key=len, reverse=True)
     for nv in sorted_nv:
         nv_lower = nv.lower()
         parts = nv_lower.split()
         short_nv = " ".join(parts[-2:]) if len(parts) >= 2 else nv_lower
-        
         if nv_lower in raw_str:
             if nv not in found_names: found_names.append(nv)
             raw_str = raw_str.replace(nv_lower, " ")
         elif short_nv in raw_str:
             if nv not in found_names: found_names.append(nv)
             raw_str = raw_str.replace(short_nv, " ")
-            
     if not found_names: return "Chưa phân công"
     return ", ".join(found_names)
 
@@ -243,10 +237,8 @@ def has_name_access(curr_name, assignees_text):
     return target and target in _parse_assignees(assignees_text)
 
 def check_quyen(curr_name, role, task_row, df_duan=None):
-    if role in {"LanhDao", "Admin"}:
-        return 2
-    if has_name_access(curr_name, task_row.get("NguoiPhuTrach", "")):
-        return 1
+    if role in {"LanhDao", "Admin"}: return 2
+    if has_name_access(curr_name, task_row.get("NguoiPhuTrach", "")): return 1
     return 0
 
 @st.cache_data(ttl=3600)
@@ -321,7 +313,6 @@ def safe_read_records_with_row(wks, retries=3, delay=0.4):
             else: time.sleep(delay * (attempt + 1))
     return pd.DataFrame()
 
-# --- SIÊU TỐI ƯU TỐC ĐỘ: NHÉT TOÀN BỘ FILE VÀO RAM ---
 @st.cache_data(ttl=15, show_spinner=False)
 def fetch_vo_truc_so(tab_name):
     sh = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -416,7 +407,6 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
     m = target_date_obj.month
-    
     month_str1 = f"tháng{m}"
     month_str2 = f"tháng{m:02d}"
     
@@ -428,7 +418,6 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
             break
             
     if month_row_idx == -1: month_row_idx = 0
-    
     target_col = -1
     header_row = -1
     
@@ -1166,30 +1155,41 @@ else:
                         first_row_data = group_df.iloc[0]
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
+                        current_status_val = get_smart_status(group_df)
+                        is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
                         
                         # --- TÍNH NĂNG AI PHẢN BIỆN ---
-                        with st.expander("🤖 AI PHẢN BIỆN & CẢNH BÁO RỦI RO", expanded=True):
+                        st.markdown("🤖 **AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
+                        with st.container(border=True):
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
                             
                             c_ai1, c_ai2 = st.columns([1, 1])
-                            auto_scan = c_ai1.checkbox("🔄 Tự động quét lỗi bài này", value=True)
-                            btn_scan = c_ai2.button("⚡ QUÉT THỦ CÔNG")
+                            auto_scan = c_ai1.checkbox("🔄 Tự động quét khi mở bài", value=True)
+                            btn_scan = c_ai2.button("⚡ QUÉT LẠI")
                             
-                            if btn_scan or (auto_scan and current_text.strip()):
-                                if not current_text or len(current_text.strip()) < 5:
-                                    st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
-                                else:
-                                    with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
-                                        ai_feedback = call_gemini_ai(current_text)
-                                        if ai_feedback:
-                                            # ĐÃ SỬA LỖI UX CHỬI OAN
-                                            if "⚠️" in ai_feedback or "⚪" in ai_feedback:
-                                                st.warning(ai_feedback)
-                                            elif "nội dung an toàn" in ai_feedback.lower() and "đủ điều kiện" in ai_feedback.lower():
-                                                st.success("✅ " + ai_feedback)
-                                            else:
-                                                st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
-                                                st.markdown(ai_feedback)
+                            if not current_text or len(current_text.strip()) < 10:
+                                st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
+                            elif is_already_done and not btn_scan:
+                                st.success("✅ Bài viết này đã được phê duyệt hoặc đã đăng. (Bỏ qua rà soát AI để tiết kiệm tài nguyên).")
+                            else:
+                                text_hash = hashlib.md5(current_text.encode('utf-8')).hexdigest()
+                                cache_key = f"ai_res_{text_hash}"
+                                
+                                if btn_scan or (auto_scan and cache_key not in st.session_state):
+                                    with st.spinner("🤖 AI đang phân tích văn bản..."):
+                                        ans = call_gemini_ai(current_text)
+                                        st.session_state[cache_key] = ans
+                                
+                                if cache_key in st.session_state:
+                                    ans = st.session_state[cache_key]
+                                    if "⚠️" in ans or "⚪" in ans:
+                                        st.warning(ans)
+                                    elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower():
+                                        st.success("✅ " + ans)
+                                    else:
+                                        st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
+                                        with st.container(height=350):
+                                            st.markdown(ans)
                         # ---------------------------------
                         
                         with st.form("edit_group_form"):
@@ -1357,24 +1357,19 @@ else:
                 xls = pd.ExcelFile(io.BytesIO(excel_bytes))
                 sheet_names = xls.sheet_names
                 
-                target_ts = int(target_date_lps.strftime("%Y%m%d"))
                 best_idx = 0
-                
                 for idx, title in enumerate(sheet_names):
-                    dates_in_title = re.findall(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', title)
-                    if len(dates_in_title) >= 2:
+                    dates = re.findall(r'(\d{1,2})[./](\d{1,2})', title)
+                    if len(dates) >= 1:
                         try:
-                            d1, m1, y1 = dates_in_title[0]
-                            d2, m2, y2 = dates_in_title[1]
-                            y1 = int(y1) if y1 else target_date_lps.year
-                            if y1 < 100: y1 += 2000
-                            y2 = int(y2) if y2 else y1
-                            if y2 < 100: y2 += 2000
+                            d1, m1 = int(dates[0][0]), int(dates[0][1])
+                            d2, m2 = int(dates[1][0]), int(dates[1][1]) if len(dates) >= 2 else (d1, m1)
+                            y_target = target_date_lps.year
+                            start_date = datetime(y_target, m1, d1).date()
+                            y_end = y_target + 1 if m2 < m1 else y_target
+                            end_date = datetime(y_end, m2, d2).date()
                             
-                            start_date = int(datetime(y1, int(m1), int(d1)).strftime("%Y%m%d"))
-                            end_date = int(datetime(y2, int(m2), int(d2)).strftime("%Y%m%d"))
-                            
-                            if start_date <= target_ts <= end_date:
+                            if start_date <= target_date_lps <= end_date:
                                 best_idx = idx
                                 break
                         except: pass
@@ -1417,7 +1412,6 @@ else:
                                     "thời tiết", "weather", "bản tin thời tiết", "thoi tiet"
                                 ]
                                 title_lower = title.lower()
-                                
                                 if not any(kw in title_lower for kw in exclude_keywords): 
                                     lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
