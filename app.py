@@ -26,8 +26,10 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide")
 
+# --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & ÉP WRAP TEXT ---
 st.markdown("""
     <style>
+    /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
     [data-stale="true"], div[data-stale="true"] {
         opacity: 1 !important;
         filter: none !important;
@@ -48,6 +50,7 @@ VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 def get_vn_time(): return datetime.now(VN_TZ)
 def get_vn_today(): return get_vn_time().date()
 
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -59,18 +62,20 @@ def get_ai_api_key():
     key = str(st.secrets.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))).strip()
     return key if key else ""
 
-@st.cache_resource
-def init_ai_engine():
-    return {
-        "cache": {},
-        "queue": set(),
-        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    }
+def call_gemini_ai(text):
+    text = str(text or "").strip()
+    if len(text) < 10:
+        return ""
 
-AI_ENGINE = init_ai_engine()
+    api_key = get_ai_api_key()
+    if not api_key:
+        return "⚪ AI chưa được cấu hình — chưa thực hiện kiểm tra nội dung."
 
-def _call_api(text, api_key, model_name, today_str):
+    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    
+    today_str = get_vn_time().strftime("%d/%m/%Y")
+
     prompt = f"""
     Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh đối ngoại, quốc tế của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản.
     
@@ -101,11 +106,11 @@ def _call_api(text, api_key, model_name, today_str):
         "Content-Type": "application/json",
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=25)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 429:
-            return "⚠️ Băng thông AI đang bận (giới hạn tần suất). Vui lòng đợi 30-60 giây rồi thử lại."
+            return "⚠️ Băng thông AI đang bận (vượt quá giới hạn tần suất 15 request/phút). Vui lòng đợi 30 giây rồi bấm Quét lại."
         if response.status_code != 200: 
-            return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code})."
+            return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code}): {response.text}"
         result = response.json()
         answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
@@ -113,33 +118,6 @@ def _call_api(text, api_key, model_name, today_str):
         return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
     except Exception as e:
         return f"⚠️ Không kết nối được hệ thống AI: {e}"
-
-def _bg_task(text, api_key, model_name, today_str, text_hash):
-    try:
-        time.sleep(4.5)
-        ans = _call_api(text, api_key, model_name, today_str)
-        AI_ENGINE["cache"][text_hash] = ans
-    except Exception: pass
-    finally:
-        if text_hash in AI_ENGINE["queue"]: AI_ENGINE["queue"].remove(text_hash)
-
-def queue_bg_scan(text, smart_status=""):
-    # Bỏ qua hoàn toàn các bài đã được duyệt hoặc đã đăng
-    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]):
-        return
-
-    if not text or len(text.strip()) < 10: return
-    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-    
-    if text_hash in AI_ENGINE["cache"] or text_hash in AI_ENGINE["queue"]: return
-    
-    api_key = get_ai_api_key()
-    if not api_key: return
-    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
-    today_str = get_vn_time().strftime("%d/%m/%Y")
-    
-    AI_ENGINE["queue"].add(text_hash)
-    AI_ENGINE["executor"].submit(_bg_task, text, api_key, model_name, today_str, text_hash)
 
 # --- BẢO MẬT & MẬT KHẨU ---
 def _scrypt_hash(password: str) -> str:
@@ -884,6 +862,7 @@ else:
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
             if is_shift_admin:
+                
                 with st.spinner("⚡ Đang kết nối siêu tốc đa luồng để phân tích Lịch..."):
                     auto_ldp, auto_tcsx, auto_btv, auto_ht, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
                 
@@ -1015,11 +994,6 @@ else:
                         "Nền tảng": ", ".join(plats)
                     })
 
-                    # Bỏ qua hoàn toàn quét ngầm nếu bài đã duyệt/đã đăng
-                    first_row_bg = group.iloc[0]
-                    curr_txt, _ = split_text_link(first_row_bg.get('LINK DUYỆT', ''))
-                    queue_bg_scan(curr_txt, smart_status)
-                
                 df_summary = pd.DataFrame(summary_data)
                 
                 if not df_summary.empty:
@@ -1039,7 +1013,7 @@ else:
                         for i, b in enumerate(btv_list):
                             b_df = df_summary[df_summary['BTV'] == b]
                             total_b = len(b_df)
-                            done_b = len(b_df[b_df['Tiến độ'] == "✅ Đã duyệt"])
+                            done_b = len(b_df[b_df['Tiến độ"] == "✅ Đã duyệt"])
                             btv_cols[i].metric(label=b, value=f"{done_b}/{total_b}") 
 
                         st.write("")
@@ -1169,49 +1143,43 @@ else:
                         current_status_val = get_smart_status(group_df)
                         is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
                         
-                        # --- TÍNH NĂNG AI PHẢN BIỆN ---
-                        st.markdown("**:robot_face: AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
+                        # --- TÍNH NĂNG AI PHẢN BIỆN (QUÉT TRỰC TIẾP KHI CHỌN BÀI) ---
+                        st.markdown("🤖 **AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
                         with st.container(border=True):
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
                             
                             c_ai1, c_ai2 = st.columns([1, 1])
-                            auto_scan = c_ai1.checkbox("🔄 Tự động hiển thị kết quả quét", value=True)
-                            btn_scan = c_ai2.button("⚡ QUÉT LẠI (ÉP BUỘC)")
+                            auto_scan = c_ai1.checkbox("🔄 Tự động quét khi mở bài", value=True)
+                            btn_scan = c_ai2.button("⚡ QUÉT LẠI")
                             
                             if not current_text or len(current_text.strip()) < 10:
                                 st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
                             elif is_already_done and not btn_scan:
-                                st.success("✅ Bài viết này đã được phê duyệt / đã đăng xuất bản hoàn tất (Tự động bỏ qua quét AI để bảo toàn hạn mức).")
+                                st.success("✅ Bài viết này đã được phê duyệt hoặc đã đăng. (Bỏ qua rà soát AI để tiết kiệm tài nguyên).")
                             else:
                                 text_hash = hashlib.md5(current_text.encode('utf-8')).hexdigest()
                                 
-                                if btn_scan:
-                                    with st.spinner("🤖 AI đang quét và phân tích dữ liệu..."):
+                                # Sử dụng Session State để lưu kết quả bài hiện tại, mở ra là thấy ngay trong 0.001s không cần gọi lại API
+                                cache_key = f"ai_res_{text_hash}"
+                                
+                                if btn_scan or (auto_scan and cache_key not in st.session_state):
+                                    with st.spinner("🤖 AI đang phân tích văn bản..."):
                                         api_key = get_ai_api_key()
                                         model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
                                         today_str = get_vn_time().strftime("%d/%m/%Y")
-                                        ans = _call_api(current_text, api_key, model_name, today_str)
-                                        AI_ENGINE["cache"][text_hash] = ans
-                                        
-                                        if "⚠️" in ans or "⚪" in ans: st.warning(ans)
-                                        elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower(): st.success("✅ " + ans)
-                                        else:
-                                            st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
-                                            with st.container(height=350):
-                                                st.markdown(ans)
+                                        ans = call_gemini_ai(current_text)
+                                        st.session_state[cache_key] = ans
                                 
-                                elif auto_scan:
-                                    if text_hash in AI_ENGINE["cache"]:
-                                        ans = AI_ENGINE["cache"][text_hash]
-                                        if "⚠️" in ans or "⚪" in ans: st.warning(ans)
-                                        elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower(): st.success("✅ " + ans)
-                                        else:
-                                            st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
-                                            with st.container(height=350):
-                                                st.markdown(ans)
+                                if cache_key in st.session_state:
+                                    ans = st.session_state[cache_key]
+                                    if "⚠️" in ans or "⚪" in ans:
+                                        st.warning(ans)
+                                    elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower():
+                                        st.success("✅ " + ans)
                                     else:
-                                        st.warning("⏳ AI đang ngầm phân tích bài này. Bạn có thể xem bài khác hoặc bấm 'QUÉT LẠI (ÉP BUỘC)'.")
-                                        queue_bg_scan(current_text, current_status_val)
+                                        st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
+                                        with st.container(height=350):
+                                            st.markdown(ans)
                         # ---------------------------------
                         
                         with st.form("edit_group_form"):
@@ -1380,17 +1348,12 @@ else:
                 sheet_names = xls.sheet_names
                 
                 best_idx = 0
-                
                 for idx, title in enumerate(sheet_names):
                     dates = re.findall(r'(\d{1,2})[./](\d{1,2})', title)
                     if len(dates) >= 1:
                         try:
                             d1, m1 = int(dates[0][0]), int(dates[0][1])
-                            if len(dates) >= 2:
-                                d2, m2 = int(dates[1][0]), int(dates[1][1])
-                            else:
-                                d2, m2 = d1, m1
-
+                            d2, m2 = int(dates[1][0]), int(dates[1][1]) if len(dates) >= 2 else (d1, m1)
                             y_target = target_date_lps.year
                             start_date = datetime(y_target, m1, d1).date()
                             y_end = y_target + 1 if m2 < m1 else y_target
@@ -1439,7 +1402,6 @@ else:
                                     "thời tiết", "weather", "bản tin thời tiết", "thoi tiet"
                                 ]
                                 title_lower = title.lower()
-                                
                                 if not any(kw in title_lower for kw in exclude_keywords): 
                                     lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
