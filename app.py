@@ -75,17 +75,25 @@ def call_gemini_ai(text):
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     
+    # Lấy ngày hiện tại
+    today_str = get_vn_time().strftime("%d/%m/%Y")
+
     prompt = f"""
-Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản.
-Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây.
+    Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh đối ngoại, quốc tế của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản.
+    
+    LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản.
+
+    Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây...
 
 Kiểm tra theo thứ tự:
 1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
 2. Logic, mâu thuẫn, dữ kiện thiếu căn cứ hoặc diễn đạt có thể gây hiểu sai.
 3. Bản quyền, nhạy cảm văn hóa/tôn giáo, phân biệt đối xử.
 4. Chính tả, ngữ pháp, diễn đạt lủng củng.
+5. Nội dung cập nhật bị muộn, cũ, hoặc thông tin đã có sự thay đổi.
+6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả?
 
-Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Không khen ngợi dài dòng.
+Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng.
 Nếu không phát hiện rủi ro nào đáng kể, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
 
 NỘI DUNG CẦN RÀ SOÁT:
