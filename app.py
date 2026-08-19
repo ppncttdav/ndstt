@@ -50,7 +50,7 @@ VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 def get_vn_time(): return datetime.now(VN_TZ)
 def get_vn_today(): return get_vn_time().date()
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (CÓ CƠ CHẾ RETRY TỰ ĐỘNG) ---
+# --- LÕI AI ĐƯỢC THAY MÁU SANG GROQ (LLAMA 3.3) ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -59,10 +59,21 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 def get_ai_api_key():
-    key = str(st.secrets.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))).strip()
+    key = str(st.secrets.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))).strip()
     return key if key else ""
 
-def call_gemini_ai(text):
+@st.cache_resource
+def init_ai_engine():
+    return {
+        "cache": {},
+        "queue": set(),
+        # Tăng luồng vì Groq phản hồi cực nhanh, không lo nghẽn cục bộ
+        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    }
+
+AI_ENGINE = init_ai_engine()
+
+def call_groq_ai(text):
     text = str(text or "").strip()
     if len(text) < 10:
         return ""
@@ -71,17 +82,15 @@ def call_gemini_ai(text):
     if not api_key:
         return "⚪ AI chưa được cấu hình — chưa thực hiện kiểm tra nội dung."
 
-    model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip()
+    url = "https://api.groq.com/openai/v1/chat/completions"
     
     today_str = get_vn_time().strftime("%d/%m/%Y")
-
-    prompt = f"""
-    Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh đối ngoại, quốc tế của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản.
     
-    LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản.
+    system_prompt = f"Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh đối ngoại, quốc tế của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản. LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản."
 
-    Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây...
+    user_prompt = f"""
+    Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây.
 
     Kiểm tra theo thứ tự:
     1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
@@ -97,42 +106,61 @@ def call_gemini_ai(text):
     NỘI DUNG CẦN RÀ SOÁT:
     {text}
     """
-    
-    # Nâng maxOutputTokens lên 4096 để khắc phục triệt để lỗi cụt chữ (truncation)
+
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096},
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 4096
     }
     headers = {
-        "x-goog-api-key": api_key,
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
-    # Cơ chế Thử lại tự động (Retry with Exponential Backoff) khi gặp lỗi 429 hoặc quá tải
-    for attempt in range(3):
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=35)
-            if response.status_code == 429:
-                if attempt < 2:
-                    time.sleep(2 ** (attempt + 1)) # Chờ 2s, 4s rồi tự động gọi lại
-                    continue
-                return "⚠️ Băng thông AI đang bận (vượt quá giới hạn tần suất). Vui lòng đợi 30 giây rồi bấm Quét lại."
-            if response.status_code != 200: 
-                return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code}): {response.text}"
-            
-            result = response.json()
-            answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
-        except requests.exceptions.Timeout:
-            if attempt < 2:
-                continue
-            return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
-        except Exception as e:
-            if attempt < 2:
-                continue
-            return f"⚠️ Không kết nối được hệ thống AI: {e}"
-            
-    return "⚠️ Quá giới hạn thử lại do nghẽn mạng."
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=25)
+        if response.status_code == 429:
+            return "⚠️ Băng thông AI đang bận. Vui lòng đợi chút rồi Quét lại."
+        if response.status_code != 200: 
+            return f"⚠️ Lỗi từ máy chủ Groq (HTTP {response.status_code}): {response.text}"
+        
+        result = response.json()
+        answer = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
+    except requests.exceptions.Timeout:
+        return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
+    except Exception as e:
+        return f"⚠️ Không kết nối được hệ thống AI Groq: {e}"
+
+def _bg_task(text, text_hash):
+    try:
+        # Nghỉ nhẹ 2 giây để điều tiết nhịp với giới hạn 30 req/phút của Groq Free Tier
+        time.sleep(2)
+        ans = call_groq_ai(text)
+        AI_ENGINE["cache"][text_hash] = ans
+    except Exception: pass
+    finally:
+        if text_hash in AI_ENGINE["queue"]: AI_ENGINE["queue"].remove(text_hash)
+
+def queue_bg_scan(text, smart_status=""):
+    # Bỏ qua quét ngầm các bài đã hoàn tất
+    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]):
+        return
+
+    if not text or len(text.strip()) < 10: return
+    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+    
+    if text_hash in AI_ENGINE["cache"] or text_hash in AI_ENGINE["queue"]: return
+    
+    api_key = get_ai_api_key()
+    if not api_key: return
+    
+    AI_ENGINE["queue"].add(text_hash)
+    AI_ENGINE["executor"].submit(_bg_task, text, text_hash)
 
 # --- BẢO MẬT & MẬT KHẨU ---
 def _scrypt_hash(password: str) -> str:
@@ -1008,6 +1036,11 @@ else:
                         "Tiến độ": smart_status,
                         "Nền tảng": ", ".join(plats)
                     })
+
+                    # BÍ MẬT QUÉT NGẦM
+                    first_row_bg = group.iloc[0]
+                    curr_txt, _ = split_text_link(first_row_bg.get('LINK DUYỆT', ''))
+                    queue_bg_scan(curr_txt, smart_status)
                 
                 df_summary = pd.DataFrame(summary_data)
                 
@@ -1028,7 +1061,7 @@ else:
                         for i, b in enumerate(btv_list):
                             b_df = df_summary[df_summary['BTV'] == b]
                             total_b = len(b_df)
-                            done_b = len(b_df[b_df['Tiến độ'] == "✅ Đã duyệt"])
+                            done_b = len(b_df[b_df['Tiến độ'].astype(str).str.contains("Đã duyệt", na=False)])
                             btv_cols[i].metric(label=b, value=f"{done_b}/{total_b}") 
 
                         st.write("")
@@ -1164,8 +1197,8 @@ else:
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
                             
                             c_ai1, c_ai2 = st.columns([1, 1])
-                            auto_scan = c_ai1.checkbox("🔄 Tự động quét khi mở bài", value=False)
-                            btn_scan = c_ai2.button("⚡ QUÉT LẠI")
+                            auto_scan = c_ai1.checkbox("🔄 Tự động hiển thị kết quả quét", value=True)
+                            btn_scan = c_ai2.button("⚡ QUÉT LẠI (ÉP BUỘC)")
                             
                             if not current_text or len(current_text.strip()) < 10:
                                 st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
@@ -1177,7 +1210,7 @@ else:
                                 
                                 if btn_scan or (auto_scan and cache_key not in st.session_state):
                                     with st.spinner("🤖 AI đang phân tích văn bản..."):
-                                        ans = call_gemini_ai(current_text)
+                                        ans = call_groq_ai(current_text)
                                         st.session_state[cache_key] = ans
                                 
                                 if cache_key in st.session_state:
@@ -1204,7 +1237,7 @@ else:
                                 e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                 
                                 st.markdown("---")
-                                if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                 e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                 e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                 
