@@ -42,17 +42,17 @@ LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (REST API CHUẨN MỰC NHẤT) ---
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (BYPASS LỖI AQ. TOÀN CẦU CỦA GOOGLE) ---
 @st.cache_data(ttl=86400, show_spinner=False)
 def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
-        # API Key sạch từ dự án mới
+        # API Key siêu sạch từ dự án mới của bạn
         api_key = "AQ.Ab8RN6JyKj_wWBAWH7e8tJAUCQlNh8h5mcptZ7tCrs_zEPi9uw"
         
-        # Bắn thẳng bằng đường dẫn có chứa ?key= (chuẩn xác nhất)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+        # Tuyệt đối không dùng ?key= ở URL để tránh bị Google bắt bẻ định dạng AQ.
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
         
         prompt = f"""
         Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của Đài truyền hình quốc gia, vô cùng khắt khe, cầu toàn và soi lỗi cực giỏi.
@@ -73,7 +73,9 @@ def call_gemini_ai(text):
             "contents": [{"parts": [{"text": prompt}]}]
         }
         
+        # CHIẾN THUẬT VƯỢT RÀO: Gói API Key vào vỏ bọc Bearer Token để đi cửa sau
         headers = {
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
@@ -87,7 +89,7 @@ def call_gemini_ai(text):
             except:
                 return "⚠️ AI trả về dữ liệu trống hoặc không đúng định dạng."
         else:
-            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): Vui lòng đợi thêm 3-5 phút để Google kích hoạt chìa khóa mới của bạn.\nChi tiết lỗi: {response.text}"
+            return f"⚠️ Lỗi từ máy chủ Google (Code {response.status_code}): {response.text}"
             
     except Exception as e:
         return f"⚠️ Lỗi kết nối mạng: {str(e)}"
@@ -1391,7 +1393,7 @@ else:
                         dl_fmt = f"{tv_time.strftime('%H:%M:%S')} {tv_date.strftime('%d/%m/%Y')}"
                         sh_main = ket_noi_sheet(SHEET_MAIN)
                         sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, ", ".join(tv_nguoi), "Đã giao", "", tv_ghichu, curr_name])
-                        ghi_nhat_ky(sh_main, curr_name, "Tạo việc", tv_ten); st.success("Xong!")
+                        ghi_nhat_ky(curr_name, "Tạo việc", tv_ten); st.success("Xong!")
                         if opt_nv and tv_nguoi:
                             mails = df_users[df_users['HoTen'].isin(tv_nguoi)]['Email'].tolist()
                             mails = [m for m in mails if str(m).strip()]
