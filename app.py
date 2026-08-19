@@ -42,16 +42,13 @@ LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L
 LINK_LICH_LDP = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=570145520#gid=570145520"
 LINK_KHUNG_LPS = "https://docs.google.com/spreadsheets/d/1WfZledcegY7E0Vqm0gEX9kjczx0JxnYv/edit?gid=1508530487#gid=1508530487"
 
-# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN (BYPASS LỖI AQ. TOÀN CẦU CỦA GOOGLE) ---
+# --- LÕI AI RÀ SOÁT RỦI RO & PHẢN BIỆN ---
 @st.cache_data(ttl=86400, show_spinner=False)
 def call_gemini_ai(text):
     if not text or len(text.strip()) < 10: 
         return ""
     try:
-        # API Key định dạng AQ. của bạn
         api_key = "AQ.Ab8RN6IRxnzG7H6lQUC27ZVxA0NrtdjKTMua5Lwg9A34oGuFwg"
-        
-        # Bắn lệnh thẳng lên máy chủ Google bằng REST API
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
         
         prompt = f"""
@@ -73,7 +70,6 @@ def call_gemini_ai(text):
             "contents": [{"parts": [{"text": prompt}]}]
         }
         
-        # CHIẾN THUẬT VƯỢT RÀO: Thử dán nhãn x-goog-api-key trước, nếu Google báo lỗi 401 thì lập tức ngụy trang thành Bearer Token
         headers_api = {
             "x-goog-api-key": api_key,
             "Content-Type": "application/json"
@@ -134,22 +130,18 @@ def match_nv(name, list_nv):
                 return nv
     return name.title()
 
-# --- BẢN VÁ LỖI TÊN VIẾT TẮT: NHẬN DIỆN CẢ TÊN CHUẨN VÀ TÊN NGẮN GỌN ---
 def normalize_btv_names_strict(name_str, list_nv):
     if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
     raw_str = str(name_str).lower()
     found_names = []
     
-    # Sắp xếp danh sách tên chuẩn từ dài đến ngắn để quét chính xác
     sorted_nv = sorted(list_nv, key=len, reverse=True)
     
     for nv in sorted_nv:
         nv_lower = nv.lower()
-        # Trích xuất 2 chữ cuối làm tên viết tắt (VD: "Lưu Gia Huy" -> "Gia Huy")
         parts = nv_lower.split()
         short_nv = " ".join(parts[-2:]) if len(parts) >= 2 else nv_lower
         
-        # Kiểm tra xem tên full hoặc tên tắt có nằm trong ô hay không
         if nv_lower in raw_str:
             if nv not in found_names: found_names.append(nv)
             raw_str = raw_str.replace(nv_lower, " ")
@@ -1272,7 +1264,7 @@ else:
                                 title_lower = title.lower()
                                 
                                 if not any(kw in title_lower for kw in exclude_keywords): 
-                                    lps_data.append({"Giờ phát sóng (hh:mm)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
+                                    lps_data.append({"Giờ phát sóng (hh:mm:ss)": formatted_time, "Tiêu đề": title, "Mô tả": desc})
                 
                 if lps_data:
                     df_lps = pd.DataFrame(lps_data)
