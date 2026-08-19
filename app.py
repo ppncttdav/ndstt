@@ -82,7 +82,7 @@ def call_groq_ai(text):
     if not api_key:
         return "⚪ AI chưa được cấu hình — chưa thực hiện kiểm tra nội dung."
 
-    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip()
+    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"))).strip()
     url = "https://api.groq.com/openai/v1/chat/completions"
     
     today_str = get_vn_time().strftime("%d/%m/%Y")
