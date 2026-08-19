@@ -26,10 +26,8 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide")
 
-# --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & ÉP WRAP TEXT ---
 st.markdown("""
     <style>
-    /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
     [data-stale="true"], div[data-stale="true"] {
         opacity: 1 !important;
         filter: none !important;
@@ -50,7 +48,6 @@ VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 def get_vn_time(): return datetime.now(VN_TZ)
 def get_vn_today(): return get_vn_time().date()
 
-# --- LÕI AI ĐƯỢC ÉP XUNG NGƯỢC (CHỐNG LỖI 429 RATE LIMIT) ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -67,7 +64,6 @@ def init_ai_engine():
     return {
         "cache": {},
         "queue": set(),
-        # Khóa cứng 1 luồng xử lý duy nhất để không vượt quá 15 RPM của Google Free Tier
         "executor": concurrent.futures.ThreadPoolExecutor(max_workers=1)
     }
 
@@ -105,20 +101,21 @@ def _call_api(text, api_key, model_name, today_str):
         "Content-Type": "application/json",
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        response = requests.post(url, headers=headers, json=payload, timeout=25)
         if response.status_code == 429:
-            return "⚠️ Băng thông AI đang quá tải tạm thời (Giới hạn tài khoản miễn phí). Vui lòng đợi khoảng 1 phút rồi Quét lại."
+            return "⚠️ Băng thông AI đang bận (giới hạn tần suất). Vui lòng đợi 30-60 giây rồi thử lại."
         if response.status_code != 200: 
             return f"⚠️ Lỗi từ máy chủ Google (HTTP {response.status_code})."
         result = response.json()
         answer = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         return answer.strip() or "⚠️ AI không trả về nội dung phân tích."
+    except requests.exceptions.Timeout:
+        return "⚠️ Quá thời gian chờ phản hồi AI (Timeout). Vui lòng bấm Quét Lại."
     except Exception as e:
         return f"⚠️ Không kết nối được hệ thống AI: {e}"
 
 def _bg_task(text, api_key, model_name, today_str, text_hash):
     try:
-        # Ngủ 4.5 giây trước khi gọi để đảm bảo nhịp điệu không vượt 13-14 request/phút
         time.sleep(4.5)
         ans = _call_api(text, api_key, model_name, today_str)
         AI_ENGINE["cache"][text_hash] = ans
@@ -126,7 +123,11 @@ def _bg_task(text, api_key, model_name, today_str, text_hash):
     finally:
         if text_hash in AI_ENGINE["queue"]: AI_ENGINE["queue"].remove(text_hash)
 
-def queue_bg_scan(text):
+def queue_bg_scan(text, smart_status=""):
+    # Bỏ qua hoàn toàn các bài đã được duyệt hoặc đã đăng
+    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]):
+        return
+
     if not text or len(text.strip()) < 10: return
     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
     
@@ -883,7 +884,6 @@ else:
         if not tab_exists:
             st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
             if is_shift_admin:
-                
                 with st.spinner("⚡ Đang kết nối siêu tốc đa luồng để phân tích Lịch..."):
                     auto_ldp, auto_tcsx, auto_btv, auto_ht, scan_errors = lay_nhan_su_tu_lich_phuc_tap(target_date, list_nv)
                 
@@ -1015,10 +1015,10 @@ else:
                         "Nền tảng": ", ".join(plats)
                     })
 
-                    # BÍ MẬT QUÉT NGẦM: Thả bài vào luồng chờ, chỉ 1 luồng xử lý
+                    # Bỏ qua hoàn toàn quét ngầm nếu bài đã duyệt/đã đăng
                     first_row_bg = group.iloc[0]
                     curr_txt, _ = split_text_link(first_row_bg.get('LINK DUYỆT', ''))
-                    queue_bg_scan(curr_txt)
+                    queue_bg_scan(curr_txt, smart_status)
                 
                 df_summary = pd.DataFrame(summary_data)
                 
@@ -1166,6 +1166,8 @@ else:
                         first_row_data = group_df.iloc[0]
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
+                        current_status_val = get_smart_status(group_df)
+                        is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
                         
                         # --- TÍNH NĂNG AI PHẢN BIỆN ---
                         st.markdown("**:robot_face: AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
@@ -1178,6 +1180,8 @@ else:
                             
                             if not current_text or len(current_text.strip()) < 10:
                                 st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
+                            elif is_already_done and not btn_scan:
+                                st.success("✅ Bài viết này đã được phê duyệt / đã đăng xuất bản hoàn tất (Tự động bỏ qua quét AI để bảo toàn hạn mức).")
                             else:
                                 text_hash = hashlib.md5(current_text.encode('utf-8')).hexdigest()
                                 
@@ -1206,8 +1210,8 @@ else:
                                             with st.container(height=350):
                                                 st.markdown(ans)
                                     else:
-                                        st.warning("⏳ AI đang ngầm phân tích bài này phía sau. Bạn có thể lướt xem các bài khác, hoặc bấm nút 'QUÉT LẠI' để xem kết quả ngay.")
-                                        queue_bg_scan(current_text)
+                                        st.warning("⏳ AI đang ngầm phân tích bài này. Bạn có thể xem bài khác hoặc bấm 'QUÉT LẠI (ÉP BUỘC)'.")
+                                        queue_bg_scan(current_text, current_status_val)
                         # ---------------------------------
                         
                         with st.form("edit_group_form"):
@@ -1378,7 +1382,6 @@ else:
                 best_idx = 0
                 
                 for idx, title in enumerate(sheet_names):
-                    # Tìm tất cả cụm ngày tháng (dd.mm hoặc dd/mm)
                     dates = re.findall(r'(\d{1,2})[./](\d{1,2})', title)
                     if len(dates) >= 1:
                         try:
@@ -1386,13 +1389,10 @@ else:
                             if len(dates) >= 2:
                                 d2, m2 = int(dates[1][0]), int(dates[1][1])
                             else:
-                                d2, m2 = d1, m1 # Nếu chỉ ghi 1 ngày
+                                d2, m2 = d1, m1
 
-                            # Dùng năm của ngày mục tiêu làm chuẩn để tránh lỗi gõ sai năm trên tên sheet
                             y_target = target_date_lps.year
                             start_date = datetime(y_target, m1, d1).date()
-                            
-                            # Nếu tháng kết thúc nhỏ hơn tháng bắt đầu (vắt qua năm mới)
                             y_end = y_target + 1 if m2 < m1 else y_target
                             end_date = datetime(y_end, m2, d2).date()
                             
