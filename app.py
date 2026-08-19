@@ -993,7 +993,7 @@ else:
                         "Tiến độ": smart_status,
                         "Nền tảng": ", ".join(plats)
                     })
-
+                
                 df_summary = pd.DataFrame(summary_data)
                 
                 if not df_summary.empty:
@@ -1013,7 +1013,7 @@ else:
                         for i, b in enumerate(btv_list):
                             b_df = df_summary[df_summary['BTV'] == b]
                             total_b = len(b_df)
-                            done_b = len(b_df[b_df['Tiến độ"] == "✅ Đã duyệt"])
+                            done_b = len(b_df[b_df['Tiến độ'].astype(str).str.contains("Đã duyệt", na=False)])
                             btv_cols[i].metric(label=b, value=f"{done_b}/{total_b}") 
 
                         st.write("")
@@ -1143,7 +1143,7 @@ else:
                         current_status_val = get_smart_status(group_df)
                         is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
                         
-                        # --- TÍNH NĂNG AI PHẢN BIỆN (QUÉT TRỰC TIẾP KHI CHỌN BÀI) ---
+                        # --- TÍNH NĂNG AI PHẢN BIỆN ---
                         st.markdown("🤖 **AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
                         with st.container(border=True):
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
@@ -1155,18 +1155,13 @@ else:
                             if not current_text or len(current_text.strip()) < 10:
                                 st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
                             elif is_already_done and not btn_scan:
-                                st.success("✅ Bài viết này đã được phê duyệt hoặc đã đăng. (Bỏ qua rà soát AI để tiết kiệm tài nguyên).")
+                                st.success("✅ Bài viết này đã được phê duyệt / đã đăng xuất bản hoàn tất (Tự động bỏ qua quét AI để bảo toàn hạn mức).")
                             else:
                                 text_hash = hashlib.md5(current_text.encode('utf-8')).hexdigest()
-                                
-                                # Sử dụng Session State để lưu kết quả bài hiện tại, mở ra là thấy ngay trong 0.001s không cần gọi lại API
                                 cache_key = f"ai_res_{text_hash}"
                                 
                                 if btn_scan or (auto_scan and cache_key not in st.session_state):
                                     with st.spinner("🤖 AI đang phân tích văn bản..."):
-                                        api_key = get_ai_api_key()
-                                        model_name = str(st.secrets.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
-                                        today_str = get_vn_time().strftime("%d/%m/%Y")
                                         ans = call_gemini_ai(current_text)
                                         st.session_state[cache_key] = ans
                                 
