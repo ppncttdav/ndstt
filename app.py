@@ -1164,8 +1164,8 @@ else:
                             st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
                             
                             c_ai1, c_ai2 = st.columns([1, 1])
-auto_scan = c_ai1.checkbox("🔄 Tự động quét khi mở bài", value=False)
-btn_scan = c_ai2.button("⚡ QUÉT LẠI")
+                            auto_scan = c_ai1.checkbox("🔄 Tự động quét khi mở bài", value=False)
+                            btn_scan = c_ai2.button("⚡ QUÉT LẠI")
                             
                             if not current_text or len(current_text.strip()) < 10:
                                 st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
