@@ -76,7 +76,7 @@ AI_ENGINE = init_ai_engine()
 def _call_api(text, api_key, model_name, today_str):
     url = "https://api.groq.com/openai/v1/chat/completions"
     
-    system_prompt = f"Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh truyền hình đối ngoại, quốc tế Vietnam Today của Đài truyền hình quốc gia, vô cùng khắt khe và ưu tiên an toàn xuất bản. LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản."
+    system_prompt = f"Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh truyền hình đối ngoại, quốc tế Vietnam Today. Vietnam Today là kênh truyền hình chính của Ban Truyền hình đối ngoại (VTV International), Đài truyền hình Việt Nam (VTV), vô cùng khắt khe và ưu tiên an toàn xuất bản. LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản."
 
     user_prompt = f"""
     Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây...
