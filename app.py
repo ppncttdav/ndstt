@@ -90,7 +90,7 @@ def _call_api(text, api_key, model_name, today_str):
     6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả?
     7. Chuẩn định dạng ngày theo ví dụ: 10 August, 2026
 
-    Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng.
+    Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng, chỉ nói những mục phải sửa, cái nào đúng rồi thì thôi không cần đề cập cho gọn gàng.
     Nếu không phát hiện rủi ro nào đáng kể, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
 
     NỘI DUNG CẦN RÀ SOÁT:
