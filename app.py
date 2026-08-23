@@ -1190,13 +1190,13 @@ else:
                         is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
                         
                         # --- TÍNH NĂNG AI PHẢN BIỆN ---
-                        st.markdown("🤖 **AI PHẢN BIỆN & CẢNH BÁO RỦI RO**")
+                        st.markdown("🤖 **AI CẢNH BÁO RỦI RO**")
                         with st.container(border=True):
-                            st.info("Hệ thống rà soát: Lỗi chính tả, Ngữ pháp, Logic, và Rủi ro chính trị/ngoại giao.")
+                            st.info("Hệ thống tự động rà soát lỗi chính tả, ngữ pháp và một số lỗi rủi ro có khả năng xảy ra.")
                             
                             c_ai1, c_ai2 = st.columns([1, 1])
                             auto_scan = c_ai1.checkbox("🔄 Tự động hiển thị kết quả quét", value=True)
-                            btn_scan = c_ai2.button("⚡ QUÉT LẠI (ÉP BUỘC)")
+                            btn_scan = c_ai2.button("⚡ RÀ SOÁT LẠI BẰNG AI")
                             
                             if not current_text or len(current_text.strip()) < 10:
                                 st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
@@ -1207,7 +1207,7 @@ else:
                                 cache_key = f"ai_res_{text_hash}"
                                 
                                 if btn_scan or (auto_scan and cache_key not in st.session_state):
-                                    with st.spinner("🤖 AI đang phân tích văn bản..."):
+                                    with st.spinner("🤖 AI đang phân tích văn bản để đưa ra gợi ý, cảnh báo..."):
                                         ans = _call_api(current_text, get_ai_api_key(), str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))).strip(), get_vn_time().strftime("%d/%m/%Y"))
                                         st.session_state[cache_key] = ans
                                 
