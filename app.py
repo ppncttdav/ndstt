@@ -87,8 +87,9 @@ def _call_api(text, api_key, model_name, today_str):
     3. Bản quyền, nhạy cảm văn hóa/tôn giáo, phân biệt đối xử.
     4. Chính tả, ngữ pháp, diễn đạt lủng củng.
     5. Nội dung cập nhật bị muộn, cũ, hoặc thông tin đã có sự thay đổi.
-    6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả?
-    7. Chuẩn định dạng ngày theo ví dụ: 10 August, 2026
+    6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả chưa?
+    7. Chuẩn định dạng ngày theo ví dụ: 10 August, 2026 hoặc bỏ năm đi cũng được.
+    8. Đối với tên riêng tiếng Việt, viết như format tiếng Anh.
 
     Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng, chỉ nói những mục phải sửa, cái nào đúng rồi thì thôi không cần đề cập cho gọn gàng.
     Nếu không phát hiện rủi ro nào đáng kể, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
