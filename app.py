@@ -751,7 +751,7 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # KÍCH THƯỚC CỘT
+    # KÍCH THƯỚC CỘT: Cột A (STT - 90), Cột F (Sản xuất Video - 120) Đã nới siêu rộng
     col_widths = [90, 250, 110, 120, 120, 120, 100, 120, 120, 100, 80, 90, 150, 250]
     for c_idx, w in enumerate(col_widths):
         requests.append({
@@ -770,10 +770,23 @@ def dinh_dang_dep(wks, roster_vals):
         validation_nen_tang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_NEN_TANG), showCustomUi=True)
         validation_status = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_STATUS_TRUCSO), showCustomUi=True)
         
-        set_data_validation_for_cell_range(wks, 'C6:C1000', validation_dinh_dang)
-        set_data_validation_for_cell_range(wks, 'D6:D1000', validation_nen_tang)
-        set_data_validation_for_cell_range(wks, 'E6:E1000', validation_status)
+        # ĐÃ FIX: Chỉ áp dụng Dropdown list cho 30 dòng để tránh lỗi "dài bất tận"
+        set_data_validation_for_cell_range(wks, 'C6:C30', validation_dinh_dang)
+        set_data_validation_for_cell_range(wks, 'D6:D30', validation_nen_tang)
+        set_data_validation_for_cell_range(wks, 'E6:E30', validation_status)
     except Exception: pass
+
+def update_wks_canhan(action_type, data):
+    sh_main = ket_noi_sheet(SHEET_MAIN)
+    try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+    except: 
+        wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+        wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+        
+    if action_type == "update":
+        wks_canhan.update_cells(data)
+    elif action_type == "append":
+        wks_canhan.append_row(data)
 
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'authenticated' not in st.session_state:
@@ -917,7 +930,8 @@ else:
                         with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                w = sh_trucso.add_worksheet(title=tab_name_current, rows=100, cols=20, index=0)
+                                # ĐÃ FIX: Chỉ tạo ra 30 dòng để tránh kéo dài bất tận
+                                w = sh_trucso.add_worksheet(title=tab_name_current, rows=30, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(date_str_display, roster_vals)
                                 st.cache_data.clear()
@@ -1077,31 +1091,6 @@ else:
                         }
                     )
 
-                seeding_clean = []
-                if not df_seeding.empty:
-                    for _, r in df_seeding.iterrows():
-                        task = str(r.get('NỘI DUNG', '')).strip()
-                        if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
-                        seeding_clean.append({
-                            "STT": str(r.get('STT', '')).replace('nan', '').strip(),
-                            "Nhiệm vụ": task,
-                            "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
-                            "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
-                            "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
-                            "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
-                        })
-                if seeding_clean:
-                    st.markdown("---")
-                    st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
-                    st.dataframe(
-                        pd.DataFrame(seeding_clean), 
-                        use_container_width=True, 
-                        hide_index=True,
-                        column_config={
-                            "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
-                        }
-                    )
-
             real_time_dashboard_and_table(filter_opt)
             st.divider()
 
@@ -1109,7 +1098,7 @@ else:
             st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
             st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cảnh báo rủi ro', 'Cần sửa' được đẩy lên đầu)")
             
-            # CÀI ĐẶT MẶC ĐỊNH CHỐNG LỖI KHI BẢNG TRẮNG
+            # CÀI ĐẶT MẶC ĐỊNH CHỐNG LỖI CRASH KHI BẢNG TRẮNG TRƠN
             df_main_st = pd.DataFrame()
             df_seeding_st = pd.DataFrame()
             
@@ -1214,6 +1203,26 @@ else:
                                             st.markdown(ans)
                         # ---------------------------------
                         
+                        # --- NÚT XÓA BÀI VIẾT TỔNG THỂ ---
+                        col_del_main, _ = st.columns([1, 4])
+                        with col_del_main:
+                            if st.button("🗑️ XÓA TOÀN BỘ BÀI VIẾT NÀY", type="secondary", use_container_width=True):
+                                with st.spinner("Đang xóa an toàn..."):
+                                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                    wks_today = sh_trucso.worksheet(tab_name_current)
+                                    min_idx = min(group_df.index)
+                                    max_idx = max(group_df.index)
+                                    start_row = int(min_idx) + 5
+                                    end_row = int(max_idx) + 5 + 1
+                                    del_req = {
+                                        "deleteDimension": {
+                                            "range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": end_row}
+                                        }
+                                    }
+                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
+                                    clear_app_caches()
+                                    st.success("Đã xóa bài viết thành công!"); time.sleep(1); st.rerun()
+
                         with st.form("edit_group_form"):
                             col_left, col_right = st.columns([1.2, 1])
                             
@@ -1255,13 +1264,50 @@ else:
 
                             with col_right:
                                 st.markdown("**:orange[3. TRẠNG THÁI TỪNG NỀN TẢNG]**")
-                                st.caption("Các nền tảng phát sóng của bài viết này. Chỉ cập nhật khi có thay đổi giờ/link sản phẩm.")
+                                st.caption("Cập nhật giờ/link sản phẩm hoặc XÓA nền tảng không cần thiết.")
                                 
                                 platform_updates = {}
                                 for i, r in group_df.iterrows():
                                     nentang = r['NỀN TẢNG']
                                     
                                     with st.expander(f"🔹 {nentang} (Status: {r['STATUS']})", expanded=False):
+                                        # Tính năng xóa nền tảng đơn lẻ
+                                        if st.button(f"🗑️ Xóa nền tảng {nentang}", key=f"del_{i}"):
+                                            with st.spinner("Đang xóa nền tảng..."):
+                                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                                
+                                                # Nếu là nền tảng duy nhất, thì tương đương xóa cả bài
+                                                if len(group_df) == 1:
+                                                    start_row = int(i) + 5
+                                                    del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": start_row + 1}}}
+                                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
+                                                else:
+                                                    # Nếu đây là nền tảng đầu tiên, phải nhồi lại thông tin bài viết vào nền tảng kế tiếp trước khi xóa để chống mất data
+                                                    if i == min(group_df.index):
+                                                        next_idx = i + 1
+                                                        sheet_r_next = int(next_idx) + 6 # 1-based
+                                                        cells_to_rescue = [
+                                                            gspread.Cell(sheet_r_next, 2, str(first_row_data.get('NỘI DUNG_GROUP', ''))),
+                                                            gspread.Cell(sheet_r_next, 7, str(first_row_data.get('NGUỒN', ''))),
+                                                            gspread.Cell(sheet_r_next, 8, str(first_row_data.get('NHÂN SỰ', ''))),
+                                                            gspread.Cell(sheet_r_next, 9, str(first_row_data.get('TCSX', ''))),
+                                                            gspread.Cell(sheet_r_next, 10, str(first_row_data.get('LĐP', ''))),
+                                                            gspread.Cell(sheet_r_next, 11, str(first_row_data.get('GIỜ ĐĂNG', ''))),
+                                                            gspread.Cell(sheet_r_next, 12, str(first_row_data.get('NGÀY ĐĂNG', ''))),
+                                                            gspread.Cell(sheet_r_next, 13, str(first_row_data.get('LINK SẢN PHẨM', ''))),
+                                                            gspread.Cell(sheet_r_next, 14, str(first_row_data.get('LINK DUYỆT', ''))),
+                                                        ]
+                                                        wks_today.update_cells(cells_to_rescue)
+                                                    
+                                                    # Gửi lệnh xóa dòng an toàn
+                                                    row_0_based = int(i) + 5
+                                                    del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
+                                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
+                                                    
+                                                clear_app_caches()
+                                                st.success("Đã xóa xong!"); time.sleep(1); st.rerun()
+
                                         try: idx_st = OPTS_STATUS_TRUCSO.index(r['STATUS'])
                                         except: idx_st = 0
                                         st_val = st.selectbox(f"Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"st_{i}")
@@ -1346,7 +1392,7 @@ else:
                                 for r_idx, r_val in enumerate(all_rows):
                                     r_str = " ".join([str(x).upper() for x in r_val])
                                     if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in r_str or ("LINK" in r_str and "PHỤ TRÁCH" in r_str and "KPI" in r_str):
-                                        seeding_title_row = r_idx + 1 # 1-based index cho gspread
+                                        seeding_title_row = r_idx + 1 
                                         break
                                 
                                 # FIX STT Logic: Đếm KPI liên tục cho từng Nền tảng
@@ -1360,8 +1406,12 @@ else:
                                 plats = ts_nentang if ts_nentang else [""]
                                 merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
                                 rows_to_add = []
-                                for p in plats:
-                                    row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
+                                for idx_p, p in enumerate(plats):
+                                    # CHỈ BƠM DỮ LIỆU ĐỦ VÀO DÒNG ĐẦU TIÊN ĐỂ GOOGLE SHEETS MERGE NGON LÀNH
+                                    if idx_p == 0:
+                                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
+                                    else:
+                                        row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
                                     rows_to_add.append(row)
                                     start_stt += 1 # Cộng tự động cho STT từng bài
                                 
@@ -1376,6 +1426,19 @@ else:
                                 
                                 # ================= ALL-IN-ONE BATCH UPDATE FORMAT & MERGE =================
                                 fmt_requests = []
+                                
+                                # 0. CHỐNG KẾ THỪA MERGE TỪ DÒNG KHÁC GÂY LỖI
+                                fmt_requests.append({
+                                    "unmergeCells": {
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_to_format - 1, 
+                                            "endRowIndex": end_row_to_format - 1, 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 14
+                                        }
+                                    }
+                                })
                                 
                                 # 1. Kẻ viền (Borders), Căn giữa tuyệt đối (MIDDLE), ÉP TIMES NEW ROMAN
                                 fmt_requests.append({
@@ -1417,9 +1480,9 @@ else:
                                     }
                                 })
                                 
-                                # 3. Merge Cells các cột tĩnh
+                                # 3. Merge Cells các cột tĩnh (Chỉ chạy khi có >= 2 nền tảng)
                                 if len(rows_to_add) > 1:
-                                    # CHỈ Merge các cột Nội Dung (1) đến Link Duyệt. ĐÃ LOẠI STT(0) VÀ ĐỊNH DẠNG(2) THEO YÊU CẦU KPI
+                                    # CHỈ Merge các cột Nội Dung (1) đến Link Duyệt. ĐÃ BỎ STT(0) VÀ ĐỊNH DẠNG(2)
                                     cols_to_merge = [1, 6, 7, 8, 9, 10, 11, 12, 13]
                                     for col_idx in cols_to_merge:
                                         fmt_requests.append({
@@ -1492,9 +1555,9 @@ else:
                     key="edit_seeding_table"
                 )
                 
-                col_btn1, _ = st.columns([1, 4])
+                col_btn1, col_btn2 = st.columns([2, 4])
                 with col_btn1:
-                    if st.button("💾 LƯU CẬP NHẬT KẾT QUẢ", type="primary"):
+                    if st.button("💾 LƯU CẬP NHẬT KẾT QUẢ", type="primary", use_container_width=True):
                         with st.spinner("Đang lưu kết quả seeding..."):
                             cells_to_update_seed = []
                             for idx_s, r_s in edited_seed.iterrows():
@@ -1511,6 +1574,18 @@ else:
                                 sh_trucso.worksheet(tab_name_current).update_cells(cells_to_update_seed)
                                 clear_app_caches()
                                 st.success("Đã cập nhật bảng Seeding!"); time.sleep(1); st.rerun()
+
+                st.markdown("---")
+                del_sd_id = st.selectbox("Chọn STT Nhiệm vụ Seeding để xóa:", ["--"] + df_seed_edit['STT'].tolist())
+                if st.button("🗑️ XÓA NHIỆM VỤ NÀY"):
+                    if del_sd_id != "--":
+                        with st.spinner("Đang xóa..."):
+                            target_r = df_seed_edit[df_seed_edit['STT'] == del_sd_id].iloc[0]['ID_ROW']
+                            row_0_based = int(target_r) - 1
+                            del_req = {"deleteDimension": {"range": {"sheetId": ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
+                            ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).spreadsheet.batch_update({"requests": [del_req]})
+                            clear_app_caches()
+                            st.success("Đã xóa!"); time.sleep(1); st.rerun()
             else:
                 st.info("Chưa có nhiệm vụ Seeding nào trong ngày hôm nay.")
                 
@@ -1602,9 +1677,17 @@ else:
                                     })
                                 
                                 task_row_idx = end_append_row
+                                
+                                # Chống kế thừa Merge lỗi
+                                fmt_requests.append({
+                                    "unmergeCells": {
+                                        "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 14}
+                                    }
+                                })
+                                
                                 fmt_requests.append({
                                     "repeatCell": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx, "endRowIndex": task_row_idx + 1, "startColumnIndex": 0, "endColumnIndex": 7},
+                                        "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 7},
                                         "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE", "horizontalAlignment": "CENTER", "textFormat": {"fontFamily": "Times New Roman"}, "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}},
                                         "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment,textFormat,borders)"
                                     }
