@@ -407,7 +407,7 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
                 target_sheet = xls.sheet_names[0]
                 if kw == "LDP":
                     for sn in xls.sheet_names:
-                        if "LĐP" in sn.upper(): target_sheet = sn; break
+                        if "LĐP" in sn.upper() or "LÃNH ĐẠO PHÒNG" in sn.upper(): target_sheet = sn; break
                 else:
                     for sn in xls.sheet_names:
                         if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
@@ -428,6 +428,9 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
     return results
 
 def get_ldp_from_df(df, target_date_obj, list_nv):
+    """
+    THUẬT TOÁN ĐÃ ĐƯỢC CHỈNH SỬA: Quét chuẩn xác cấu trúc bảng LĐP, tìm hàng có số 1 và 15 để khoanh vùng ngày.
+    """
     if df is None or df.empty: return ""
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
@@ -436,33 +439,24 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     target_col = -1
     header_row = -1
     
-    for r in range(len(df)):
+    for r in range(1, len(df)):
         row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
         
-        if (d_str in row_vals_clean or d_str_02 in row_vals_clean):
-            if not ("1" in row_vals_clean or "01" in row_vals_clean or "15" in row_vals_clean):
-                continue
-                
-            indices = [i for i, x in enumerate(row_vals_clean) if x == d_str or x == d_str_02]
+        if ("1" in row_vals_clean and "15" in row_vals_clean):
+            header_row = r
+            month_row_idx = r - 1
             
-            for col_idx in indices:
-                is_correct_month = True
-                for pr in range(max(0, r-6), r):
-                    prev_row = " ".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
-                    if "tháng" in prev_row:
-                        months_found = re.findall(r'tháng\s*(\d+)', prev_row)
-                        if months_found:
-                            if str(m) not in months_found:
-                                is_correct_month = False
-                            else:
-                                is_correct_month = True
-                                break
-                
-                if is_correct_month:
-                    target_col = col_idx
-                    header_row = r
+            current_month = -1
+            for c in range(len(df.columns)):
+                m_val = str(df.iloc[month_row_idx, c]).lower().strip()
+                m_match = re.search(r'tháng\s*0?(\d+)', m_val)
+                if m_match:
+                    current_month = int(m_match.group(1))
+                    
+                if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
+                    target_col = c
                     break
-            
+                    
             if target_col != -1:
                 break
                 
@@ -473,12 +467,11 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
                 if "nghỉ" in val or "off" in val or "công tác" in val: continue
                 if "số" in val:
                     name = ""
-                    for c in [1, 2, 0, 3]:
-                        if c < len(df.columns):
-                            n = str(df.iloc[r, c]).strip()
-                            if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
-                                name = n
-                                break
+                    for c in range(min(4, len(df.columns))):
+                        n = str(df.iloc[r, c]).strip()
+                        if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
+                            name = n
+                            break
                     if name:
                         matched = match_nv(name, list_nv)
                         if matched: return matched
@@ -486,72 +479,42 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
 
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     """
-    SỬ DỤNG CHUNG THUẬT TOÁN ARRAY ĐỂ TÌM NGÀY CHO BTV/TCSX (Chống lỗi nhảy ngày 27, 28)
+    THUẬT TOÁN ĐÃ ĐƯỢC CHỈNH SỬA: Quét đích danh chuỗi "dd/mm/yyyy" cho tab VNTD_LỊCH TRỰC SỐ
     """
     res_tcsx = ""
     res_btv = []
     if df is None or df.empty: return res_tcsx, res_btv
     
-    d_str = str(target_date_obj.day)
-    d_str_02 = f"{target_date_obj.day:02d}"
+    d = target_date_obj.day
     m = target_date_obj.month
+    y = target_date_obj.year
+    date_patterns = [
+        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}"
+    ]
     
     target_col = -1
     header_row = -1
     
-    # Quét chuẩn xác từng cột theo lịch vạn niên trên file
     for r in range(len(df)):
-        row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
-        if (d_str in row_vals_clean or d_str_02 in row_vals_clean):
-            if not ("1" in row_vals_clean or "01" in row_vals_clean or "15" in row_vals_clean):
-                continue
-                
-            indices = [i for i, x in enumerate(row_vals_clean) if x == d_str or x == d_str_02]
-            for col_idx in indices:
-                is_correct_month = True
-                for pr in range(max(0, r-6), r):
-                    prev_row = " ".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
-                    if "tháng" in prev_row:
-                        months_found = re.findall(r'tháng\s*(\d+)', prev_row)
-                        if months_found:
-                            if str(m) not in months_found:
-                                is_correct_month = False
-                            else:
-                                is_correct_month = True
-                                break
-                if is_correct_month:
-                    target_col = col_idx
-                    header_row = r
-                    break
+        for c in range(len(df.columns)):
+            val = str(df.iloc[r, c]).strip().lower()
+            if any(p == val or val.endswith(f" {p}") or val.startswith(f"{p} ") for p in date_patterns):
+                target_col = c
+                header_row = r
+                break
         if target_col != -1: break
         
-    # Backup: Nếu form BTV không phải là các ngày đánh số thứ tự mà là dd/mm
-    if target_col == -1:
-        date_patterns = [
-            f"{d_str_02}/{m:02d}/{target_date_obj.year}", f"{d_str}/{m}/{target_date_obj.year}", 
-            f"{d_str_02}/{m:02d}", f"{d_str}/{m}", f"{d_str_02}.{m:02d}", f"{d_str}.{m}"
-        ]
-        for r in range(len(df)):
-            for c in range(len(df.columns)):
-                val = str(df.iloc[r, c]).strip().lower()
-                if any(p in val for p in date_patterns) and "tháng" not in val:
-                    target_col = c
-                    header_row = r
-                    break
-            if target_col != -1: break
-            
     if target_col != -1:
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
             if not val or val == 'nan': continue
             
             name = ""
-            for c in [1, 2, 0, 3]:
-                if c < len(df.columns):
-                    n = str(df.iloc[r, c]).strip()
-                    if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
-                        name = n
-                        break
+            for c in range(min(4, len(df.columns))):
+                n = str(df.iloc[r, c]).strip()
+                if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower() and "thứ" not in n.lower() and "tháng" not in n.lower():
+                    name = n
+                    break
             
             if name:
                 matched = match_nv(name, list_nv)
@@ -559,7 +522,7 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
                     if "tcsx" in val:
                         res_tcsx = matched
                     elif "số" in val or "btv" in val or "trực" in val or val == "x":
-                        if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val:
+                        if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val and "nghỉ" not in val and "off" not in val:
                             if matched not in res_btv: res_btv.append(matched)
     return res_tcsx, res_btv
 
@@ -1374,13 +1337,13 @@ else:
                     ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
                     ts_linkduyet = st.text_input("LINK GOOGLE DRIVE")
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
-                        with st.spinner("Đang thêm và tự động định dạng gộp ô (Merge Cells)..."):
+                        with st.spinner("Đang thêm và Tự động căn chỉnh Gộp ô (Merge)..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
                                 
-                                # FIX STT Logic: Lấy số lớn nhất từ các dòng trước đó
+                                # Lấy STT chuẩn (lấy số to nhất của các dòng trước đó)
                                 start_stt = 1
                                 if len(all_rows) > 5:
                                     for r in reversed(all_rows[5:]):
@@ -1399,9 +1362,10 @@ else:
                                 wks_today.append_rows(rows_to_add)
                                 end_row_to_format = len(all_rows) + len(rows_to_add)
                                 
-                                # ================= FIX GỘP Ô & ĐỊNH DẠNG ALL IN ONE =================
+                                # ================= ALL-IN-ONE BATCH UPDATE FORMAT & MERGE =================
                                 fmt_requests = []
-                                # 1. Kẻ viền (Borders), Gióng giữa ô (Vertical Align) toàn bộ hàng mới
+                                
+                                # 1. Kẻ viền (Borders), Căn giữa tuyệt đối (MIDDLE)
                                 fmt_requests.append({
                                     "repeatCell": {
                                         "range": {
@@ -1440,10 +1404,10 @@ else:
                                     }
                                 })
                                 
-                                # 3. Merge Cells các cột tĩnh
+                                # 3. Merge Cells các cột tĩnh theo đúng yêu cầu
                                 if len(rows_to_add) > 1:
-                                    # Các cột cần merge theo format chuẩn (Bỏ qua Nền tảng, Status, Checklist, Giờ, Ngày, Link SP)
-                                    cols_to_merge = [0, 1, 2, 6, 7, 8, 9, 13]
+                                    # CHỈ Merge các cột: STT(0), NỘI DUNG(1), NGUỒN(6), NHÂN SỰ(7), TCSX(8), LĐP(9), GIỜ ĐĂNG(10), NGÀY ĐĂNG(11), LINK SP(12), LINK DUYỆT(13)
+                                    cols_to_merge = [0, 1, 6, 7, 8, 9, 10, 11, 12, 13]
                                     for col_idx in cols_to_merge:
                                         fmt_requests.append({
                                             "mergeCells": {
@@ -1454,14 +1418,14 @@ else:
                                                     "startColumnIndex": col_idx,
                                                     "endColumnIndex": col_idx + 1
                                                 },
-                                                "mergeType": "MERGE_ALL"
+                                                "mergeType": "MERGE_COLUMNS"
                                             }
                                         })
                                 
                                 try:
                                     wks_today.spreadsheet.batch_update({"requests": fmt_requests})
                                 except Exception as merge_err:
-                                    st.error(f"Lỗi Format/Merge tự động: {merge_err}")
+                                    st.error(f"Lỗi Format/Merge API: {merge_err}")
                                 
                                 clear_app_caches()
                                 st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
