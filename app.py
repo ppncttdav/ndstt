@@ -991,7 +991,6 @@ else:
                         break
                 
                 df_main = df_content.iloc[:split_idx].copy()
-                df_seeding = df_content.iloc[split_idx+1:].copy()
                 
                 df_context = df_main.copy()
                 def is_valid_row(row):
@@ -1427,18 +1426,7 @@ else:
                                 # ================= ALL-IN-ONE BATCH UPDATE FORMAT & MERGE =================
                                 fmt_requests = []
                                 
-                                # 0. CHỐNG KẾ THỪA MERGE TỪ DÒNG KHÁC GÂY LỖI
-                                fmt_requests.append({
-                                    "unmergeCells": {
-                                        "range": {
-                                            "sheetId": wks_today.id, 
-                                            "startRowIndex": start_row_to_format - 1, 
-                                            "endRowIndex": end_row_to_format - 1, 
-                                            "startColumnIndex": 0, 
-                                            "endColumnIndex": 14
-                                        }
-                                    }
-                                })
+                                # ĐÃ XÓA LỆNH unmergeCells GÂY LỖI CRASH
                                 
                                 # 1. Kẻ viền (Borders), Căn giữa tuyệt đối (MIDDLE), ÉP TIMES NEW ROMAN
                                 fmt_requests.append({
@@ -1678,12 +1666,7 @@ else:
                                 
                                 task_row_idx = end_append_row
                                 
-                                # Chống kế thừa Merge lỗi
-                                fmt_requests.append({
-                                    "unmergeCells": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 14}
-                                    }
-                                })
+                                # ĐÃ XÓA LỆNH unmergeCells GÂY LỖI CRASH
                                 
                                 fmt_requests.append({
                                     "repeatCell": {
@@ -1902,7 +1885,7 @@ else:
             if da_filter != "-- TẤT CẢ --": df_display = df_display[df_display['DuAn']==da_filter]
             edits = {f"{r['TenViec']} ({i+2})": {"id": i, "lv": check_quyen(curr_name, role, r, df_duan)} for i, r in df_display.iterrows() if check_quyen(curr_name, role, r, df_duan)>0}
             if edits:
-                with st.expander("🛠️ CẬP NHẬT TRẠNG THÁI", expanded=True):
+                with st.expander("🛠️ CẬP TRẠNG THÁI", expanded=True):
                     s_task = st.selectbox("CHỌN ĐẦU VIỆC:", list(edits.keys()))
                     if s_task:
                         row_idx = edits[s_task]['id']; lv = edits[s_task]['lv']; r_dat = df_display.iloc[row_idx]
