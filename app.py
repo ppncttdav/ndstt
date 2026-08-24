@@ -428,6 +428,11 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
     return results
 
 def get_ldp_from_df(df, target_date_obj, list_nv):
+    """
+    THUẬT TOÁN ĐÃ ĐƯỢC CHỈNH SỬA: 
+    - Lấy ĐÚNG người có chữ "số" trong ô (theo quy ước LĐP)
+    - Nhận diện đúng tháng kể cả khi một hàng chứa cả "Tháng 8", "Tháng 9"
+    """
     if df is None or df.empty: return ""
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
@@ -436,33 +441,50 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     target_col = -1
     header_row = -1
     
-    # 1. Tìm cột chứa ngày bằng cách quyét dòng có các số ngày (1..31)
     for r in range(len(df)):
+        # Chuẩn hóa để chống các ngày bị format thành 26.0
         row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
-        if (d_str in row_vals_clean or d_str_02 in row_vals_clean) and ("1" in row_vals_clean or "01" in row_vals_clean):
-            # Xác nhận xem có bị nhầm tháng không bằng regex (tìm ngược lên các dòng trên)
-            is_correct_month = True
-            for pr in range(max(0, r-5), r):
-                prev_row = "".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
-                if "tháng" in prev_row:
-                    match = re.search(r'tháng\s*(\d+)', prev_row)
-                    if match and int(match.group(1)) != m:
-                        is_correct_month = False
+        
+        # Nếu dòng có chứa ngày mục tiêu
+        if (d_str in row_vals_clean or d_str_02 in row_vals_clean):
+            # Xác nhận xem dòng này có phải dòng tiêu đề Ngày không (phải chứa mùng 1 hoặc 15)
+            if not ("1" in row_vals_clean or "01" in row_vals_clean or "15" in row_vals_clean):
+                continue
+                
+            indices = [i for i, x in enumerate(row_vals_clean) if x == d_str or x == d_str_02]
             
-            if is_correct_month:
-                target_col = row_vals_clean.index(d_str) if d_str in row_vals_clean else row_vals_clean.index(d_str_02)
-                header_row = r
+            for col_idx in indices:
+                is_correct_month = True
+                # Rà ngược lên trên để tìm xem dòng Header là tháng mấy
+                for pr in range(max(0, r-6), r):
+                    prev_row = " ".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
+                    if "tháng" in prev_row:
+                        # Bóc toàn bộ các tháng có trong dòng bằng Regex (đề phòng tháng 8 và tháng 9 chung dòng)
+                        months_found = re.findall(r'tháng\s*(\d+)', prev_row)
+                        if months_found:
+                            if str(m) not in months_found:
+                                is_correct_month = False
+                            else:
+                                is_correct_month = True
+                                break
+                
+                if is_correct_month:
+                    target_col = col_idx
+                    header_row = r
+                    break
+            
+            if target_col != -1:
                 break
                 
     if target_col != -1 and header_row != -1:
-        # 2. Tìm người trực theo marker
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
             if val and val != 'nan':
-                # Bỏ qua các marker nghỉ phép, họp chung, công tác
+                # Bỏ qua các marker nghỉ
                 if "nghỉ" in val or "off" in val or "công tác" in val: continue
-                # Các marker xác nhận trực LĐP (Số, Trực, X, TS)
-                if "số" in val or "trực" in val or "ts" in val or val == "x" or val == "v":
+                
+                # QUY ƯỚC LĐP: CHỈ AI CÓ CHỮ "SỐ" THÌ LÀ NGƯỜI DUYỆT (bỏ qua Trực PS, TS)
+                if "số" in val:
                     name = ""
                     for c in [1, 2, 0, 3]:
                         if c < len(df.columns):
@@ -770,11 +792,12 @@ def dinh_dang_dep(wks, roster_vals):
 
 def dinh_dang_dong_moi(wks, start_row, end_row):
     try:
+        # Thay đổi verticalAlignment thành MIDDLE để khi merge dòng chữ nằm giữa ô rất đẹp
         req = [{
             "repeatCell": {
                 "range": {"sheetId": wks.id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 14},
                 "cell": {"userEnteredFormat": {
-                    "wrapStrategy": "WRAP", "verticalAlignment": "TOP",
+                    "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE",
                     "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
                 }},
                 "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,borders)"
@@ -925,7 +948,6 @@ else:
                     for i, r_t in enumerate(ROLES_HEADER):
                         with cols[i%3]: 
                             def_val = default_roster[i]
-                            # Ép Lãnh đạo xuất hiện ngay cả khi chưa tạo tài khoản trong hệ thống
                             options = ["--"] + list_nv
                             if def_val and def_val != "--" and def_val not in options:
                                 options.append(def_val)
@@ -1350,7 +1372,7 @@ else:
                     ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
                     ts_linkduyet = st.text_input("LINK GOOGLE DRIVE")
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
-                        with st.spinner("Đang lưu..."):
+                        with st.spinner("Đang thêm và Tự động gộp dòng (Merge Cells)..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 wks_today = sh_trucso.worksheet(tab_name_current)
@@ -1380,7 +1402,7 @@ else:
                                 # --- FIX GỘP Ô (MERGE CELLS) TRỰC TIẾP TRÊN SHEET ---
                                 if len(rows_to_add) > 1:
                                     merge_requests = []
-                                    # Các cột cần merge theo format (trừ Nền tảng, Status, Checklist, Thời gian, Link SP)
+                                    # Các cột cần merge theo format chuẩn (trừ Nền tảng, Status, Checklist, Thời gian, Link SP)
                                     cols_to_merge = [0, 1, 2, 6, 7, 8, 9, 13]
                                     for col_idx in cols_to_merge:
                                         merge_requests.append({
@@ -1392,16 +1414,16 @@ else:
                                                     "startColumnIndex": col_idx,
                                                     "endColumnIndex": col_idx + 1
                                                 },
-                                                "mergeType": "MERGE_ALL"
+                                                "mergeType": "MERGE_COLUMNS"
                                             }
                                         })
                                     try:
                                         wks_today.spreadsheet.batch_update({"requests": merge_requests})
                                     except Exception as merge_err:
-                                        logger.error(f"Lỗi khi thực hiện gộp ô: {merge_err}")
+                                        st.error(f"Lỗi khi thực hiện gộp ô (Merge API): {merge_err}")
                                 
                                 clear_app_caches()
-                                st.success("ĐÃ THÊM MỚI!"); time.sleep(1); st.rerun()
+                                st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
     # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
