@@ -428,11 +428,6 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
     return results
 
 def get_ldp_from_df(df, target_date_obj, list_nv):
-    """
-    THUẬT TOÁN ĐÃ ĐƯỢC CHỈNH SỬA: 
-    - Lấy ĐÚNG người có chữ "số" trong ô (theo quy ước LĐP)
-    - Nhận diện đúng tháng kể cả khi một hàng chứa cả "Tháng 8", "Tháng 9"
-    """
     if df is None or df.empty: return ""
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
@@ -442,12 +437,9 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     header_row = -1
     
     for r in range(len(df)):
-        # Chuẩn hóa để chống các ngày bị format thành 26.0
         row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
         
-        # Nếu dòng có chứa ngày mục tiêu
         if (d_str in row_vals_clean or d_str_02 in row_vals_clean):
-            # Xác nhận xem dòng này có phải dòng tiêu đề Ngày không (phải chứa mùng 1 hoặc 15)
             if not ("1" in row_vals_clean or "01" in row_vals_clean or "15" in row_vals_clean):
                 continue
                 
@@ -455,11 +447,9 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
             
             for col_idx in indices:
                 is_correct_month = True
-                # Rà ngược lên trên để tìm xem dòng Header là tháng mấy
                 for pr in range(max(0, r-6), r):
                     prev_row = " ".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
                     if "tháng" in prev_row:
-                        # Bóc toàn bộ các tháng có trong dòng bằng Regex (đề phòng tháng 8 và tháng 9 chung dòng)
                         months_found = re.findall(r'tháng\s*(\d+)', prev_row)
                         if months_found:
                             if str(m) not in months_found:
@@ -480,10 +470,7 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
             if val and val != 'nan':
-                # Bỏ qua các marker nghỉ
                 if "nghỉ" in val or "off" in val or "công tác" in val: continue
-                
-                # QUY ƯỚC LĐP: CHỈ AI CÓ CHỮ "SỐ" THÌ LÀ NGƯỜI DUYỆT (bỏ qua Trực PS, TS)
                 if "số" in val:
                     name = ""
                     for c in [1, 2, 0, 3]:
@@ -498,30 +485,61 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     return ""
 
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
+    """
+    SỬ DỤNG CHUNG THUẬT TOÁN ARRAY ĐỂ TÌM NGÀY CHO BTV/TCSX (Chống lỗi nhảy ngày 27, 28)
+    """
     res_tcsx = ""
     res_btv = []
     if df is None or df.empty: return res_tcsx, res_btv
     
-    d = target_date_obj.day
+    d_str = str(target_date_obj.day)
+    d_str_02 = f"{target_date_obj.day:02d}"
     m = target_date_obj.month
-    y = target_date_obj.year
-    date_patterns = [
-        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}",
-        f"{y}-{m:02d}-{d:02d}", f"{d:02d}.{m:02d}", f"{d}.{m}"
-    ]
     
     target_col = -1
     header_row = -1
     
+    # Quét chuẩn xác từng cột theo lịch vạn niên trên file
     for r in range(len(df)):
-        for c in range(len(df.columns)):
-            val = str(df.iloc[r, c]).strip().lower()
-            if any(p in val for p in date_patterns) and "tháng" not in val:
-                target_col = c
-                header_row = r
-                break
+        row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
+        if (d_str in row_vals_clean or d_str_02 in row_vals_clean):
+            if not ("1" in row_vals_clean or "01" in row_vals_clean or "15" in row_vals_clean):
+                continue
+                
+            indices = [i for i, x in enumerate(row_vals_clean) if x == d_str or x == d_str_02]
+            for col_idx in indices:
+                is_correct_month = True
+                for pr in range(max(0, r-6), r):
+                    prev_row = " ".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
+                    if "tháng" in prev_row:
+                        months_found = re.findall(r'tháng\s*(\d+)', prev_row)
+                        if months_found:
+                            if str(m) not in months_found:
+                                is_correct_month = False
+                            else:
+                                is_correct_month = True
+                                break
+                if is_correct_month:
+                    target_col = col_idx
+                    header_row = r
+                    break
         if target_col != -1: break
         
+    # Backup: Nếu form BTV không phải là các ngày đánh số thứ tự mà là dd/mm
+    if target_col == -1:
+        date_patterns = [
+            f"{d_str_02}/{m:02d}/{target_date_obj.year}", f"{d_str}/{m}/{target_date_obj.year}", 
+            f"{d_str_02}/{m:02d}", f"{d_str}/{m}", f"{d_str_02}.{m:02d}", f"{d_str}.{m}"
+        ]
+        for r in range(len(df)):
+            for c in range(len(df.columns)):
+                val = str(df.iloc[r, c]).strip().lower()
+                if any(p in val for p in date_patterns) and "tháng" not in val:
+                    target_col = c
+                    header_row = r
+                    break
+            if target_col != -1: break
+            
     if target_col != -1:
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
@@ -788,22 +806,6 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'C6:C100', validation_dinh_dang)
         set_data_validation_for_cell_range(wks, 'D6:D100', validation_nen_tang)
         set_data_validation_for_cell_range(wks, 'E6:E100', validation_status)
-    except Exception: pass
-
-def dinh_dang_dong_moi(wks, start_row, end_row):
-    try:
-        # Thay đổi verticalAlignment thành MIDDLE để khi merge dòng chữ nằm giữa ô rất đẹp
-        req = [{
-            "repeatCell": {
-                "range": {"sheetId": wks.id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 14},
-                "cell": {"userEnteredFormat": {
-                    "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE",
-                    "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
-                }},
-                "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,borders)"
-            }
-        }]
-        wks.spreadsheet.batch_update({"requests": req})
     except Exception: pass
 
 def update_wks_canhan(action_type, data):
@@ -1372,13 +1374,13 @@ else:
                     ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
                     ts_linkduyet = st.text_input("LINK GOOGLE DRIVE")
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
-                        with st.spinner("Đang thêm và Tự động gộp dòng (Merge Cells)..."):
+                        with st.spinner("Đang thêm và tự động định dạng gộp ô (Merge Cells)..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
                                 
-                                # FIX STT Logic: Lấy số lớn nhất từ các dòng trước đó để không bị lệch do merge cells
+                                # FIX STT Logic: Lấy số lớn nhất từ các dòng trước đó
                                 start_stt = 1
                                 if len(all_rows) > 5:
                                     for r in reversed(all_rows[5:]):
@@ -1397,15 +1399,53 @@ else:
                                 wks_today.append_rows(rows_to_add)
                                 end_row_to_format = len(all_rows) + len(rows_to_add)
                                 
-                                dinh_dang_dong_moi(wks_today, start_row_to_format, end_row_to_format)
+                                # ================= FIX GỘP Ô & ĐỊNH DẠNG ALL IN ONE =================
+                                fmt_requests = []
+                                # 1. Kẻ viền (Borders), Gióng giữa ô (Vertical Align) toàn bộ hàng mới
+                                fmt_requests.append({
+                                    "repeatCell": {
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_to_format - 1, 
+                                            "endRowIndex": end_row_to_format, 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 14
+                                        },
+                                        "cell": {"userEnteredFormat": {
+                                            "wrapStrategy": "WRAP", 
+                                            "verticalAlignment": "MIDDLE",
+                                            "borders": {
+                                                "top": {"style": "SOLID"}, 
+                                                "bottom": {"style": "SOLID"}, 
+                                                "left": {"style": "SOLID"}, 
+                                                "right": {"style": "SOLID"}
+                                            }
+                                        }},
+                                        "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,borders)"
+                                    }
+                                })
                                 
-                                # --- FIX GỘP Ô (MERGE CELLS) TRỰC TIẾP TRÊN SHEET ---
+                                # 2. Căn giữa chữ STT theo chiều ngang (Center Horizontal)
+                                fmt_requests.append({
+                                    "repeatCell": {
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_to_format - 1, 
+                                            "endRowIndex": end_row_to_format, 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 1
+                                        },
+                                        "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                                        "fields": "userEnteredFormat(horizontalAlignment)"
+                                    }
+                                })
+                                
+                                # 3. Merge Cells các cột tĩnh
                                 if len(rows_to_add) > 1:
-                                    merge_requests = []
-                                    # Các cột cần merge theo format chuẩn (trừ Nền tảng, Status, Checklist, Thời gian, Link SP)
+                                    # Các cột cần merge theo format chuẩn (Bỏ qua Nền tảng, Status, Checklist, Giờ, Ngày, Link SP)
                                     cols_to_merge = [0, 1, 2, 6, 7, 8, 9, 13]
                                     for col_idx in cols_to_merge:
-                                        merge_requests.append({
+                                        fmt_requests.append({
                                             "mergeCells": {
                                                 "range": {
                                                     "sheetId": wks_today.id,
@@ -1414,17 +1454,18 @@ else:
                                                     "startColumnIndex": col_idx,
                                                     "endColumnIndex": col_idx + 1
                                                 },
-                                                "mergeType": "MERGE_COLUMNS"
+                                                "mergeType": "MERGE_ALL"
                                             }
                                         })
-                                    try:
-                                        wks_today.spreadsheet.batch_update({"requests": merge_requests})
-                                    except Exception as merge_err:
-                                        st.error(f"Lỗi khi thực hiện gộp ô (Merge API): {merge_err}")
+                                
+                                try:
+                                    wks_today.spreadsheet.batch_update({"requests": fmt_requests})
+                                except Exception as merge_err:
+                                    st.error(f"Lỗi Format/Merge tự động: {merge_err}")
                                 
                                 clear_app_caches()
                                 st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
-                            except Exception as e: st.error(f"Lỗi: {e}")
+                            except Exception as e: st.error(f"Lỗi thêm mới: {e}")
 
     # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
     with tabs[1]:
