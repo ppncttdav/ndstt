@@ -751,8 +751,8 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # KÍCH THƯỚC CỘT: Cột A (STT - 90), Cột F (Sản xuất Video - 120) Đã nới siêu rộng
-    col_widths = [90, 250, 110, 120, 120, 120, 100, 120, 120, 100, 80, 90, 150, 250]
+    # NỚI RỘNG CỘT TỐI ĐA (Cột A - 100px, Cột F - 150px)
+    col_widths = [100, 250, 120, 120, 120, 150, 120, 120, 120, 100, 100, 100, 150, 250]
     for c_idx, w in enumerate(col_widths):
         requests.append({
             "updateDimensionProperties": {
@@ -770,7 +770,7 @@ def dinh_dang_dep(wks, roster_vals):
         validation_nen_tang = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_NEN_TANG), showCustomUi=True)
         validation_status = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_STATUS_TRUCSO), showCustomUi=True)
         
-        # ĐÃ FIX: Chỉ áp dụng Dropdown list cho 30 dòng để tránh lỗi "dài bất tận"
+        # CHỈ SET DATA VALIDATION CHO 30 DÒNG ĐỂ SHEET KHÔNG BỊ TRÀN DÀI BẤT TẬN
         set_data_validation_for_cell_range(wks, 'C6:C30', validation_dinh_dang)
         set_data_validation_for_cell_range(wks, 'D6:D30', validation_nen_tang)
         set_data_validation_for_cell_range(wks, 'E6:E30', validation_status)
@@ -977,7 +977,6 @@ else:
                 _, df_content, _, _ = fetch_vo_truc_so(tab_name_current)
                 if df_content.empty: return
                 
-                # Bóc tách siêu chuẩn Vỏ tin bài và Vỏ Seeding
                 split_idx = len(df_content)
                 for i, row in df_content.iterrows():
                     b_val = str(row.get('NỘI DUNG', '')).strip().upper()
@@ -1102,7 +1101,6 @@ else:
             df_seeding_st = pd.DataFrame()
             
             if not df_content_static.empty:
-                # Tách riêng df_main_st chuẩn xác
                 split_idx_st = len(df_content_static)
                 for i, row in df_content_static.iterrows():
                     b_val = str(row.get('NỘI DUNG', '')).strip().upper()
@@ -1202,25 +1200,61 @@ else:
                                             st.markdown(ans)
                         # ---------------------------------
                         
-                        # --- NÚT XÓA BÀI VIẾT TỔNG THỂ ---
-                        col_del_main, _ = st.columns([1, 4])
-                        with col_del_main:
-                            if st.button("🗑️ XÓA TOÀN BỘ BÀI VIẾT NÀY", type="secondary", use_container_width=True):
-                                with st.spinner("Đang xóa an toàn..."):
-                                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                    wks_today = sh_trucso.worksheet(tab_name_current)
-                                    min_idx = min(group_df.index)
-                                    max_idx = max(group_df.index)
-                                    start_row = int(min_idx) + 5
-                                    end_row = int(max_idx) + 5 + 1
-                                    del_req = {
-                                        "deleteDimension": {
-                                            "range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": end_row}
-                                        }
-                                    }
-                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                    clear_app_caches()
-                                    st.success("Đã xóa bài viết thành công!"); time.sleep(1); st.rerun()
+                        # --- KHU VỰC XÓA AN TOÀN (ĐƯA RA NGOÀI FORM) ---
+                        with st.expander("🗑️ QUẢN LÝ XÓA BÀI VIẾT / NỀN TẢNG", expanded=False):
+                            st.warning("Hành động này sẽ xóa dữ liệu trực tiếp trên Google Sheets. Hãy cẩn trọng!")
+                            c_del_1, c_del_2 = st.columns(2)
+                            
+                            with c_del_1:
+                                if st.button("🗑️ XÓA TOÀN BỘ BÀI VIẾT NÀY", type="primary", use_container_width=True):
+                                    with st.spinner("Đang xóa an toàn..."):
+                                        sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                        wks_today = sh_trucso.worksheet(tab_name_current)
+                                        min_idx = min(group_df.index)
+                                        max_idx = max(group_df.index)
+                                        start_row = int(min_idx) + 5
+                                        end_row = int(max_idx) + 5 + 1
+                                        del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": end_row}}}
+                                        wks_today.spreadsheet.batch_update({"requests": [del_req]})
+                                        clear_app_caches()
+                                        st.success("Đã xóa bài viết thành công!"); time.sleep(1); st.rerun()
+
+                            with c_del_2:
+                                for i, r in group_df.iterrows():
+                                    nentang = r['NỀN TẢNG']
+                                    if st.button(f"❌ Xóa nền tảng: {nentang}", key=f"del_out_{i}", use_container_width=True):
+                                        with st.spinner(f"Đang xóa {nentang}..."):
+                                            sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                            wks_today = sh_trucso.worksheet(tab_name_current)
+                                            
+                                            # Nếu là nền tảng duy nhất, tương đương xóa cả bài
+                                            if len(group_df) == 1:
+                                                start_row = int(i) + 5
+                                                del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": start_row + 1}}}
+                                                wks_today.spreadsheet.batch_update({"requests": [del_req]})
+                                            else:
+                                                # Cứu dữ liệu nếu xóa nền tảng đầu tiên
+                                                if i == min(group_df.index):
+                                                    next_idx = i + 1
+                                                    sheet_r_next = int(next_idx) + 6 # 1-based
+                                                    cells_to_rescue = [
+                                                        gspread.Cell(sheet_r_next, 2, str(first_row_data.get('NỘI DUNG_GROUP', ''))),
+                                                        gspread.Cell(sheet_r_next, 7, str(first_row_data.get('NGUỒN', ''))),
+                                                        gspread.Cell(sheet_r_next, 8, str(first_row_data.get('NHÂN SỰ', ''))),
+                                                        gspread.Cell(sheet_r_next, 9, str(first_row_data.get('TCSX', ''))),
+                                                        gspread.Cell(sheet_r_next, 10, str(first_row_data.get('LĐP', ''))),
+                                                        gspread.Cell(sheet_r_next, 11, str(first_row_data.get('GIỜ ĐĂNG', ''))),
+                                                        gspread.Cell(sheet_r_next, 12, str(first_row_data.get('NGÀY ĐĂNG', ''))),
+                                                        gspread.Cell(sheet_r_next, 13, str(first_row_data.get('LINK SẢN PHẨM', ''))),
+                                                        gspread.Cell(sheet_r_next, 14, str(first_row_data.get('LINK DUYỆT', ''))),
+                                                    ]
+                                                    wks_today.update_cells(cells_to_rescue)
+                                                
+                                                row_0_based = int(i) + 5
+                                                del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
+                                                wks_today.spreadsheet.batch_update({"requests": [del_req]})
+                                            clear_app_caches()
+                                            st.success("Đã xóa nền tảng thành công!"); time.sleep(1); st.rerun()
 
                         with st.form("edit_group_form"):
                             col_left, col_right = st.columns([1.2, 1])
@@ -1263,50 +1297,13 @@ else:
 
                             with col_right:
                                 st.markdown("**:orange[3. TRẠNG THÁI TỪNG NỀN TẢNG]**")
-                                st.caption("Cập nhật giờ/link sản phẩm hoặc XÓA nền tảng không cần thiết.")
+                                st.caption("Cập nhật trạng thái, giờ lên bài hoặc link sản phẩm.")
                                 
                                 platform_updates = {}
                                 for i, r in group_df.iterrows():
                                     nentang = r['NỀN TẢNG']
                                     
                                     with st.expander(f"🔹 {nentang} (Status: {r['STATUS']})", expanded=False):
-                                        # Tính năng xóa nền tảng đơn lẻ
-                                        if st.button(f"🗑️ Xóa nền tảng {nentang}", key=f"del_{i}"):
-                                            with st.spinner("Đang xóa nền tảng..."):
-                                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                                wks_today = sh_trucso.worksheet(tab_name_current)
-                                                
-                                                # Nếu là nền tảng duy nhất, thì tương đương xóa cả bài
-                                                if len(group_df) == 1:
-                                                    start_row = int(i) + 5
-                                                    del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": start_row + 1}}}
-                                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                                else:
-                                                    # Nếu đây là nền tảng đầu tiên, phải nhồi lại thông tin bài viết vào nền tảng kế tiếp trước khi xóa để chống mất data
-                                                    if i == min(group_df.index):
-                                                        next_idx = i + 1
-                                                        sheet_r_next = int(next_idx) + 6 # 1-based
-                                                        cells_to_rescue = [
-                                                            gspread.Cell(sheet_r_next, 2, str(first_row_data.get('NỘI DUNG_GROUP', ''))),
-                                                            gspread.Cell(sheet_r_next, 7, str(first_row_data.get('NGUỒN', ''))),
-                                                            gspread.Cell(sheet_r_next, 8, str(first_row_data.get('NHÂN SỰ', ''))),
-                                                            gspread.Cell(sheet_r_next, 9, str(first_row_data.get('TCSX', ''))),
-                                                            gspread.Cell(sheet_r_next, 10, str(first_row_data.get('LĐP', ''))),
-                                                            gspread.Cell(sheet_r_next, 11, str(first_row_data.get('GIỜ ĐĂNG', ''))),
-                                                            gspread.Cell(sheet_r_next, 12, str(first_row_data.get('NGÀY ĐĂNG', ''))),
-                                                            gspread.Cell(sheet_r_next, 13, str(first_row_data.get('LINK SẢN PHẨM', ''))),
-                                                            gspread.Cell(sheet_r_next, 14, str(first_row_data.get('LINK DUYỆT', ''))),
-                                                        ]
-                                                        wks_today.update_cells(cells_to_rescue)
-                                                    
-                                                    # Gửi lệnh xóa dòng an toàn
-                                                    row_0_based = int(i) + 5
-                                                    del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
-                                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                                    
-                                                clear_app_caches()
-                                                st.success("Đã xóa xong!"); time.sleep(1); st.rerun()
-
                                         try: idx_st = OPTS_STATUS_TRUCSO.index(r['STATUS'])
                                         except: idx_st = 0
                                         st_val = st.selectbox(f"Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"st_{i}")
@@ -1380,13 +1377,12 @@ else:
                     ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
                     ts_linkduyet = st.text_input("LINK GOOGLE DRIVE")
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
-                        with st.spinner("Đang thêm và Tự động căn chỉnh Gộp ô (Merge)..."):
+                        with st.spinner("Đang thêm và tự động định dạng Gộp ô (Merge)..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
                                 
-                                # Tìm ranh giới của Seeding (Nếu có) để chèn lên trên
                                 seeding_title_row = -1
                                 for r_idx, r_val in enumerate(all_rows):
                                     r_str = " ".join([str(x).upper() for x in r_val])
@@ -1394,7 +1390,6 @@ else:
                                         seeding_title_row = r_idx + 1 
                                         break
                                 
-                                # FIX STT Logic: Đếm KPI liên tục cho từng Nền tảng
                                 start_stt = 1
                                 end_search = seeding_title_row - 1 if seeding_title_row != -1 else len(all_rows)
                                 for r in reversed(all_rows[5:end_search]):
@@ -1406,13 +1401,12 @@ else:
                                 merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
                                 rows_to_add = []
                                 for idx_p, p in enumerate(plats):
-                                    # CHỈ BƠM DỮ LIỆU ĐỦ VÀO DÒNG ĐẦU TIÊN ĐỂ GOOGLE SHEETS MERGE NGON LÀNH
                                     if idx_p == 0:
                                         row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
                                     else:
                                         row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
                                     rows_to_add.append(row)
-                                    start_stt += 1 # Cộng tự động cho STT từng bài
+                                    start_stt += 1 
                                 
                                 if seeding_title_row != -1:
                                     wks_today.insert_rows(rows_to_add, row=seeding_title_row)
@@ -1423,12 +1417,11 @@ else:
                                     
                                 end_row_to_format = start_row_to_format + len(rows_to_add)
                                 
-                                # ================= ALL-IN-ONE BATCH UPDATE FORMAT & MERGE =================
+                                # ================= CẮT 2 NHỊP API ĐỂ CHỐNG LỖI GOOGLE SHEETS =================
                                 fmt_requests = []
+                                merge_requests = []
                                 
-                                # ĐÃ XÓA LỆNH unmergeCells GÂY LỖI CRASH
-                                
-                                # 1. Kẻ viền (Borders), Căn giữa tuyệt đối (MIDDLE), ÉP TIMES NEW ROMAN
+                                # Nhịp 1: Kẻ viền (Borders), Căn giữa tuyệt đối (MIDDLE), ÉP TIMES NEW ROMAN
                                 fmt_requests.append({
                                     "repeatCell": {
                                         "range": {
@@ -1443,17 +1436,14 @@ else:
                                             "verticalAlignment": "MIDDLE",
                                             "textFormat": {"fontFamily": "Times New Roman"},
                                             "borders": {
-                                                "top": {"style": "SOLID"}, 
-                                                "bottom": {"style": "SOLID"}, 
-                                                "left": {"style": "SOLID"}, 
-                                                "right": {"style": "SOLID"}
+                                                "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
+                                                "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
                                             }
                                         }},
                                         "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
                                     }
                                 })
                                 
-                                # 2. Căn giữa chữ STT theo chiều ngang (Center Horizontal)
                                 fmt_requests.append({
                                     "repeatCell": {
                                         "range": {
@@ -1468,12 +1458,13 @@ else:
                                     }
                                 })
                                 
-                                # 3. Merge Cells các cột tĩnh (Chỉ chạy khi có >= 2 nền tảng)
+                                wks_today.spreadsheet.batch_update({"requests": fmt_requests})
+                                
+                                # Nhịp 2: Merge Cells (ĐÃ BỎ STT VÀ ĐỊNH DẠNG THEO KPI)
                                 if len(rows_to_add) > 1:
-                                    # CHỈ Merge các cột Nội Dung (1) đến Link Duyệt. ĐÃ BỎ STT(0) VÀ ĐỊNH DẠNG(2)
                                     cols_to_merge = [1, 6, 7, 8, 9, 10, 11, 12, 13]
                                     for col_idx in cols_to_merge:
-                                        fmt_requests.append({
+                                        merge_requests.append({
                                             "mergeCells": {
                                                 "range": {
                                                     "sheetId": wks_today.id,
@@ -1482,14 +1473,10 @@ else:
                                                     "startColumnIndex": col_idx,
                                                     "endColumnIndex": col_idx + 1
                                                 },
-                                                "mergeType": "MERGE_COLUMNS"
+                                                "mergeType": "MERGE_ALL"
                                             }
                                         })
-                                
-                                try:
-                                    wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-                                except Exception as merge_err:
-                                    st.error(f"Lỗi Format/Merge API: {merge_err}")
+                                    wks_today.spreadsheet.batch_update({"requests": merge_requests})
                                 
                                 clear_app_caches()
                                 st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
@@ -1628,7 +1615,6 @@ else:
                                 wks_today.append_rows(rows_to_append)
                                 end_append_row = start_append_row + len(rows_to_append) - 1
                                 
-                                # Format Headers (Nếu vừa tạo mới)
                                 if header_row == -1:
                                     fmt_requests.append({
                                         "mergeCells": {
@@ -1665,9 +1651,6 @@ else:
                                     })
                                 
                                 task_row_idx = end_append_row
-                                
-                                # ĐÃ XÓA LỆNH unmergeCells GÂY LỖI CRASH
-                                
                                 fmt_requests.append({
                                     "repeatCell": {
                                         "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 7},
@@ -1885,7 +1868,7 @@ else:
             if da_filter != "-- TẤT CẢ --": df_display = df_display[df_display['DuAn']==da_filter]
             edits = {f"{r['TenViec']} ({i+2})": {"id": i, "lv": check_quyen(curr_name, role, r, df_duan)} for i, r in df_display.iterrows() if check_quyen(curr_name, role, r, df_duan)>0}
             if edits:
-                with st.expander("🛠️ CẬP TRẠNG THÁI", expanded=True):
+                with st.expander("🛠️ CẬP NHẬT TRẠNG THÁI", expanded=True):
                     s_task = st.selectbox("CHỌN ĐẦU VIỆC:", list(edits.keys()))
                     if s_task:
                         row_idx = edits[s_task]['id']; lv = edits[s_task]['lv']; r_dat = df_display.iloc[row_idx]
