@@ -681,7 +681,6 @@ def dinh_dang_dep(wks, roster_vals):
     wks.update('A1:N5', [row1, row2, row3, row4, row5])
     requests = []
     
-    # 1. Ép toàn bộ Sheet thành Times New Roman
     requests.append({
         "repeatCell": {
             "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1000, "startColumnIndex": 0, "endColumnIndex": 20},
@@ -977,6 +976,7 @@ else:
                 _, df_content, _, _ = fetch_vo_truc_so(tab_name_current)
                 if df_content.empty: return
                 
+                # Bóc tách siêu chuẩn Vỏ tin bài và Vỏ Seeding
                 split_idx = len(df_content)
                 for i, row in df_content.iterrows():
                     b_val = str(row.get('NỘI DUNG', '')).strip().upper()
@@ -1227,16 +1227,14 @@ else:
                                             sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                             wks_today = sh_trucso.worksheet(tab_name_current)
                                             
-                                            # Nếu là nền tảng duy nhất, tương đương xóa cả bài
                                             if len(group_df) == 1:
                                                 start_row = int(i) + 5
                                                 del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": start_row + 1}}}
                                                 wks_today.spreadsheet.batch_update({"requests": [del_req]})
                                             else:
-                                                # Cứu dữ liệu nếu xóa nền tảng đầu tiên
                                                 if i == min(group_df.index):
                                                     next_idx = i + 1
-                                                    sheet_r_next = int(next_idx) + 6 # 1-based
+                                                    sheet_r_next = int(next_idx) + 6 
                                                     cells_to_rescue = [
                                                         gspread.Cell(sheet_r_next, 2, str(first_row_data.get('NỘI DUNG_GROUP', ''))),
                                                         gspread.Cell(sheet_r_next, 7, str(first_row_data.get('NGUỒN', ''))),
@@ -1268,7 +1266,7 @@ else:
                                 e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                 
                                 st.markdown("---")
-                                if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                 e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                 e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                 
@@ -1377,25 +1375,23 @@ else:
                     ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
                     ts_linkduyet = st.text_input("LINK GOOGLE DRIVE")
                     if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
-                        with st.spinner("Đang thêm và tự động định dạng Gộp ô (Merge)..."):
+                        with st.spinner("Đang thêm và Tự động căn chỉnh Gộp ô (Merge)..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
                                 
-                                seeding_title_row = -1
-                                for r_idx, r_val in enumerate(all_rows):
-                                    r_str = " ".join([str(x).upper() for x in r_val])
-                                    if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in r_str or ("LINK" in r_str and "PHỤ TRÁCH" in r_str and "KPI" in r_str):
-                                        seeding_title_row = r_idx + 1 
-                                        break
-                                
+                                # 1. TÌM VỊ TRÍ ĐỂ CHÈN (DÒNG TRỐNG HOẶC TRÊN SEEDING)
                                 start_stt = 1
-                                end_search = seeding_title_row - 1 if seeding_title_row != -1 else len(all_rows)
-                                for r in reversed(all_rows[5:end_search]):
-                                    if len(r) > 0 and str(r[0]).strip().isdigit():
-                                        start_stt = int(str(r[0]).strip()) + 1
+                                start_row_idx = 5
+                                for i, r in enumerate(all_rows[5:]):
+                                    r_str = "".join([str(x).strip() for x in r])
+                                    if "PHÂN CÔNG TRẢ LỜI" in r_str.upper():
                                         break
+                                    if r_str: # Có dữ liệu
+                                        start_row_idx = i + 5 + 1
+                                        if len(r) > 0 and str(r[0]).strip().isdigit():
+                                            start_stt = int(str(r[0]).strip()) + 1
 
                                 plats = ts_nentang if ts_nentang else [""]
                                 merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
@@ -1406,16 +1402,10 @@ else:
                                     else:
                                         row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
                                     rows_to_add.append(row)
-                                    start_stt += 1 
+                                    start_stt += 1 # Cộng STT cho từng nền tảng
                                 
-                                if seeding_title_row != -1:
-                                    wks_today.insert_rows(rows_to_add, row=seeding_title_row)
-                                    start_row_to_format = seeding_title_row
-                                else:
-                                    start_row_to_format = len(all_rows) + 1
-                                    wks_today.append_rows(rows_to_add)
-                                    
-                                end_row_to_format = start_row_to_format + len(rows_to_add)
+                                # Chèn dữ liệu vào sheet
+                                wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
                                 
                                 # ================= CẮT 2 NHỊP API ĐỂ CHỐNG LỖI GOOGLE SHEETS =================
                                 fmt_requests = []
@@ -1426,8 +1416,8 @@ else:
                                     "repeatCell": {
                                         "range": {
                                             "sheetId": wks_today.id, 
-                                            "startRowIndex": start_row_to_format - 1, 
-                                            "endRowIndex": end_row_to_format - 1, 
+                                            "startRowIndex": start_row_idx, 
+                                            "endRowIndex": start_row_idx + len(rows_to_add), 
                                             "startColumnIndex": 0, 
                                             "endColumnIndex": 14
                                         },
@@ -1448,8 +1438,8 @@ else:
                                     "repeatCell": {
                                         "range": {
                                             "sheetId": wks_today.id, 
-                                            "startRowIndex": start_row_to_format - 1, 
-                                            "endRowIndex": end_row_to_format - 1, 
+                                            "startRowIndex": start_row_idx, 
+                                            "endRowIndex": start_row_idx + len(rows_to_add), 
                                             "startColumnIndex": 0, 
                                             "endColumnIndex": 1
                                         },
@@ -1460,7 +1450,7 @@ else:
                                 
                                 wks_today.spreadsheet.batch_update({"requests": fmt_requests})
                                 
-                                # Nhịp 2: Merge Cells (ĐÃ BỎ STT VÀ ĐỊNH DẠNG THEO KPI)
+                                # Nhịp 2: Gộp ô (ĐÃ BỎ CỘT STT VÀ ĐỊNH DẠNG ĐỂ ĐẾM KPI)
                                 if len(rows_to_add) > 1:
                                     cols_to_merge = [1, 6, 7, 8, 9, 10, 11, 12, 13]
                                     for col_idx in cols_to_merge:
@@ -1468,12 +1458,12 @@ else:
                                             "mergeCells": {
                                                 "range": {
                                                     "sheetId": wks_today.id,
-                                                    "startRowIndex": start_row_to_format - 1,
-                                                    "endRowIndex": end_row_to_format - 1,
+                                                    "startRowIndex": start_row_idx,
+                                                    "endRowIndex": start_row_idx + len(rows_to_add),
                                                     "startColumnIndex": col_idx,
                                                     "endColumnIndex": col_idx + 1
                                                 },
-                                                "mergeType": "MERGE_ALL"
+                                                "mergeType": "MERGE_COLUMNS"
                                             }
                                         })
                                     wks_today.spreadsheet.batch_update({"requests": merge_requests})
@@ -1615,6 +1605,7 @@ else:
                                 wks_today.append_rows(rows_to_append)
                                 end_append_row = start_append_row + len(rows_to_append) - 1
                                 
+                                # Format Headers (Nếu vừa tạo mới)
                                 if header_row == -1:
                                     fmt_requests.append({
                                         "mergeCells": {
