@@ -67,7 +67,6 @@ def init_ai_engine():
     return {
         "cache": {},
         "queue": set(),
-        # Tốc độ Groq cực cao và Rate Limit lớn (1000 RPM), mở 3 luồng quét ngầm song song
         "executor": concurrent.futures.ThreadPoolExecutor(max_workers=3)
     }
 
@@ -433,46 +432,47 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
     m = target_date_obj.month
-    month_str1 = f"tháng{m}"
-    month_str2 = f"tháng{m:02d}"
     
-    month_row_idx = -1
-    for r in range(len(df)-1, -1, -1):
-        row_joined = "".join([str(x).lower().strip() for x in df.iloc[r].values if str(x).lower() != 'nan'])
-        if month_str1 in row_joined or month_str2 in row_joined:
-            month_row_idx = r
-            break
-            
-    if month_row_idx == -1: month_row_idx = 0
     target_col = -1
     header_row = -1
     
-    for r in range(month_row_idx, min(month_row_idx + 15, len(df))):
-        row_vals = [str(x).strip() for x in df.iloc[r].values]
-        row_vals_clean = [v[:-2] if v.endswith('.0') else v for v in row_vals]
-        if d_str in row_vals_clean or d_str_02 in row_vals_clean:
-            if "1" in row_vals_clean or "15" in row_vals_clean or str((target_date_obj.day % 28) + 1) in row_vals_clean:
+    # 1. Tìm cột chứa ngày bằng cách quyét dòng có các số ngày (1..31)
+    for r in range(len(df)):
+        row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
+        if (d_str in row_vals_clean or d_str_02 in row_vals_clean) and ("1" in row_vals_clean or "01" in row_vals_clean):
+            # Xác nhận xem có bị nhầm tháng không bằng regex (tìm ngược lên các dòng trên)
+            is_correct_month = True
+            for pr in range(max(0, r-5), r):
+                prev_row = "".join([str(x).lower().strip() for x in df.iloc[pr].values if str(x).lower() != 'nan'])
+                if "tháng" in prev_row:
+                    match = re.search(r'tháng\s*(\d+)', prev_row)
+                    if match and int(match.group(1)) != m:
+                        is_correct_month = False
+            
+            if is_correct_month:
                 target_col = row_vals_clean.index(d_str) if d_str in row_vals_clean else row_vals_clean.index(d_str_02)
                 header_row = r
                 break
                 
     if target_col != -1 and header_row != -1:
+        # 2. Tìm người trực theo marker
         for r in range(header_row + 1, len(df)):
-            row_joined = "".join([str(x).lower() for x in df.iloc[r].values if str(x).lower() != 'nan'])
-            if "tháng" in row_joined and str(m) not in row_joined: break
-                
             val = str(df.iloc[r, target_col]).lower().strip()
-            if "số" in val or "trực" in val or val == "x" or "ts" in val or "họp" in val:
-                name = ""
-                for c in [1, 2, 0, 3]:
-                    if c < len(df.columns):
-                        n = str(df.iloc[r, c]).strip()
-                        if n and n != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
-                            name = n
-                            break
-                if name:
-                    matched = match_nv(name, list_nv)
-                    if matched: return matched
+            if val and val != 'nan':
+                # Bỏ qua các marker nghỉ phép, họp chung, công tác
+                if "nghỉ" in val or "off" in val or "công tác" in val: continue
+                # Các marker xác nhận trực LĐP (Số, Trực, X, TS)
+                if "số" in val or "trực" in val or "ts" in val or val == "x" or val == "v":
+                    name = ""
+                    for c in [1, 2, 0, 3]:
+                        if c < len(df.columns):
+                            n = str(df.iloc[r, c]).strip()
+                            if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
+                                name = n
+                                break
+                    if name:
+                        matched = match_nv(name, list_nv)
+                        if matched: return matched
     return ""
 
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
@@ -924,8 +924,14 @@ else:
                     cols = st.columns(3); roster_vals = []
                     for i, r_t in enumerate(ROLES_HEADER):
                         with cols[i%3]: 
-                            def_idx = list_nv.index(default_roster[i]) + 1 if default_roster[i] in list_nv else 0
-                            val = st.selectbox(f"**{r_t}**", ["--"]+list_nv, index=def_idx, key=f"cr_{i}")
+                            def_val = default_roster[i]
+                            # Ép Lãnh đạo xuất hiện ngay cả khi chưa tạo tài khoản trong hệ thống
+                            options = ["--"] + list_nv
+                            if def_val and def_val != "--" and def_val not in options:
+                                options.append(def_val)
+                            
+                            def_idx = options.index(def_val) if def_val in options else 0
+                            val = st.selectbox(f"**{r_t}**", options, index=def_idx, key=f"cr_{i}")
                             roster_vals.append(val if val != "--" else "")
                     
                     if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
@@ -1349,14 +1355,21 @@ else:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                 wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
-                                start_stt = max(0, len(all_rows) - 5) + 1
+                                
+                                # FIX STT Logic: Lấy số lớn nhất từ các dòng trước đó để không bị lệch do merge cells
+                                start_stt = 1
+                                if len(all_rows) > 5:
+                                    for r in reversed(all_rows[5:]):
+                                        if len(r) > 0 and str(r[0]).strip().isdigit():
+                                            start_stt = int(str(r[0]).strip()) + 1
+                                            break
+
                                 plats = ts_nentang if ts_nentang else [""]
                                 merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
                                 rows_to_add = []
                                 for p in plats:
                                     row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
                                     rows_to_add.append(row)
-                                    start_stt += 1
                                 
                                 start_row_to_format = len(all_rows) + 1
                                 wks_today.append_rows(rows_to_add)
@@ -1364,8 +1377,31 @@ else:
                                 
                                 dinh_dang_dong_moi(wks_today, start_row_to_format, end_row_to_format)
                                 
+                                # --- FIX GỘP Ô (MERGE CELLS) TRỰC TIẾP TRÊN SHEET ---
+                                if len(rows_to_add) > 1:
+                                    merge_requests = []
+                                    # Các cột cần merge theo format (trừ Nền tảng, Status, Checklist, Thời gian, Link SP)
+                                    cols_to_merge = [0, 1, 2, 6, 7, 8, 9, 13]
+                                    for col_idx in cols_to_merge:
+                                        merge_requests.append({
+                                            "mergeCells": {
+                                                "range": {
+                                                    "sheetId": wks_today.id,
+                                                    "startRowIndex": start_row_to_format - 1,
+                                                    "endRowIndex": end_row_to_format,
+                                                    "startColumnIndex": col_idx,
+                                                    "endColumnIndex": col_idx + 1
+                                                },
+                                                "mergeType": "MERGE_ALL"
+                                            }
+                                        })
+                                    try:
+                                        wks_today.spreadsheet.batch_update({"requests": merge_requests})
+                                    except Exception as merge_err:
+                                        logger.error(f"Lỗi khi thực hiện gộp ô: {merge_err}")
+                                
                                 clear_app_caches()
-                                st.success("ĐÃ THÊM MỚI!"); st.rerun()
+                                st.success("ĐÃ THÊM MỚI!"); time.sleep(1); st.rerun()
                             except Exception as e: st.error(f"Lỗi: {e}")
 
     # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
