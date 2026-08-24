@@ -428,9 +428,6 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
     return results
 
 def get_ldp_from_df(df, target_date_obj, list_nv):
-    """
-    THUẬT TOÁN ĐÃ ĐƯỢC CHỈNH SỬA: Quét chuẩn xác cấu trúc bảng LĐP, tìm hàng có số 1 và 15 để khoanh vùng ngày.
-    """
     if df is None or df.empty: return ""
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
@@ -478,9 +475,6 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     return ""
 
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
-    """
-    THUẬT TOÁN ĐÃ ĐƯỢC CHỈNH SỬA: Quét đích danh chuỗi "dd/mm/yyyy" cho tab VNTD_LỊCH TRỰC SỐ
-    """
     res_tcsx = ""
     res_btv = []
     if df is None or df.empty: return res_tcsx, res_btv
@@ -748,7 +742,8 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    col_widths = [40, 250, 100, 120, 120, 60, 100, 120, 120, 100, 80, 90, 150, 250]
+    # ĐÃ FIX: Nới rộng cột A (90) và cột F (120) để chống ép chữ
+    col_widths = [90, 250, 110, 120, 120, 120, 100, 120, 120, 100, 80, 90, 150, 250]
     for c_idx, w in enumerate(col_widths):
         requests.append({
             "updateDimensionProperties": {
@@ -1343,7 +1338,7 @@ else:
                                 wks_today = sh_trucso.worksheet(tab_name_current)
                                 all_rows = wks_today.get_all_values()
                                 
-                                # Lấy STT chuẩn (lấy số to nhất của các dòng trước đó)
+                                # ĐÃ FIX: Lấy STT chuẩn (Lấy số đếm của ô STT dưới cùng và cộng 1)
                                 start_stt = 1
                                 if len(all_rows) > 5:
                                     for r in reversed(all_rows[5:]):
@@ -1357,6 +1352,8 @@ else:
                                 for p in plats:
                                     row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
                                     rows_to_add.append(row)
+                                    # CỘNG STT TỰ ĐỘNG CHO TỪNG BÀI/NỀN TẢNG THEO YÊU CẦU ĐẾM KPI
+                                    start_stt += 1
                                 
                                 start_row_to_format = len(all_rows) + 1
                                 wks_today.append_rows(rows_to_add)
@@ -1404,10 +1401,11 @@ else:
                                     }
                                 })
                                 
-                                # 3. Merge Cells các cột tĩnh theo đúng yêu cầu
+                                # 3. Merge Cells các cột tĩnh
                                 if len(rows_to_add) > 1:
-                                    # CHỈ Merge các cột: STT(0), NỘI DUNG(1), NGUỒN(6), NHÂN SỰ(7), TCSX(8), LĐP(9), GIỜ ĐĂNG(10), NGÀY ĐĂNG(11), LINK SP(12), LINK DUYỆT(13)
-                                    cols_to_merge = [0, 1, 6, 7, 8, 9, 10, 11, 12, 13]
+                                    # CHỈ Merge các cột: NỘI DUNG(1), NGUỒN(6), NHÂN SỰ(7), TCSX(8), LĐP(9), GIỜ ĐĂNG(10), NGÀY ĐĂNG(11), LINK SP(12), LINK DUYỆT(13)
+                                    # KHÔNG MERGE: STT(0), ĐỊNH DẠNG(2), NỀN TẢNG(3), STATUS(4), CHECK(5)
+                                    cols_to_merge = [1, 6, 7, 8, 9, 10, 11, 12, 13]
                                     for col_idx in cols_to_merge:
                                         fmt_requests.append({
                                             "mergeCells": {
