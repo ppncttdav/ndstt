@@ -751,7 +751,7 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    # KÍCH THƯỚC CỘT: Cột A (STT - 90), Cột F (Sản xuất Video - 120) Đã nới siêu rộng
+    # KÍCH THƯỚC CỘT
     col_widths = [90, 250, 110, 120, 120, 120, 100, 120, 120, 100, 80, 90, 150, 250]
     for c_idx, w in enumerate(col_widths):
         requests.append({
@@ -977,7 +977,7 @@ else:
                         break
                 
                 df_main = df_content.iloc[:split_idx].copy()
-                df_seeding_raw = df_content.iloc[split_idx:].copy()
+                df_seeding = df_content.iloc[split_idx+1:].copy()
                 
                 df_context = df_main.copy()
                 def is_valid_row(row):
@@ -1077,12 +1077,41 @@ else:
                         }
                     )
 
+                seeding_clean = []
+                if not df_seeding.empty:
+                    for _, r in df_seeding.iterrows():
+                        task = str(r.get('NỘI DUNG', '')).strip()
+                        if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
+                        seeding_clean.append({
+                            "STT": str(r.get('STT', '')).replace('nan', '').strip(),
+                            "Nhiệm vụ": task,
+                            "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
+                            "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
+                            "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
+                            "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
+                        })
+                if seeding_clean:
+                    st.markdown("---")
+                    st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
+                    st.dataframe(
+                        pd.DataFrame(seeding_clean), 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
+                        }
+                    )
+
             real_time_dashboard_and_table(filter_opt)
             st.divider()
 
             # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT =================
             st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
             st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cảnh báo rủi ro', 'Cần sửa' được đẩy lên đầu)")
+            
+            # CÀI ĐẶT MẶC ĐỊNH CHỐNG LỖI KHI BẢNG TRẮNG
+            df_main_st = pd.DataFrame()
+            df_seeding_st = pd.DataFrame()
             
             if not df_content_static.empty:
                 # Tách riêng df_main_st chuẩn xác
