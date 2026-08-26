@@ -407,7 +407,7 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
                 target_sheet = xls.sheet_names[0]
                 if kw == "LDP":
                     for sn in xls.sheet_names:
-                        if "LĐP" in sn.upper() or "LÃNH ĐẠO PHÒNG" in sn.upper(): target_sheet = sn; break
+                        if "LĐP" in sn.upper(): target_sheet = sn; break
                 else:
                     for sn in xls.sheet_names:
                         if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
@@ -759,6 +759,53 @@ def dinh_dang_dep(wks, roster_vals):
                 "properties": {"pixelSize": w}, "fields": "pixelSize"
             }
         })
+
+    # --- TÍNH NĂNG TỰ ĐỘNG ĐỔ MÀU "CHIP" DROPDOWN TRÊN GOOGLE SHEETS ---
+    chip_colors = {
+        "Facebook": (0.09, 0.47, 0.95, 1, 1, 1),
+        "Youtube": (1.0, 0.0, 0.0, 1, 1, 1),
+        "YouTube": (1.0, 0.0, 0.0, 1, 1, 1),
+        "TikTok": (0.88, 0.88, 0.88, 0, 0, 0),
+        "Threads": (0.0, 0.0, 0.0, 1, 1, 1),
+        "LinkedIn": (0.04, 0.4, 0.76, 1, 1, 1),
+        "Instagram": (0.88, 0.19, 0.58, 1, 1, 1),
+        "Web": (1.0, 0.82, 0.2, 0, 0, 0),
+        "App": (0.96, 0.5, 0.1, 1, 1, 1),
+        "Posted": (0.06, 0.62, 0.35, 1, 1, 1),
+        "Đã đăng": (0.06, 0.62, 0.35, 1, 1, 1),
+        "Đã duyệt/Chờ đăng": (0.2, 0.7, 0.4, 1, 1, 1),
+        "Scheduled": (0.2, 0.7, 0.4, 1, 1, 1),
+        "Cảnh báo rủi ro": (0.9, 0.16, 0.16, 1, 1, 1),
+        "Yêu cầu sửa (TCSX)": (0.9, 0.4, 0.4, 1, 1, 1),
+        "Yêu cầu sửa (LĐP)": (0.9, 0.4, 0.4, 1, 1, 1),
+        "Hủy": (0.4, 0.4, 0.4, 1, 1, 1),
+        "Gửi duyệt TCSX": (0.2, 0.5, 0.8, 1, 1, 1),
+        "Gửi duyệt LĐP": (0.2, 0.5, 0.8, 1, 1, 1),
+        "Đang biên tập": (0.9, 0.9, 0.9, 0, 0, 0),
+        "Chờ xử lý": (0.9, 0.9, 0.9, 0, 0, 0),
+    }
+
+    for val, (br, bg, bb, tr, tg, tb) in chip_colors.items():
+        requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [
+                        {"sheetId": wks.id, "startRowIndex": 5, "endRowIndex": 1000, "startColumnIndex": 3, "endColumnIndex": 5}
+                    ],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "TEXT_EQ",
+                            "values": [{"userEnteredValue": val}]
+                        },
+                        "format": {
+                            "backgroundColor": {"red": br, "green": bg, "blue": bb},
+                            "textFormat": {"foregroundColor": {"red": tr, "green": tg, "blue": tb}, "bold": True}
+                        }
+                    }
+                },
+                "index": 0
+            }
+        })
         
     try:
         wks.spreadsheet.batch_update({"requests": requests})
@@ -773,6 +820,21 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'C6:C30', validation_dinh_dang)
         set_data_validation_for_cell_range(wks, 'D6:D30', validation_nen_tang)
         set_data_validation_for_cell_range(wks, 'E6:E30', validation_status)
+    except Exception: pass
+
+def dinh_dang_dong_moi(wks, start_row, end_row):
+    try:
+        req = [{
+            "repeatCell": {
+                "range": {"sheetId": wks.id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 14},
+                "cell": {"userEnteredFormat": {
+                    "wrapStrategy": "WRAP", "verticalAlignment": "TOP",
+                    "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+                }},
+                "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,borders)"
+            }
+        }]
+        wks.spreadsheet.batch_update({"requests": req})
     except Exception: pass
 
 def update_wks_canhan(action_type, data):
@@ -1089,6 +1151,31 @@ else:
                         }
                     )
 
+                seeding_clean = []
+                if not df_seeding.empty:
+                    for _, r in df_seeding.iterrows():
+                        task = str(r.get('NỘI DUNG', '')).strip()
+                        if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
+                        seeding_clean.append({
+                            "STT": str(r.get('STT', '')).replace('nan', '').strip(),
+                            "Nhiệm vụ": task,
+                            "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
+                            "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
+                            "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
+                            "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
+                        })
+                if seeding_clean:
+                    st.markdown("---")
+                    st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
+                    st.dataframe(
+                        pd.DataFrame(seeding_clean), 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
+                        }
+                    )
+
             real_time_dashboard_and_table(filter_opt)
             st.divider()
 
@@ -1266,7 +1353,7 @@ else:
                                 e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                 
                                 st.markdown("---")
-                                if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                 e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                 e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                 
