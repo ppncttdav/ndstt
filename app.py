@@ -290,7 +290,14 @@ ROLES_HEADER = [
 
 OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
 OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Threads", "LinkedIn", "Instagram", "Web", "App"]
-OPTS_STATUS_TRUCSO = ["Chờ xử lý", "Đang biên tập", "Cảnh báo rủi ro", "Gửi duyệt TCSX", "Yêu cầu sửa (TCSX)", "Gửi duyệt LĐP", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Đã đăng", "Scheduled", "Posted", "Hủy"]
+
+# ĐÃ SẮP XẾP LẠI THEO ĐÚNG YÊU CẦU TIỆN SỬ DỤNG NHẤT
+OPTS_STATUS_TRUCSO = [
+    "Gửi duyệt TCSX", "Gửi duyệt LĐP", "Scheduled", "Đã đăng", "Posted",
+    "Chờ xử lý", "Đang biên tập", "Cảnh báo rủi ro", 
+    "Yêu cầu sửa (TCSX)", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Hủy"
+]
+
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
 CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
 
@@ -348,8 +355,9 @@ def fetch_vo_truc_so(tab_name):
     for _ in range(2):
         try:
             data = wks.get_all_values()
-            roster_names = data[2][1:] if len(data) > 2 else []
-            r_roles = data[1][1:] if len(data) > 1 else []
+            # FIX: Lấy chuẩn 8 cột từ A đến H
+            r_roles = (data[1] + [""] * 8)[:8] if len(data) > 1 else [""] * 8
+            roster_names = (data[2] + [""] * 8)[:8] if len(data) > 2 else [""] * 8
             
             if len(data) > 5: 
                 num_cols = len(CONTENT_HEADER)
@@ -407,7 +415,7 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
                 target_sheet = xls.sheet_names[0]
                 if kw == "LDP":
                     for sn in xls.sheet_names:
-                        if "LĐP" in sn.upper(): target_sheet = sn; break
+                        if "LĐP" in sn.upper() or "LÃNH ĐẠO PHÒNG" in sn.upper(): target_sheet = sn; break
                 else:
                     for sn in xls.sheet_names:
                         if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
@@ -760,7 +768,45 @@ def dinh_dang_dep(wks, roster_vals):
             }
         })
 
-    # --- TÍNH NĂNG TỰ ĐỘNG ĐỔ MÀU "CHIP" DROPDOWN TRÊN GOOGLE SHEETS ---
+    # ================= MÀU SẮC ĐỘNG CHO BTV VÀ TRẠNG THÁI =================
+    btv_colors = [
+        {"red": 0.85, "green": 0.93, "blue": 0.98}, # Xanh da trời nhạt
+        {"red": 0.88, "green": 0.95, "blue": 0.88}, # Xanh lá nhạt
+        {"red": 1.0, "green": 0.95, "blue": 0.8},   # Vàng nhạt
+        {"red": 0.95, "green": 0.88, "blue": 0.95}  # Tím nhạt
+    ]
+    btv_indices = [2, 5, 6, 7] # Tương ứng Cột C, F, G, H trong Sheet
+    
+    for i, col_idx in enumerate(btv_indices):
+        # Tô màu nền nhẹ cho phần tên của các BTV trên Header
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": wks.id, "startRowIndex": 1, "endRowIndex": 3, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1},
+                "cell": {"userEnteredFormat": {"backgroundColor": btv_colors[i]}},
+                "fields": "userEnteredFormat.backgroundColor"
+            }
+        })
+        
+        # Áp dụng Conditional Formatting: Đổ màu ô NỘI DUNG tương ứng với BTV nhận tin đó
+        btv_name = roster_vals[col_idx]
+        if btv_name and btv_name != "--":
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{"sheetId": wks.id, "startRowIndex": 5, "endRowIndex": 1000, "startColumnIndex": 1, "endColumnIndex": 2}],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": f'=SEARCH("{btv_name}", $H6)'}]
+                            },
+                            "format": {"backgroundColor": btv_colors[i]}
+                        }
+                    },
+                    "index": 0
+                }
+            })
+
+    # Định dạng các "Chip" màu tự động cho Trạng Thái và Nền tảng
     chip_colors = {
         "Facebook": (0.09, 0.47, 0.95, 1, 1, 1),
         "Youtube": (1.0, 0.0, 0.0, 1, 1, 1),
@@ -771,18 +817,18 @@ def dinh_dang_dep(wks, roster_vals):
         "Instagram": (0.88, 0.19, 0.58, 1, 1, 1),
         "Web": (1.0, 0.82, 0.2, 0, 0, 0),
         "App": (0.96, 0.5, 0.1, 1, 1, 1),
+        "Gửi duyệt TCSX": (0.16, 0.43, 0.75, 1, 1, 1), # Blue
+        "Gửi duyệt LĐP": (0.42, 0.22, 0.6, 1, 1, 1),   # Purple
+        "Scheduled": (0.98, 0.68, 0.0, 0, 0, 0),       # Orange
+        "Đã đăng": (0.06, 0.62, 0.35, 1, 1, 1),        # Green
         "Posted": (0.06, 0.62, 0.35, 1, 1, 1),
-        "Đã đăng": (0.06, 0.62, 0.35, 1, 1, 1),
         "Đã duyệt/Chờ đăng": (0.2, 0.7, 0.4, 1, 1, 1),
-        "Scheduled": (0.2, 0.7, 0.4, 1, 1, 1),
+        "Chờ xử lý": (0.9, 0.9, 0.9, 0, 0, 0),
+        "Đang biên tập": (0.9, 0.9, 0.9, 0, 0, 0),
         "Cảnh báo rủi ro": (0.9, 0.16, 0.16, 1, 1, 1),
         "Yêu cầu sửa (TCSX)": (0.9, 0.4, 0.4, 1, 1, 1),
         "Yêu cầu sửa (LĐP)": (0.9, 0.4, 0.4, 1, 1, 1),
         "Hủy": (0.4, 0.4, 0.4, 1, 1, 1),
-        "Gửi duyệt TCSX": (0.2, 0.5, 0.8, 1, 1, 1),
-        "Gửi duyệt LĐP": (0.2, 0.5, 0.8, 1, 1, 1),
-        "Đang biên tập": (0.9, 0.9, 0.9, 0, 0, 0),
-        "Chờ xử lý": (0.9, 0.9, 0.9, 0, 0, 0),
     }
 
     for val, (br, bg, bb, tr, tg, tb) in chip_colors.items():
@@ -817,9 +863,9 @@ def dinh_dang_dep(wks, roster_vals):
         validation_status = DataValidationRule(condition=BooleanCondition('ONE_OF_LIST', OPTS_STATUS_TRUCSO), showCustomUi=True)
         
         # CHỈ SET DATA VALIDATION CHO 30 DÒNG ĐỂ SHEET KHÔNG BỊ TRÀN DÀI BẤT TẬN
-        set_data_validation_for_cell_range(wks, 'C6:C30', validation_dinh_dang)
-        set_data_validation_for_cell_range(wks, 'D6:D30', validation_nen_tang)
-        set_data_validation_for_cell_range(wks, 'E6:E30', validation_status)
+        set_data_validation_for_cell_range(wks, 'C6:C35', validation_dinh_dang)
+        set_data_validation_for_cell_range(wks, 'D6:D35', validation_nen_tang)
+        set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
     except Exception: pass
 
 def dinh_dang_dong_moi(wks, start_row, end_row):
@@ -991,7 +1037,6 @@ else:
                         with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                # ĐÃ FIX: Chỉ tạo ra 30 dòng để tránh kéo dài bất tận
                                 w = sh_trucso.add_worksheet(title=tab_name_current, rows=30, cols=20, index=0)
                                 dinh_dang_dep(w, roster_vals)
                                 tu_dong_cap_nhat_thong_ke(date_str_display, roster_vals)
@@ -1052,6 +1097,7 @@ else:
                         break
                 
                 df_main = df_content.iloc[:split_idx].copy()
+                df_seeding = df_content.iloc[split_idx:].copy() if split_idx < len(df_content) else pd.DataFrame()
                 
                 df_context = df_main.copy()
                 def is_valid_row(row):
@@ -1201,7 +1247,7 @@ else:
                         break
                         
                 df_main_st = df_content_static.iloc[:split_idx_st].copy()
-                df_seeding_st = df_content_static.iloc[split_idx_st:].copy()
+                df_seeding_st = df_content_static.iloc[split_idx_st:].copy() if split_idx_st < len(df_content_static) else pd.DataFrame()
                     
                 df_context_st = df_main_st.copy()
                 
@@ -1454,10 +1500,11 @@ else:
                     c1, c2 = st.columns([3, 1])
                     ts_noidung = c1.text_area("Tên bài / Nội dung", placeholder="Nhập nội dung...")
                     ts_dinhdang = c2.selectbox("Định dạng", OPTS_DINH_DANG)
-                    c3, c4, c5 = st.columns(3)
+                    c3, c4, c5, c6 = st.columns(4)
                     ts_nentang = c3.multiselect("Nền tảng xuất bản", OPTS_NEN_TANG)
                     ts_status = c4.selectbox("Trạng thái", OPTS_STATUS_TRUCSO)
                     ts_nhansu = c5.multiselect("BTV Thực hiện", list_nv, default=[curr_name] if curr_name in list_nv else None)
+                    ts_check = c6.text_input("Ghi chú Check", placeholder="VD: OK, Sửa video...")
                     st.markdown("**NỘI DUNG CAPTION/TEXT:**")
                     ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
                     ts_linkduyet = st.text_input("LINK GOOGLE DRIVE")
@@ -1475,7 +1522,7 @@ else:
                                     r_str = "".join([str(x).strip() for x in r])
                                     if "PHÂN CÔNG TRẢ LỜI" in r_str.upper():
                                         break
-                                    if r_str: # Có dữ liệu
+                                    if r_str: 
                                         start_row_idx = i + 5 + 1
                                         if len(r) > 0 and str(r[0]).strip().isdigit():
                                             start_stt = int(str(r[0]).strip()) + 1
@@ -1485,13 +1532,12 @@ else:
                                 rows_to_add = []
                                 for idx_p, p in enumerate(plats):
                                     if idx_p == 0:
-                                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, "", "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
+                                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, "", ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
                                     else:
                                         row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
                                     rows_to_add.append(row)
-                                    start_stt += 1 # Cộng STT cho từng nền tảng
+                                    start_stt += 1 
                                 
-                                # Chèn dữ liệu vào sheet
                                 wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
                                 
                                 # ================= CẮT 2 NHỊP API ĐỂ CHỐNG LỖI GOOGLE SHEETS =================
@@ -1537,9 +1583,10 @@ else:
                                 
                                 wks_today.spreadsheet.batch_update({"requests": fmt_requests})
                                 
-                                # Nhịp 2: Gộp ô (ĐÃ BỎ CỘT STT VÀ ĐỊNH DẠNG ĐỂ ĐẾM KPI)
+                                # Nhịp 2: Gộp ô (ĐÃ BỔ SUNG CỘT CHECK ĐỂ GỘP)
                                 if len(rows_to_add) > 1:
-                                    cols_to_merge = [1, 6, 7, 8, 9, 10, 11, 12, 13]
+                                    # Cột Check nằm ở vị trí index = 5
+                                    cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
                                     for col_idx in cols_to_merge:
                                         merge_requests.append({
                                             "mergeCells": {
