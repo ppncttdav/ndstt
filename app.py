@@ -304,6 +304,39 @@ VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": 
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
+# ================= TÍNH NĂNG DI CHUYỂN BÀI VIẾT (API GOOGLE SHEETS) =================
+def move_group_in_sheet(wks, src_start, src_end, dest_index):
+    # API của Google cho phép chuyển cả khối dòng (cùng màu sắc, ô gộp) đến vị trí mới
+    move_req = {
+        "moveDimension": {
+            "source": {
+                "sheetId": wks.id,
+                "dimension": "ROWS",
+                "startIndex": int(src_start),
+                "endIndex": int(src_end)
+            },
+            "destinationIndex": int(dest_index)
+        }
+    }
+    wks.spreadsheet.batch_update({"requests": [move_req]})
+    
+    # Sửa lại toàn bộ cột STT cho chuẩn xác sau khi di chuyển
+    all_rows = wks.get_all_values()
+    stt_updates = []
+    current_stt = 1
+    for r_idx, row in enumerate(all_rows[5:]):
+        sheet_r = r_idx + 6
+        r_str = "".join([str(x).strip().upper() for x in row])
+        if "PHÂN CÔNG TRẢ LỜI" in r_str:
+            break
+        val_A = str(row[0]).strip() if len(row) > 0 else ""
+        if val_A.isdigit():
+            stt_updates.append(gspread.Cell(sheet_r, 1, str(current_stt)))
+            current_stt += 1
+            
+    if stt_updates:
+        wks.update_cells(stt_updates)
+
 # ================= 1. BACKEND & XỬ LÝ DỮ LIỆU =================
 @st.cache_resource(ttl=3600, show_spinner=False)
 def get_gspread_client_cached():
@@ -655,7 +688,7 @@ def parse_khung_cell(cell_val):
     if not lines: return "", ""
     title = lines[0]
     title = re.sub(r'\(.*?\)', '', title) 
-    title = re.sub(r'\s*\b\d{1,2}\'?m?\s*$', '', title) # ĐÃ SỬA LỖI XÓA SỐ 360 CỦA VIETNAM 360
+    title = re.sub(r'\s*\b\d{1,2}\'?m?\s*$', '', title) 
     title = title.split('/')[0].strip() 
     title = format_title_name(title)
     desc = ""
@@ -857,21 +890,6 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'C6:C35', validation_dinh_dang)
         set_data_validation_for_cell_range(wks, 'D6:D35', validation_nen_tang)
         set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
-    except Exception: pass
-
-def dinh_dang_dong_moi(wks, start_row, end_row):
-    try:
-        req = [{
-            "repeatCell": {
-                "range": {"sheetId": wks.id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 14},
-                "cell": {"userEnteredFormat": {
-                    "wrapStrategy": "WRAP", "verticalAlignment": "TOP",
-                    "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
-                }},
-                "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,borders)"
-            }
-        }]
-        wks.spreadsheet.batch_update({"requests": req})
     except Exception: pass
 
 def update_wks_canhan(action_type, data):
@@ -1086,7 +1104,12 @@ else:
                         split_idx = i
                         break
                 
-                df_main = df_content.iloc[:split_idx].copy()
+                df_main = pd.DataFrame()
+                df_seeding = pd.DataFrame()
+                if split_idx != -1:
+                    df_main = df_content.iloc[:split_idx].copy()
+                    if split_idx < len(df_content):
+                        df_seeding = df_content.iloc[split_idx:].copy()
                 
                 df_context = df_main.copy()
                 def is_valid_row(row):
@@ -1185,6 +1208,31 @@ else:
                         }
                     )
 
+                seeding_clean = []
+                if not df_seeding.empty:
+                    for _, r in df_seeding.iterrows():
+                        task = str(r.get('NỘI DUNG', '')).strip()
+                        if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
+                        seeding_clean.append({
+                            "STT": str(r.get('STT', '')).replace('nan', '').strip(),
+                            "Nhiệm vụ": task,
+                            "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
+                            "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
+                            "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
+                            "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
+                        })
+                if seeding_clean:
+                    st.markdown("---")
+                    st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
+                    st.dataframe(
+                        pd.DataFrame(seeding_clean), 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
+                        }
+                    )
+
             real_time_dashboard_and_table(filter_opt)
             st.divider()
 
@@ -1209,7 +1257,8 @@ else:
                         break
                         
                 df_main_st = df_content_static.iloc[:split_idx_st].copy()
-                df_seeding_st = df_content_static.iloc[split_idx_st:].copy() if split_idx_st < len(df_content_static) else pd.DataFrame()
+                if split_idx_st < len(df_content_static):
+                    df_seeding_st = df_content_static.iloc[split_idx_st:].copy()
                     
                 df_context_st = df_main_st.copy()
                 
@@ -1229,140 +1278,7 @@ else:
                 
                 unique_products = df_context_st['NỘI DUNG_GROUP'].unique()
                 valid_products = [p for p in unique_products if str(p).strip() != ""]
-
-                # ================= TÍNH NĂNG SẮP XẾP LẠI VỎ TRỰC SỐ =================
-                with st.expander("🔄 SẮP XẾP LẠI THỨ TỰ TIN BÀI", expanded=False):
-                    if not df_context_st.empty:
-                        df_order = pd.DataFrame({
-                            "STT Cũ": range(1, len(valid_products) + 1), 
-                            "Tên Bài": valid_products, 
-                            "Vị trí mới": range(1, len(valid_products) + 1)
-                        })
-                        st.info("Kéo thả, hoặc nhấp đúp vào ô 'Vị trí mới' để đổi số thứ tự cho các bài viết. Hệ thống sẽ tự động gộp ô và căn chỉnh lại đẹp mắt.")
-                        edited_order = st.data_editor(df_order, hide_index=True, use_container_width=True)
-                        if st.button("💾 LƯU THỨ TỰ MỚI", type="primary"):
-                            with st.spinner("Đang sắp xếp và căn chỉnh lại Sheet..."):
-                                try:
-                                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                    wks_today = sh_trucso.worksheet(tab_name_current)
-                                    all_rows = wks_today.get_all_values()
-
-                                    seeding_start = len(all_rows)
-                                    for i, r in enumerate(all_rows[5:]):
-                                        if "PHÂN CÔNG TRẢ LỜI" in "".join([str(x).strip().upper() for x in r]):
-                                            seeding_start = i + 5
-                                            break
-
-                                    news_rows = all_rows[5:seeding_start]
-                                    seeding_rows = all_rows[seeding_start:]
-
-                                    news_groups = []
-                                    current_group = []
-                                    for r in news_rows:
-                                        if len(r) > 0 and str(r[0]).strip().isdigit():
-                                            if current_group:
-                                                news_groups.append(current_group)
-                                            current_group = [r]
-                                        elif current_group:
-                                            current_group.append(r)
-                                        else:
-                                            current_group = [r]
-                                    if current_group:
-                                        news_groups.append(current_group)
-
-                                    sorted_order = edited_order.sort_values(by="Vị trí mới")['STT Cũ'].tolist()
-                                    new_news_groups = []
-                                    for original_stt in sorted_order:
-                                        idx = original_stt - 1
-                                        if idx < len(news_groups):
-                                            new_news_groups.append(news_groups[idx])
-
-                                    final_news_rows = []
-                                    new_stt = 1
-                                    for group in new_news_groups:
-                                        for i, r in enumerate(group):
-                                            r_padded = r + [""] * max(0, 14 - len(r))
-                                            if i == 0:
-                                                r_padded[0] = str(new_stt)
-                                            else:
-                                                r_padded[0] = ""
-                                            final_news_rows.append(r_padded[:14])
-                                        new_stt += 1
-
-                                    update_range = f"A6:N{5 + len(final_news_rows)}"
-                                    if final_news_rows:
-                                        wks_today.update(update_range, final_news_rows)
-
-                                    wks_today.spreadsheet.batch_update({
-                                        "requests": [{
-                                            "unmergeCells": {
-                                                "range": {
-                                                    "sheetId": wks_today.id,
-                                                    "startRowIndex": 5,
-                                                    "endRowIndex": seeding_start,
-                                                    "startColumnIndex": 0,
-                                                    "endColumnIndex": 14
-                                                }
-                                            }
-                                        }]
-                                    })
-
-                                    fmt_requests = []
-                                    current_row_idx = 5
-                                    for group in new_news_groups:
-                                        group_len = len(group)
-                                        if group_len > 1:
-                                            cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-                                            for col_idx in cols_to_merge:
-                                                fmt_requests.append({
-                                                    "mergeCells": {
-                                                        "range": {
-                                                            "sheetId": wks_today.id,
-                                                            "startRowIndex": current_row_idx,
-                                                            "endRowIndex": current_row_idx + group_len,
-                                                            "startColumnIndex": col_idx,
-                                                            "endColumnIndex": col_idx + 1
-                                                        },
-                                                        "mergeType": "MERGE_COLUMNS"
-                                                    }
-                                                })
-                                        
-                                        fmt_requests.append({
-                                            "repeatCell": {
-                                                "range": {"sheetId": wks_today.id, "startRowIndex": current_row_idx, "endRowIndex": current_row_idx + group_len, "startColumnIndex": 0, "endColumnIndex": 1},
-                                                "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP", "textFormat": {"fontFamily": "Times New Roman"}}},
-                                                "fields": "userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)"
-                                            }
-                                        })
-                                        
-                                        fmt_requests.append({
-                                            "repeatCell": {
-                                                "range": {"sheetId": wks_today.id, "startRowIndex": current_row_idx, "endRowIndex": current_row_idx + group_len, "startColumnIndex": 1, "endColumnIndex": 14},
-                                                "cell": {"userEnteredFormat": {"verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP", "textFormat": {"fontFamily": "Times New Roman"}}},
-                                                "fields": "userEnteredFormat(verticalAlignment,wrapStrategy,textFormat)"
-                                            }
-                                        })
-                                        
-                                        fmt_requests.append({
-                                            "repeatCell": {
-                                                "range": {"sheetId": wks_today.id, "startRowIndex": current_row_idx, "endRowIndex": current_row_idx + group_len, "startColumnIndex": 0, "endColumnIndex": 14},
-                                                "cell": {"userEnteredFormat": {"borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}},
-                                                "fields": "userEnteredFormat(borders)"
-                                            }
-                                        })
-                                        current_row_idx += group_len
-
-                                    if fmt_requests:
-                                        wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-                                    
-                                    clear_app_caches()
-                                    st.success("Đã sắp xếp lại thành công!")
-                                    time.sleep(1.5)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Lỗi: {e}")
-                # ====================================================================
-
+                
                 dropdown_options = []
                 prod_mapping = {} 
                 
@@ -1386,9 +1302,53 @@ else:
                     
                     if sel_label and sel_label != "-- Chọn bài viết --":
                         sel_product = prod_mapping[sel_label]
+                        unique_prods_list = list(valid_products)
+                        p_idx = unique_prods_list.index(sel_product)
+                        
                         group_df = df_context_st[df_context_st['NỘI DUNG_GROUP'] == sel_product]
                         first_row_idx = group_df.index[0]
                         first_row_data = group_df.iloc[0]
+                        
+                        src_start = min(group_df.index) + 5
+                        src_end = max(group_df.index) + 6
+                        
+                        # --- TÍNH NĂNG ĐỔI VỊ TRÍ BÀI VIẾT BẰNG API MOVEDIMENSION ---
+                        st.markdown("🔄 **SẮP XẾP LẠI THỨ TỰ BÀI NÀY TRÊN SHEET**")
+                        c_m1, c_m2, c_m3, c_m4 = st.columns([1, 1, 1, 3])
+                        
+                        if c_m1.button("⏫ Lên Đầu", disabled=(p_idx == 0), use_container_width=True):
+                            with st.spinner("Đang đẩy bài lên đầu..."):
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                move_group_in_sheet(wks_today, src_start, src_end, 5)
+                                clear_app_caches()
+                                st.success("Đã đẩy lên đầu!"); time.sleep(1); st.rerun()
+                                
+                        if c_m2.button("🔼 Lên 1 bậc", disabled=(p_idx == 0), use_container_width=True):
+                            with st.spinner("Đang đẩy lên..."):
+                                prev_prod = unique_prods_list[p_idx - 1]
+                                prev_group_df = df_context_st[df_context_st['NỘI DUNG_GROUP'] == prev_prod]
+                                dest_index = min(prev_group_df.index) + 5
+                                
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                move_group_in_sheet(wks_today, src_start, src_end, dest_index)
+                                clear_app_caches()
+                                st.success("Đã đẩy lên 1 bậc!"); time.sleep(1); st.rerun()
+                                
+                        if c_m3.button("🔽 Xuống 1 bậc", disabled=(p_idx == len(unique_prods_list) - 1), use_container_width=True):
+                            with st.spinner("Đang kéo xuống..."):
+                                next_prod = unique_prods_list[p_idx + 1]
+                                next_group_df = df_context_st[df_context_st['NỘI DUNG_GROUP'] == next_prod]
+                                dest_index = max(next_group_df.index) + 6
+                                
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                move_group_in_sheet(wks_today, src_start, src_end, dest_index)
+                                clear_app_caches()
+                                st.success("Đã kéo xuống 1 bậc!"); time.sleep(1); st.rerun()
+                                
+                        st.write("---")
                         
                         current_text, current_link = split_text_link(first_row_data.get('LINK DUYỆT', ''))
                         current_status_val = get_smart_status(group_df)
