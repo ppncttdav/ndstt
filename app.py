@@ -195,7 +195,7 @@ def generate_secure_token(username):
     ).hexdigest()
 
 def clear_app_caches():
-    for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules, get_public_gsheet_as_excel):
+    for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules):
         try: fn.clear()
         except Exception: pass
 
@@ -447,9 +447,14 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
                         if "LĐP" in ws.title.upper() or "LÃNH ĐẠO PHÒNG" in ws.title.upper(): 
                             target_sheet = ws.title; break
                 else:
+                    # ƯU TIÊN SỐ 1: Bắt buộc chọn đúng Tab "TRỰC SỐ" cho lịch BTV
                     for ws in worksheets:
-                        if ("SỐ" in ws.title.upper() or "TRỰC" in ws.title.upper() or "KÊNH" in ws.title.upper()) and "LĐP" not in ws.title.upper():
+                        if "TRỰC SỐ" in ws.title.upper():
                             target_sheet = ws.title; break
+                    if not target_sheet:
+                        for ws in worksheets:
+                            if ("SỐ" in ws.title.upper() or "TRỰC" in ws.title.upper() or "KÊNH" in ws.title.upper()) and "LĐP" not in ws.title.upper():
+                                target_sheet = ws.title; break
                 data = sh.worksheet(target_sheet).get_all_values()
                 if data:
                     return kw, pd.DataFrame(data)
@@ -467,66 +472,72 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
             results[k] = df
     return results
 
-# Tối ưu hóa việc dò Cột Ngày: Bắt cả chuẩn Dọc (10/09) lẫn chuẩn Ngang (1,2..31)
-def find_target_col(df, d, m, y):
-    # 1. Dò theo chuẩn ngày dọc (VD: 10/09/2026, 10/09)
-    date_patterns = [
-        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}",
-        f"{y}-{m:02d}-{d:02d}", f"{d:02d}.{m:02d}.{y}", f"{d}.{m}.{y}",
-        f"{d:02d}-{m:02d}", f"{d}-{m}", f"{d:02d}.{m:02d}", f"{d}.{m}"
-    ]
-    for r in range(min(30, len(df))):
-        for c in range(len(df.columns)):
-            val = re.sub(r'\s+', ' ', str(df.iloc[r, c]).strip().lower())
-            for p in date_patterns:
-                if re.search(r'\b' + re.escape(p) + r'\b', val) and "tháng" not in val:
-                    return r, c
-                    
-    # 2. Dò theo chuẩn lịch ngang (Ngày 1..31, tháng nằm ở trên)
-    d_str = str(d)
-    d_str_02 = f"{d:02d}"
-    for r in range(len(df)):
-        row_vals = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
-        num_count = sum(1 for x in row_vals if x.isdigit() and 1 <= int(x) <= 31)
+def get_ldp_from_df(df, target_date_obj, list_nv):
+    if df is None or df.empty: return ""
+    d_str = str(target_date_obj.day)
+    d_str_02 = f"{target_date_obj.day:02d}"
+    m = target_date_obj.month
+    
+    target_col = -1
+    header_row = -1
+    
+    # 1. Tìm cột ngày bằng cách duyệt từ ngày 1->31
+    for r in range(1, min(30, len(df))):
+        row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
         
-        if num_count >= 5: 
+        if ("1" in row_vals_clean and "15" in row_vals_clean):
+            header_row = r
             month_row_idx = max(0, r - 1)
-            current_month = -1
             
+            # Thuật toán Tracking Tháng xuyên suốt các ô gộp
+            current_month = -1
             for c in range(len(df.columns)):
                 m_val = str(df.iloc[month_row_idx, c]).lower().strip()
                 m_match = re.search(r'tháng\s*0?(\d+)', m_val)
                 if m_match:
                     current_month = int(m_match.group(1))
-                
-                if (row_vals[c] == d_str or row_vals[c] == d_str_02) and current_month == m:
-                    return r, c
-    return -1, -1
-
-def get_ldp_from_df(df, target_date_obj, list_nv):
-    if df is None or df.empty: return ""
-    d = target_date_obj.day
-    m = target_date_obj.month
-    y = target_date_obj.year
+                    
+                # Phải khớp cả Ngày VÀ Tháng
+                if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
+                    target_col = c
+                    break
+            if target_col != -1:
+                break
     
-    header_row, target_col = find_target_col(df, d, m, y)
-        
+    # 2. Fallback: Quét trực tiếp Date string nếu họ lười gộp ô
+    if target_col == -1:
+        date_patterns = [
+            f"{target_date_obj.day:02d}/{target_date_obj.month:02d}/{target_date_obj.year}",
+            f"{target_date_obj.day}/{target_date_obj.month}/{target_date_obj.year}",
+            f"{target_date_obj.day:02d}/{target_date_obj.month:02d}",
+            f"{target_date_obj.day}/{target_date_obj.month}"
+        ]
+        for r in range(min(30, len(df))):
+            for c in range(len(df.columns)):
+                val = str(df.iloc[r, c]).strip().lower()
+                if any(p in val for p in date_patterns) and "tháng" not in val:
+                    target_col = c
+                    header_row = r
+                    break
+            if target_col != -1: break
+
+    # 3. Quét lấy người trực
     if target_col != -1 and header_row != -1:
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
-            if not val or val == 'nan': continue
-            if any(x in val for x in ["nghỉ", "off", "công tác", "họp"]): continue
-            
-            if "số" in val or "trực" in val or "lđp" in val or "duyệt" in val or val == "x":
-                name = ""
-                for c in range(min(5, len(df.columns))):
-                    n = str(df.iloc[r, c]).strip()
-                    if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
-                        name = n
-                        break
-                if name:
-                    matched = match_nv(name, list_nv)
-                    if matched: return matched
+            if val and val != 'nan':
+                if "nghỉ" in val or "off" in val or "công tác" in val or "họp" in val: continue
+                # Bao gồm cả chữ "duyệt" (như Trực duyệt SFP)
+                if "lđp" in val or "trực" in val or "số" in val or "duyệt" in val or val == "x":
+                    name = ""
+                    for c in range(min(4, len(df.columns))):
+                        n = str(df.iloc[r, c]).strip()
+                        if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
+                            name = n
+                            break
+                    if name:
+                        matched = match_nv(name, list_nv)
+                        if matched: return matched
     return ""
 
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
@@ -537,17 +548,51 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     d = target_date_obj.day
     m = target_date_obj.month
     y = target_date_obj.year
+    date_patterns = [
+        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}"
+    ]
     
-    header_row, target_col = find_target_col(df, d, m, y)
+    target_col = -1
+    header_row = -1
+    
+    # 1. Thử quét theo chuẩn ngày dd/mm/yyyy
+    for r in range(min(30, len(df))):
+        for c in range(len(df.columns)):
+            val = str(df.iloc[r, c]).strip().lower()
+            # Xóa các ký tự thừa xung quanh ngày
+            if any(p == val or val.endswith(f" {p}") or val.startswith(f"{p} ") or p in val for p in date_patterns):
+                target_col = c
+                header_row = r
+                break
+        if target_col != -1: break
         
-    if target_col != -1 and header_row != -1:
+    # 2. Quét ngang lịch 1..15 nếu sheet vẫn dùng chuẩn ngang
+    if target_col == -1:
+        d_str = str(d)
+        d_str_02 = f"{d:02d}"
+        for r in range(1, min(30, len(df))):
+            row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
+            if ("1" in row_vals_clean and "15" in row_vals_clean):
+                header_row = r
+                month_row_idx = max(0, r - 1)
+                current_month = -1
+                for c in range(len(df.columns)):
+                    m_val = str(df.iloc[month_row_idx, c]).lower().strip()
+                    m_match = re.search(r'tháng\s*0?(\d+)', m_val)
+                    if m_match: current_month = int(m_match.group(1))
+                    
+                    if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
+                        target_col = c
+                        break
+                if target_col != -1: break
+        
+    if target_col != -1:
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
             if not val or val == 'nan': continue
-            if any(x in val for x in ["nghỉ", "off", "công tác", "họp", "trừ", "bù"]): continue
             
             name = ""
-            for c in range(min(5, len(df.columns))):
+            for c in range(min(4, len(df.columns))):
                 n = str(df.iloc[r, c]).strip()
                 if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower() and "thứ" not in n.lower() and "tháng" not in n.lower():
                     name = n
@@ -558,8 +603,9 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
                 if matched:
                     if "tcsx" in val:
                         res_tcsx = matched
-                    elif "số" in val or "trực" in val or "btv" in val or val == "x":
-                        if "hỗ trợ" not in val and "ht" not in val:
+                    # Bổ sung nhận diện mã ca trực như TI2, TI...
+                    elif "số" in val or "btv" in val or "trực" in val or "ti" in val or val == "x":
+                        if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val and "nghỉ" not in val and "off" not in val and "họp" not in val:
                             if matched not in res_btv: res_btv.append(matched)
     return res_tcsx, res_btv
 
@@ -692,6 +738,7 @@ def parse_khung_cell(cell_val):
     if not lines: return "", ""
     title = lines[0]
     title = re.sub(r'\(.*?\)', '', title) 
+    # FIX: Regex cải tiến chỉ xóa phút kiểu "15'", "30'", tránh xóa nhầm "360" của Vietnam 360
     title = re.sub(r'\s*\b\d{1,2}\'?m?\s*$', '', title) 
     title = title.split('/')[0].strip() 
     title = format_title_name(title)
@@ -961,11 +1008,9 @@ else:
         weather_info, advice_msg = get_weather_and_advice()
         st.markdown(f"---\n**🌤️ HÀ NỘI:** {weather_info}\n\n💡 **LỜI KHUYÊN:** {advice_msg}\n---")
         
-        st.markdown("---")
-        if st.button("🔄 TẢI LẠI TRANG TỪ GOOGLE SHEETS", type="primary", use_container_width=True):
+        if st.button("🔄 TẢI LẠI TRANG", use_container_width=True, type="secondary"):
             clear_cache_and_rerun()
-        st.markdown("---")
-        
+            
         with st.expander("🔐 ĐỔI MẬT KHẨU"):
             with st.form("change_pass_form"):
                 old_p = st.text_input("MẬT KHẨU CŨ", type="password"); new_p = st.text_input("MẬT KHẨU MỚI", type="password"); cfm_p = st.text_input("NHẬP LẠI", type="password")
@@ -994,7 +1039,7 @@ else:
                             logger.exception("Đổi mật khẩu thất bại")
                             st.error(f"Không thể đổi mật khẩu: {exc}")
                             
-        if st.button("ĐĂNG XUẤT"): 
+        if st.button("ĐĂNG XUẤT", use_container_width=True): 
             st.session_state['authenticated'] = False; st.session_state['user_info'] = {}; st.session_state['username'] = ''
             st.rerun()
 
@@ -1039,19 +1084,29 @@ else:
                 default_roster[7] = auto_btv[2] if len(auto_btv) > 2 else "--" 
 
                 with st.form("init_roster"):
-                    cols = st.columns(3); roster_vals = []
-                    for i, r_t in enumerate(ROLES_HEADER):
-                        with cols[i%3]: 
-                            def_val = default_roster[i]
-                            options = ["--"] + list_nv
-                            if def_val and def_val != "--" and def_val not in options:
-                                options.append(def_val)
-                            
-                            def_idx = options.index(def_val) if def_val in options else 0
-                            val = st.selectbox(f"**{r_t}**", options, index=def_idx, key=f"cr_{i}")
-                            roster_vals.append(val if val != "--" else "")
+                    st.write("Căn chỉnh nhân sự ca trực")
+                    roster_vals = [""] * 8
                     
-                    if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI"):
+                    row1_cols = st.columns(4)
+                    row2_cols = st.columns(4)
+                    
+                    for i, r_t in enumerate(ROLES_HEADER):
+                        def_val = default_roster[i]
+                        options = ["--"] + list_nv
+                        if def_val and def_val != "--" and def_val not in options:
+                            options.append(def_val)
+                        def_idx = options.index(def_val) if def_val in options else 0
+                        
+                        if i < 4:
+                            with row1_cols[i]:
+                                val = st.selectbox(f"**{r_t}**", options, index=def_idx, key=f"cr_{i}")
+                                roster_vals[i] = val if val != "--" else ""
+                        else:
+                            with row2_cols[i - 4]:
+                                val = st.selectbox(f"**{r_t}**", options, index=def_idx, key=f"cr_{i}")
+                                roster_vals[i] = val if val != "--" else ""
+                    
+                    if st.form_submit_button("🚀 TẠO VỎ TRỰC SỐ MỚI", type="primary"):
                         with st.spinner("Đang tạo vỏ trực số chuẩn Formatting..."):
                             try:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -1084,11 +1139,17 @@ else:
                     c1, c2, c3, c4 = st.columns(4)
                     cols_1 = [c1, c2, c3, c4]
                     for i in range(4):
-                        if i < len(roster_names_current): cols_1[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[i]}</p><b>{roster_names_current[i]}</b>", unsafe_allow_html=True)
-                    st.write("---"); c5, c6, c7, c8 = st.columns(4); cols_2 = [c5, c6, c7, c8]
+                        if i < len(roster_names_current): 
+                            cols_1[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[i]}</p><b>{roster_names_current[i]}</b>", unsafe_allow_html=True)
+                    
+                    st.write("---")
+                    
+                    c5, c6, c7, c8 = st.columns(4)
+                    cols_2 = [c5, c6, c7, c8]
                     for i in range(4):
                         idx = i + 4
-                        if idx < len(roster_names_current): cols_2[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[idx]}</p><b>{roster_names_current[idx]}</b>", unsafe_allow_html=True)
+                        if idx < len(roster_names_current): 
+                            cols_2[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[idx]}</p><b>{roster_names_current[idx]}</b>", unsafe_allow_html=True)
                 except: pass
 
             st.write("")
@@ -1522,7 +1583,7 @@ else:
                             st.markdown("<br>", unsafe_allow_html=True)
                             submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
                             with submit_col2:
-                                if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP TRÊN SHEET", use_container_width=True, type="primary"):
+                                if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", use_container_width=True, type="primary"):
                                     with st.spinner("Đang đồng bộ dữ liệu siêu tốc..."):
                                         merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
                                         final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
