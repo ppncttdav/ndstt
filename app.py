@@ -195,7 +195,7 @@ def generate_secure_token(username):
     ).hexdigest()
 
 def clear_app_caches():
-    for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules, get_public_gsheet_as_excel):
+    for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules):
         try: fn.clear()
         except Exception: pass
 
@@ -306,7 +306,6 @@ VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDo
 
 # ================= TÍNH NĂNG DI CHUYỂN BÀI VIẾT (API GOOGLE SHEETS) =================
 def move_group_in_sheet(wks, src_start, src_end, dest_index):
-    # API của Google cho phép chuyển cả khối dòng (cùng màu sắc, ô gộp) đến vị trí mới
     move_req = {
         "moveDimension": {
             "source": {
@@ -320,7 +319,6 @@ def move_group_in_sheet(wks, src_start, src_end, dest_index):
     }
     wks.spreadsheet.batch_update({"requests": [move_req]})
     
-    # Sửa lại toàn bộ cột STT cho chuẩn xác sau khi di chuyển
     all_rows = wks.get_all_values()
     stt_updates = []
     current_stt = 1
@@ -424,36 +422,27 @@ def load_du_lieu_app():
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def get_public_gsheet_as_excel(url):
-    try:
-        sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
-        if not sheet_id_match: return None
-        sheet_id = sheet_id_match.group(1)
-        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
-        res = requests.get(export_url, timeout=15)
-        if res.status_code == 200: return res.content
-    except Exception: pass
-    return None
-
-@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_and_parse_schedules(url_ldp, url_btv):
     results = {"LDP": pd.DataFrame(), "BTV": pd.DataFrame()}
     def _fetch_and_parse(url, kw):
         try:
-            excel_bytes = get_public_gsheet_as_excel(url)
-            if excel_bytes:
-                xls = pd.ExcelFile(io.BytesIO(excel_bytes))
-                target_sheet = xls.sheet_names[0]
+            sh = ket_noi_sheet(url)
+            if sh:
+                worksheets = sh.worksheets()
+                target_sheet = worksheets[0].title
                 if kw == "LDP":
-                    for sn in xls.sheet_names:
-                        if "LĐP" in sn.upper() or "LÃNH ĐẠO PHÒNG" in sn.upper(): target_sheet = sn; break
+                    for ws in worksheets:
+                        if "LĐP" in ws.title.upper() or "LÃNH ĐẠO PHÒNG" in ws.title.upper(): 
+                            target_sheet = ws.title; break
                 else:
-                    for sn in xls.sheet_names:
-                        if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
-                            target_sheet = sn; break
-                df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
-                return kw, df
-        except: pass
+                    for ws in worksheets:
+                        if ("SỐ" in ws.title.upper() or "TRỰC" in ws.title.upper() or "KÊNH" in ws.title.upper()) and "LĐP" not in ws.title.upper():
+                            target_sheet = ws.title; break
+                data = sh.worksheet(target_sheet).get_all_values()
+                if data:
+                    return kw, pd.DataFrame(data)
+        except Exception as e:
+            logger.error(f"Error fetching schedule {kw}: {e}")
         return kw, pd.DataFrame()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -471,41 +460,56 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     d_str = str(target_date_obj.day)
     d_str_02 = f"{target_date_obj.day:02d}"
     m = target_date_obj.month
+    y = target_date_obj.year
+    
+    date_patterns = [
+        f"{target_date_obj.day:02d}/{target_date_obj.month:02d}/{target_date_obj.year}",
+        f"{target_date_obj.day}/{target_date_obj.month}/{target_date_obj.year}",
+        f"{target_date_obj.day:02d}/{target_date_obj.month:02d}",
+        f"{target_date_obj.day}/{target_date_obj.month}"
+    ]
     
     target_col = -1
     header_row = -1
     
-    for r in range(1, len(df)):
-        row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
-        
-        if ("1" in row_vals_clean and "15" in row_vals_clean):
-            header_row = r
-            month_row_idx = r - 1
-            
-            current_month = -1
-            for c in range(len(df.columns)):
-                m_val = str(df.iloc[month_row_idx, c]).lower().strip()
-                m_match = re.search(r'tháng\s*0?(\d+)', m_val)
-                if m_match:
-                    current_month = int(m_match.group(1))
-                    
-                if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
-                    target_col = c
-                    break
-                    
-            if target_col != -1:
+    # 1. Thử quét theo chuẩn ngày dd/mm/yyyy
+    for r in range(min(30, len(df))):
+        for c in range(len(df.columns)):
+            val = str(df.iloc[r, c]).strip().lower()
+            if any(p in val for p in date_patterns) and "tháng" not in val:
+                target_col = c
+                header_row = r
                 break
+        if target_col != -1: break
+        
+    # 2. Nếu không thấy, quét theo chuẩn Lịch ngang (1..15)
+    if target_col == -1:
+        for r in range(1, len(df)):
+            row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
+            if ("1" in row_vals_clean and "15" in row_vals_clean):
+                header_row = r
+                month_row_idx = max(0, r - 1)
+                current_month = -1
+                for c in range(len(df.columns)):
+                    m_val = str(df.iloc[month_row_idx, c]).lower().strip()
+                    m_match = re.search(r'tháng\s*0?(\d+)', m_val)
+                    if m_match: current_month = int(m_match.group(1))
+                    
+                    if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
+                        target_col = c
+                        break
+                if target_col != -1: break
                 
     if target_col != -1 and header_row != -1:
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
             if val and val != 'nan':
-                if "nghỉ" in val or "off" in val or "công tác" in val: continue
-                if "số" in val:
+                if "nghỉ" in val or "off" in val or "công tác" in val or "họp" in val: continue
+                if "lđp" in val or "trực" in val or "số" in val or val == "x":
                     name = ""
                     for c in range(min(4, len(df.columns))):
                         n = str(df.iloc[r, c]).strip()
-                        if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
+                        if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
                             name = n
                             break
                     if name:
@@ -528,16 +532,37 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     target_col = -1
     header_row = -1
     
-    for r in range(len(df)):
+    # 1. Thử quét theo chuẩn ngày dd/mm/yyyy
+    for r in range(min(30, len(df))):
         for c in range(len(df.columns)):
             val = str(df.iloc[r, c]).strip().lower()
-            if any(p == val or val.endswith(f" {p}") or val.startswith(f"{p} ") for p in date_patterns):
+            if any(p in val for p in date_patterns) and "tháng" not in val:
                 target_col = c
                 header_row = r
                 break
         if target_col != -1: break
         
-    if target_col != -1:
+    # 2. Nếu không thấy, quét theo chuẩn Lịch ngang (1..15)
+    if target_col == -1:
+        d_str = str(target_date_obj.day)
+        d_str_02 = f"{target_date_obj.day:02d}"
+        for r in range(1, len(df)):
+            row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
+            if ("1" in row_vals_clean and "15" in row_vals_clean):
+                header_row = r
+                month_row_idx = max(0, r - 1)
+                current_month = -1
+                for c in range(len(df.columns)):
+                    m_val = str(df.iloc[month_row_idx, c]).lower().strip()
+                    m_match = re.search(r'tháng\s*0?(\d+)', m_val)
+                    if m_match: current_month = int(m_match.group(1))
+                    
+                    if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
+                        target_col = c
+                        break
+                if target_col != -1: break
+        
+    if target_col != -1 and header_row != -1:
         for r in range(header_row + 1, len(df)):
             val = str(df.iloc[r, target_col]).lower().strip()
             if not val or val == 'nan': continue
@@ -555,7 +580,7 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
                     if "tcsx" in val:
                         res_tcsx = matched
                     elif "số" in val or "btv" in val or "trực" in val or val == "x":
-                        if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val and "nghỉ" not in val and "off" not in val:
+                        if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val and "nghỉ" not in val and "off" not in val and "họp" not in val:
                             if matched not in res_btv: res_btv.append(matched)
     return res_tcsx, res_btv
 
@@ -1312,7 +1337,6 @@ else:
                         src_start = min(group_df.index) + 5
                         src_end = max(group_df.index) + 6
                         
-                        # --- TÍNH NĂNG ĐỔI VỊ TRÍ BÀI VIẾT BẰNG API MOVEDIMENSION ---
                         st.markdown("🔄 **SẮP XẾP LẠI THỨ TỰ BÀI NÀY TRÊN SHEET**")
                         c_m1, c_m2, c_m3, c_m4 = st.columns([1, 1, 1, 3])
                         
@@ -1354,7 +1378,6 @@ else:
                         current_status_val = get_smart_status(group_df)
                         is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
                         
-                        # --- TÍNH NĂNG AI PHẢN BIỆN ---
                         st.markdown("🤖 **AI CẢNH BÁO RỦI RO**")
                         with st.container(border=True):
                             st.info("Hệ thống tự động rà soát lỗi chính tả, ngữ pháp và một số lỗi rủi ro có khả năng xảy ra.")
@@ -1386,9 +1409,7 @@ else:
                                         st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
                                         with st.container(height=350):
                                             st.markdown(ans)
-                        # ---------------------------------
                         
-                        # --- KHU VỰC XÓA AN TOÀN (ĐƯA RA NGOÀI FORM) ---
                         with st.expander("🗑️ QUẢN LÝ XÓA BÀI VIẾT / NỀN TẢNG", expanded=False):
                             st.warning("Hành động này sẽ xóa dữ liệu trực tiếp trên Google Sheets. Hãy cẩn trọng!")
                             c_del_1, c_del_2 = st.columns(2)
@@ -1859,17 +1880,39 @@ else:
         col_d, col_s = st.columns([1, 2])
         target_date_lps = col_d.date_input("📅 Chọn Ngày phát sóng:", value=tom_date, format="DD/MM/YYYY")
         
-        excel_bytes = get_public_gsheet_as_excel(LINK_KHUNG_LPS)
+        sh_khung = ket_noi_sheet(LINK_KHUNG_LPS)
+        df_khung = None
         
-        if not excel_bytes:
-            st.error("⚠️ Không thể tải dữ liệu tự động từ đường link Khung. Vui lòng tải file lên thủ công.")
+        if not sh_khung:
+            st.error("⚠️ Không thể đọc file Khung tự động (Lỗi phân quyền). Vui lòng cấp quyền (Share) file cho hệ thống hoặc tải lên thủ công.")
             uploaded_file = st.file_uploader("📂 Tải lên file Excel Khung", type=["xlsx", "xls"])
-            if uploaded_file: excel_bytes = uploaded_file.getvalue()
-            
-        if excel_bytes:
+            if uploaded_file: 
+                try:
+                    xls = pd.ExcelFile(uploaded_file)
+                    sheet_names = xls.sheet_names
+                    best_idx = 0
+                    for idx, title in enumerate(sheet_names):
+                        dates = re.findall(r'(\d{1,2})[./](\d{1,2})', title)
+                        if len(dates) >= 1:
+                            try:
+                                d1, m1 = int(dates[0][0]), int(dates[0][1])
+                                d2, m2 = int(dates[1][0]), int(dates[1][1]) if len(dates) >= 2 else (d1, m1)
+                                y_target = target_date_lps.year
+                                start_date = datetime(y_target, m1, d1).date()
+                                y_end = y_target + 1 if m2 < m1 else y_target
+                                end_date = datetime(y_end, m2, d2).date()
+                                if start_date <= target_date_lps <= end_date:
+                                    best_idx = idx
+                                    break
+                            except: pass
+                    selected_sheet = col_s.selectbox("📍 Chọn Tab Khung:", sheet_names, index=best_idx)
+                    df_khung = pd.read_excel(xls, sheet_name=selected_sheet, header=None)
+                except Exception as e:
+                    st.error(f"Lỗi đọc file tải lên: {e}")
+        else:
             try:
-                xls = pd.ExcelFile(io.BytesIO(excel_bytes))
-                sheet_names = xls.sheet_names
+                worksheets = sh_khung.worksheets()
+                sheet_names = [ws.title for ws in worksheets]
                 
                 best_idx = 0
                 for idx, title in enumerate(sheet_names):
@@ -1890,8 +1933,17 @@ else:
                 
                 selected_sheet = col_s.selectbox("📍 Đã tự động chọn Tab Khung phù hợp (Có thể đổi):", sheet_names, index=best_idx)
                 
-                df_khung = pd.read_excel(xls, sheet_name=selected_sheet, header=None)
+                with st.spinner("Đang tải dữ liệu Khung..."):
+                    raw_data = sh_khung.worksheet(selected_sheet).get_all_values()
+                    if raw_data:
+                        df_khung = pd.DataFrame(raw_data)
+                    else:
+                        st.warning("Tab Khung này không có dữ liệu.")
+            except Exception as e:
+                st.error(f"Lỗi khi lấy dữ liệu từ Google Sheets: {e}")
                 
+        if df_khung is not None and not df_khung.empty:
+            try:
                 days_of_week = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
                 selected_day = days_of_week[target_date_lps.weekday()]
                 
@@ -1916,7 +1968,7 @@ else:
                     for r_idx in range(5, len(df_khung)):
                         time_val = df_khung.iloc[r_idx, time_col_idx]
                         content_val = df_khung.iloc[r_idx, target_col_idx]
-                        if not pd.isna(content_val) and str(content_val).strip() != "":
+                        if str(content_val).strip() != "" and str(content_val).strip().lower() != 'nan':
                             title, desc = parse_khung_cell(content_val)
                             formatted_time = format_time_col(time_val)
                             if title:
@@ -1948,7 +2000,7 @@ else:
                 else: 
                     st.warning(f"📭 Không tìm thấy dữ liệu phát sóng trong cột {selected_day} của Tab này.")
             except Exception as e:
-                st.error(f"Lỗi khi đọc file Khung: {e}")
+                st.error(f"Lỗi khi xử lý dữ liệu Khung: {e}")
 
     # ================= CÁC TAB KHÁC =================
     with tabs[2]:
