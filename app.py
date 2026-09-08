@@ -1035,15 +1035,26 @@ else:
                 if scan_errors:
                     for err in scan_errors: st.warning(err)
                     
-                default_roster = [""] * 8
-                default_roster[0] = match_nv(get_lanh_dao_ban(target_date), list_nv)
+                default_roster = ["--"] * 8
+                default_roster[0] = match_nv(get_lanh_dao_ban(target_date), list_nv) or "--"
                 default_roster[1] = auto_ldp if auto_ldp else "--"
                 default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
-                default_roster[3] = auto_tcsx if auto_tcsx else "--"          # TRỰC LỊCH PHÁT SÓNG
-                default_roster[4] = auto_btv[4] if len(auto_btv) > 1 else "--" 
-                default_roster[5] = auto_btv[3] if len(auto_btv) > 2 else "--" 
-                default_roster[6] = auto_btv[1] if len(auto_btv) > 3 else "--" 
-                default_roster[7] = auto_btv[2] if len(auto_btv) > 4 else "--" 
+                default_roster[3] = auto_tcsx if auto_tcsx else "--"          
+                
+                # Mặc định để trống (số 4: Thư ký tòa soạn 2, số 5: Sản xuất video clip, LPS)
+                default_roster[4] = "--" 
+                default_roster[5] = "--" 
+                
+                # Ưu tiên điền vào 2 ô cuối (Cổng TTĐT và App) trước
+                default_roster[6] = auto_btv[1] if len(auto_btv) > 1 else "--" 
+                default_roster[7] = auto_btv[2] if len(auto_btv) > 2 else "--" 
+                
+                # Nếu có 4 BTV trở lên, fill ngược lại vào ô Sản xuất video clip (số 5)
+                if len(auto_btv) > 3:
+                    default_roster[5] = auto_btv[3]
+                # Nếu có 5 BTV trở lên, fill tiếp vào Thư ký tòa soạn 2 (số 4)
+                if len(auto_btv) > 4:
+                    default_roster[4] = auto_btv[4]
 
                 with st.form("init_roster"):
                     cols = st.columns(3); roster_vals = []
@@ -1570,306 +1581,306 @@ else:
                                         clear_app_caches()
                                         st.success("✅ Cập nhật thành công!"); time.sleep(1); st.rerun()
 
-        with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
-            with st.form("add_news_form"):
-                c1, c2 = st.columns([3, 1])
-                ts_noidung = c1.text_area("Tên bài / Nội dung", placeholder="Nhập nội dung...")
-                ts_dinhdang = c2.selectbox("Định dạng", OPTS_DINH_DANG)
-                
-                c3, c4, c5, c6 = st.columns(4)
-                ts_nentang = c3.multiselect("Nền tảng xuất bản", OPTS_NEN_TANG)
-                
-                idx_cho_xu_ly = OPTS_STATUS_TRUCSO.index("Chờ xử lý") if "Chờ xử lý" in OPTS_STATUS_TRUCSO else 0
-                ts_status = c4.selectbox("Trạng thái", OPTS_STATUS_TRUCSO, index=idx_cho_xu_ly)
-                
-                ts_nhansu = c5.multiselect("BTV Thực hiện", list_nv, default=[curr_name] if curr_name in list_nv else None)
-                ts_check = c6.text_input("Ghi chú Check", placeholder="VD: OK, Sửa video...")
-                
-                st.markdown("**THÔNG TIN BỔ SUNG & NỘI DUNG:**")
-                c_nguon, c_drive = st.columns(2)
-                ts_nguon = c_nguon.text_input("Nguồn lấy tin", placeholder="VD: Reuters, APTN, VTV1...")
-                ts_linkduyet = c_drive.text_input("LINK GOOGLE DRIVE")
-                ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
-                
-                if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
-                    with st.spinner("Đang thêm và Tự động căn chỉnh Gộp ô (Merge)..."):
-                        try:
-                            sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                            wks_today = sh_trucso.worksheet(tab_name_current)
-                            all_rows = wks_today.get_all_values()
-                            
-                            start_stt = 1
-                            start_row_idx = 5
-                            for i, r in enumerate(all_rows[5:]):
-                                r_str = "".join([str(x).strip() for x in r])
-                                if "PHÂN CÔNG TRẢ LỜI" in r_str.upper():
-                                    break
-                                if r_str: 
-                                    start_row_idx = i + 5 + 1
-                                    if len(r) > 0 and str(r[0]).strip().isdigit():
-                                        start_stt = int(str(r[0]).strip()) + 1
-
-                            plats = ts_nentang if ts_nentang else [""]
-                            merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
-                            rows_to_add = []
-                            for idx_p, p in enumerate(plats):
-                                if idx_p == 0:
-                                    row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
-                                else:
-                                    row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
-                                rows_to_add.append(row)
-                                start_stt += 1 
-                            
-                            wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
-                            
-                            fmt_requests = []
-                            merge_requests = []
-                            
-                            fmt_requests.append({
-                                "repeatCell": {
-                                    "range": {
-                                        "sheetId": wks_today.id, 
-                                        "startRowIndex": start_row_idx, 
-                                        "endRowIndex": start_row_idx + len(rows_to_add), 
-                                        "startColumnIndex": 0, 
-                                        "endColumnIndex": 14
-                                    },
-                                    "cell": {"userEnteredFormat": {
-                                        "wrapStrategy": "WRAP", 
-                                        "verticalAlignment": "MIDDLE",
-                                        "textFormat": {"fontFamily": "Times New Roman"},
-                                        "borders": {
-                                            "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
-                                            "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
-                                        }
-                                    }},
-                                    "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
-                                }
-                            })
-                            
-                            fmt_requests.append({
-                                "repeatCell": {
-                                    "range": {
-                                        "sheetId": wks_today.id, 
-                                        "startRowIndex": start_row_idx, 
-                                        "endRowIndex": start_row_idx + len(rows_to_add), 
-                                        "startColumnIndex": 0, 
-                                        "endColumnIndex": 1
-                                    },
-                                    "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                                    "fields": "userEnteredFormat(horizontalAlignment)"
-                                }
-                            })
-                            
-                            wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-                            
-                            if len(rows_to_add) > 1:
-                                cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-                                for col_idx in cols_to_merge:
-                                    merge_requests.append({
-                                        "mergeCells": {
-                                            "range": {
-                                                "sheetId": wks_today.id,
-                                                "startRowIndex": start_row_idx,
-                                                "endRowIndex": start_row_idx + len(rows_to_add),
-                                                "startColumnIndex": col_idx,
-                                                "endColumnIndex": col_idx + 1
-                                            },
-                                            "mergeType": "MERGE_COLUMNS"
-                                        }
-                                    })
-                                wks_today.spreadsheet.batch_update({"requests": merge_requests})
-                            
-                            clear_app_caches()
-                            st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
-                        except Exception as e:
-                            st.error(f"Lỗi thêm mới: {e}")
-
-        # ================= KHU VỰC QUẢN LÝ SEEDING =================
-        st.divider()
-        st.markdown("##### 🌱 KHU VỰC QUẢN LÝ SEEDING & TƯƠNG TÁC")
-        st.caption("Quản lý các nhiệm vụ trả lời bình luận, mồi bình luận, tương tác trên nền tảng.")
-        
-        seeding_clean_form = []
-        header_found = False
-        for i, r in df_seeding_st.iterrows():
-            c_val = str(r.get('ĐỊNH DẠNG', '')).strip().upper()
-            if 'LINK' in c_val:
-                header_found = True
-                continue
-            if not header_found:
-                continue
-                
-            task_sd = str(r.get('NỘI DUNG', '')).strip()
-            if task_sd == "" or task_sd.lower() in ['nan', '<na>', 'none', 'nhiệm vụ']: continue
-            
-            seeding_clean_form.append({
-                "ID_ROW": i + 6, 
-                "STT": str(r.get('STT', '')).replace('nan', '').strip(),
-                "Nhiệm vụ": task_sd,
-                "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
-                "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
-                "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
-                "Nhân sự": str(r.get('CHECK', '')).replace('nan', '').strip(),
-                "Kết quả": str(r.get('NGUỒN', '')).replace('nan', '').strip()
-            })
-            
-        if seeding_clean_form:
-            df_seed_edit = pd.DataFrame(seeding_clean_form)
-            edited_seed = st.data_editor(
-                df_seed_edit, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "ID_ROW": None,
-                    "STT": st.column_config.TextColumn("STT", width="small", disabled=True),
-                    "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large", disabled=True),
-                    "Link": st.column_config.TextColumn("Link post", width="medium"),
-                    "Phụ trách": st.column_config.TextColumn("Nền tảng / Phụ trách", width="small"),
-                    "KPI": st.column_config.TextColumn("KPI Yêu cầu", width="medium"),
-                    "Nhân sự": st.column_config.TextColumn("BTV Thực hiện", width="medium"),
-                    "Kết quả": st.column_config.TextColumn("Kết quả", width="medium")
-                },
-                key="edit_seeding_table"
-            )
-            
-            col_btn1, col_btn2 = st.columns([2, 4])
-            with col_btn1:
-                if st.button("💾 LƯU CẬP NHẬT KẾT QUẢ", type="primary", use_container_width=True):
-                    with st.spinner("Đang lưu kết quả seeding..."):
-                        cells_to_update_seed = []
-                        for idx_s, r_s in edited_seed.iterrows():
-                            sheet_r = int(r_s['ID_ROW'])
-                            cells_to_update_seed.extend([
-                                gspread.Cell(sheet_r, 3, r_s['Link']),
-                                gspread.Cell(sheet_r, 4, r_s['Phụ trách']),
-                                gspread.Cell(sheet_r, 5, r_s['KPI']),
-                                gspread.Cell(sheet_r, 6, r_s['Nhân sự']),
-                                gspread.Cell(sheet_r, 7, r_s['Kết quả'])
-                            ])
-                        if cells_to_update_seed:
-                            sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                            sh_trucso.worksheet(tab_name_current).update_cells(cells_to_update_seed)
-                            clear_app_caches()
-                            st.success("Đã cập nhật bảng Seeding!"); time.sleep(1); st.rerun()
-
-            st.markdown("---")
-            del_sd_id = st.selectbox("Chọn STT Nhiệm vụ Seeding để xóa:", ["--"] + df_seed_edit['STT'].tolist())
-            if st.button("🗑️ XÓA NHIỆM VỤ NÀY"):
-                if del_sd_id != "--":
-                    with st.spinner("Đang xóa..."):
-                        target_r = df_seed_edit[df_seed_edit['STT'] == del_sd_id].iloc[0]['ID_ROW']
-                        row_0_based = int(target_r) - 1
-                        del_req = {"deleteDimension": {"range": {"sheetId": ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
-                        ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).spreadsheet.batch_update({"requests": [del_req]})
-                        clear_app_caches()
-                        st.success("Đã xóa!"); time.sleep(1); st.rerun()
-        else:
-            st.info("Chưa có nhiệm vụ Seeding nào trong ngày hôm nay.")
-            
-        with st.expander("➕ THÊM NHIỆM VỤ SEEDING MỚI", expanded=False):
-            with st.form("add_seeding_form"):
-                s_nhiemvu = st.text_area("Nhiệm vụ (VD: Text ảnh... explainer...)")
-                cs1, cs2 = st.columns(2)
-                s_link = cs1.text_input("Link bài post")
-                s_phutrach = cs2.text_input("Phụ trách / Nền tảng")
-                cs3, cs4 = st.columns(2)
-                s_kpi = cs3.text_input("KPI Yêu cầu")
-                s_nhansu = cs4.selectbox("Nhân sự thực hiện", [""] + list_nv)
-                
-                if st.form_submit_button("THÊM NHIỆM VỤ"):
-                    with st.spinner("Đang thêm nhiệm vụ seeding..."):
-                        try:
-                            sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                            wks_today = sh_trucso.worksheet(tab_name_current)
-                            all_rows = wks_today.get_all_values()
-                            
-                            seeding_start_row = -1
-                            header_row = -1
-                            for i, r_val in enumerate(all_rows):
-                                r_str = " ".join([str(x).upper() for x in r_val])
-                                if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in r_str:
-                                    seeding_start_row = i + 1
-                                if "LINK" in r_str and "PHỤ TRÁCH" in r_str and "KPI" in r_str:
-                                    header_row = i + 1
-                            
-                            fmt_requests = []
-                            rows_to_append = []
-                            
-                            if header_row == -1:
-                                r1 = [""] * 14
-                                r1[1] = "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN, MỒI BÌNH LUẬN, TƯƠNG TÁC"
-                                r2 = [""] * 14
-                                r2[1] = "Tương tác khán giả thì sử dụng tài khoản Vietnam Today, còn mồi bình luận thì sử dụng tài khoản cá nhân hoặc các tài khoản bên ngoài.\nKhi tương tác bằng nick Vietnam Today phải tuân thủ nghiêm ngặt mọi quy định về phát ngôn, đại diện phát ngôn của cơ quan."
-                                r3 = ["STT", "NHIỆM VỤ", "LINK", "PHỤ TRÁCH", "KPI", "NHÂN SỰ", "KẾT QUẢ"] + [""] * 7
-                                rows_to_append.extend([[""]*14, r1, r2, r3])
+            with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
+                with st.form("add_news_form"):
+                    c1, c2 = st.columns([3, 1])
+                    ts_noidung = c1.text_area("Tên bài / Nội dung", placeholder="Nhập nội dung...")
+                    ts_dinhdang = c2.selectbox("Định dạng", OPTS_DINH_DANG)
+                    
+                    c3, c4, c5, c6 = st.columns(4)
+                    ts_nentang = c3.multiselect("Nền tảng xuất bản", OPTS_NEN_TANG)
+                    
+                    idx_cho_xu_ly = OPTS_STATUS_TRUCSO.index("Chờ xử lý") if "Chờ xử lý" in OPTS_STATUS_TRUCSO else 0
+                    ts_status = c4.selectbox("Trạng thái", OPTS_STATUS_TRUCSO, index=idx_cho_xu_ly)
+                    
+                    ts_nhansu = c5.multiselect("BTV Thực hiện", list_nv, default=[curr_name] if curr_name in list_nv else None)
+                    ts_check = c6.text_input("Ghi chú Check", placeholder="VD: OK, Sửa video...")
+                    
+                    st.markdown("**THÔNG TIN BỔ SUNG & NỘI DUNG:**")
+                    c_nguon, c_drive = st.columns(2)
+                    ts_nguon = c_nguon.text_input("Nguồn lấy tin", placeholder="VD: Reuters, APTN, VTV1...")
+                    ts_linkduyet = c_drive.text_input("LINK GOOGLE DRIVE")
+                    ts_texttin = st.text_area("TEXT CỦA TIN", height=100)
+                    
+                    if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
+                        with st.spinner("Đang thêm và Tự động căn chỉnh Gộp ô (Merge)..."):
+                            try:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                all_rows = wks_today.get_all_values()
+                                
                                 start_stt = 1
-                            else:
-                                start_stt = 1
-                                for r in reversed(all_rows[header_row:]):
-                                    if len(r) > 0 and str(r[0]).strip().isdigit():
-                                        start_stt = int(str(r[0]).strip()) + 1
+                                start_row_idx = 5
+                                for i, r in enumerate(all_rows[5:]):
+                                    r_str = "".join([str(x).strip() for x in r])
+                                    if "PHÂN CÔNG TRẢ LỜI" in r_str.upper():
                                         break
-                                        
-                            new_task = [start_stt, s_nhiemvu, s_link, s_phutrach, s_kpi, s_nhansu, ""] + [""] * 7
-                            rows_to_append.append(new_task)
-                            
-                            start_append_row = len(all_rows) + 1
-                            wks_today.append_rows(rows_to_append)
-                            end_append_row = start_append_row + len(rows_to_append) - 1
-                            
-                            # Format Headers (Nếu vừa tạo mới)
-                            if header_row == -1:
-                                fmt_requests.append({
-                                    "mergeCells": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row, "endRowIndex": start_append_row + 1, "startColumnIndex": 1, "endColumnIndex": 14},
-                                        "mergeType": "MERGE_ALL"
-                                    }
-                                })
-                                fmt_requests.append({
-                                    "mergeCells": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row + 1, "endRowIndex": start_append_row + 2, "startColumnIndex": 1, "endColumnIndex": 14},
-                                        "mergeType": "MERGE_ALL"
-                                    }
-                                })
-                                fmt_requests.append({
-                                    "repeatCell": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row, "endRowIndex": start_append_row + 1, "startColumnIndex": 1, "endColumnIndex": 14},
-                                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER"}},
-                                        "fields": "userEnteredFormat(textFormat,horizontalAlignment)"
-                                    }
-                                })
+                                    if r_str: 
+                                        start_row_idx = i + 5 + 1
+                                        if len(r) > 0 and str(r[0]).strip().isdigit():
+                                            start_stt = int(str(r[0]).strip()) + 1
+
+                                plats = ts_nentang if ts_nentang else [""]
+                                merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
+                                rows_to_add = []
+                                for idx_p, p in enumerate(plats):
+                                    if idx_p == 0:
+                                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
+                                    else:
+                                        row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
+                                    rows_to_add.append(row)
+                                    start_stt += 1 
+                                
+                                wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
+                                
+                                fmt_requests = []
+                                merge_requests = []
+                                
                                 fmt_requests.append({
                                     "repeatCell": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row + 1, "endRowIndex": start_append_row + 2, "startColumnIndex": 1, "endColumnIndex": 14},
-                                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER"}},
-                                        "fields": "userEnteredFormat(textFormat,wrapStrategy,horizontalAlignment)"
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_idx, 
+                                            "endRowIndex": start_row_idx + len(rows_to_add), 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 14
+                                        },
+                                        "cell": {"userEnteredFormat": {
+                                            "wrapStrategy": "WRAP", 
+                                            "verticalAlignment": "MIDDLE",
+                                            "textFormat": {"fontFamily": "Times New Roman"},
+                                            "borders": {
+                                                "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
+                                                "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
+                                            }
+                                        }},
+                                        "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
                                     }
                                 })
+                                
                                 fmt_requests.append({
                                     "repeatCell": {
-                                        "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row + 2, "endRowIndex": start_append_row + 3, "startColumnIndex": 0, "endColumnIndex": 7},
-                                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER", "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}},
-                                        "fields": "userEnteredFormat(textFormat,horizontalAlignment,borders)"
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_idx, 
+                                            "endRowIndex": start_row_idx + len(rows_to_add), 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 1
+                                        },
+                                        "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                                        "fields": "userEnteredFormat(horizontalAlignment)"
                                     }
                                 })
-                            
-                            task_row_idx = end_append_row
-                            fmt_requests.append({
-                                "repeatCell": {
-                                    "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 7},
-                                    "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE", "horizontalAlignment": "CENTER", "textFormat": {"fontFamily": "Times New Roman"}, "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}},
-                                    "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment,textFormat,borders)"
-                                }
-                            })
-                            
-                            if fmt_requests:
+                                
                                 wks_today.spreadsheet.batch_update({"requests": fmt_requests})
                                 
+                                if len(rows_to_add) > 1:
+                                    cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                                    for col_idx in cols_to_merge:
+                                        merge_requests.append({
+                                            "mergeCells": {
+                                                "range": {
+                                                    "sheetId": wks_today.id,
+                                                    "startRowIndex": start_row_idx,
+                                                    "endRowIndex": start_row_idx + len(rows_to_add),
+                                                    "startColumnIndex": col_idx,
+                                                    "endColumnIndex": col_idx + 1
+                                                },
+                                                "mergeType": "MERGE_COLUMNS"
+                                            }
+                                        })
+                                    wks_today.spreadsheet.batch_update({"requests": merge_requests})
+                                
+                                clear_app_caches()
+                                st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
+                            except Exception as e:
+                                st.error(f"Lỗi thêm mới: {e}")
+
+            # ================= KHU VỰC QUẢN LÝ SEEDING =================
+            st.divider()
+            st.markdown("##### 🌱 KHU VỰC QUẢN LÝ SEEDING & TƯƠNG TÁC")
+            st.caption("Quản lý các nhiệm vụ trả lời bình luận, mồi bình luận, tương tác trên nền tảng.")
+            
+            seeding_clean_form = []
+            header_found = False
+            for i, r in df_seeding_st.iterrows():
+                c_val = str(r.get('ĐỊNH DẠNG', '')).strip().upper()
+                if 'LINK' in c_val:
+                    header_found = True
+                    continue
+                if not header_found:
+                    continue
+                    
+                task_sd = str(r.get('NỘI DUNG', '')).strip()
+                if task_sd == "" or task_sd.lower() in ['nan', '<na>', 'none', 'nhiệm vụ']: continue
+                
+                seeding_clean_form.append({
+                    "ID_ROW": i + 6, 
+                    "STT": str(r.get('STT', '')).replace('nan', '').strip(),
+                    "Nhiệm vụ": task_sd,
+                    "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
+                    "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
+                    "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
+                    "Nhân sự": str(r.get('CHECK', '')).replace('nan', '').strip(),
+                    "Kết quả": str(r.get('NGUỒN', '')).replace('nan', '').strip()
+                })
+                
+            if seeding_clean_form:
+                df_seed_edit = pd.DataFrame(seeding_clean_form)
+                edited_seed = st.data_editor(
+                    df_seed_edit, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "ID_ROW": None,
+                        "STT": st.column_config.TextColumn("STT", width="small", disabled=True),
+                        "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large", disabled=True),
+                        "Link": st.column_config.TextColumn("Link post", width="medium"),
+                        "Phụ trách": st.column_config.TextColumn("Nền tảng / Phụ trách", width="small"),
+                        "KPI": st.column_config.TextColumn("KPI Yêu cầu", width="medium"),
+                        "Nhân sự": st.column_config.TextColumn("BTV Thực hiện", width="medium"),
+                        "Kết quả": st.column_config.TextColumn("Kết quả", width="medium")
+                    },
+                    key="edit_seeding_table"
+                )
+                
+                col_btn1, col_btn2 = st.columns([2, 4])
+                with col_btn1:
+                    if st.button("💾 LƯU CẬP NHẬT KẾT QUẢ", type="primary", use_container_width=True):
+                        with st.spinner("Đang lưu kết quả seeding..."):
+                            cells_to_update_seed = []
+                            for idx_s, r_s in edited_seed.iterrows():
+                                sheet_r = int(r_s['ID_ROW'])
+                                cells_to_update_seed.extend([
+                                    gspread.Cell(sheet_r, 3, r_s['Link']),
+                                    gspread.Cell(sheet_r, 4, r_s['Phụ trách']),
+                                    gspread.Cell(sheet_r, 5, r_s['KPI']),
+                                    gspread.Cell(sheet_r, 6, r_s['Nhân sự']),
+                                    gspread.Cell(sheet_r, 7, r_s['Kết quả'])
+                                ])
+                            if cells_to_update_seed:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                sh_trucso.worksheet(tab_name_current).update_cells(cells_to_update_seed)
+                                clear_app_caches()
+                                st.success("Đã cập nhật bảng Seeding!"); time.sleep(1); st.rerun()
+
+                st.markdown("---")
+                del_sd_id = st.selectbox("Chọn STT Nhiệm vụ Seeding để xóa:", ["--"] + df_seed_edit['STT'].tolist())
+                if st.button("🗑️ XÓA NHIỆM VỤ NÀY"):
+                    if del_sd_id != "--":
+                        with st.spinner("Đang xóa..."):
+                            target_r = df_seed_edit[df_seed_edit['STT'] == del_sd_id].iloc[0]['ID_ROW']
+                            row_0_based = int(target_r) - 1
+                            del_req = {"deleteDimension": {"range": {"sheetId": ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
+                            ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).spreadsheet.batch_update({"requests": [del_req]})
                             clear_app_caches()
-                            st.success("Đã thêm nhiệm vụ Seeding!"); time.sleep(1.5); st.rerun()
-                        except Exception as e:
-                            st.error(f"Lỗi thêm seeding: {e}")
+                            st.success("Đã xóa!"); time.sleep(1); st.rerun()
+            else:
+                st.info("Chưa có nhiệm vụ Seeding nào trong ngày hôm nay.")
+                
+            with st.expander("➕ THÊM NHIỆM VỤ SEEDING MỚI", expanded=False):
+                with st.form("add_seeding_form"):
+                    s_nhiemvu = st.text_area("Nhiệm vụ (VD: Text ảnh... explainer...)")
+                    cs1, cs2 = st.columns(2)
+                    s_link = cs1.text_input("Link bài post")
+                    s_phutrach = cs2.text_input("Phụ trách / Nền tảng")
+                    cs3, cs4 = st.columns(2)
+                    s_kpi = cs3.text_input("KPI Yêu cầu")
+                    s_nhansu = cs4.selectbox("Nhân sự thực hiện", [""] + list_nv)
+                    
+                    if st.form_submit_button("THÊM NHIỆM VỤ"):
+                        with st.spinner("Đang thêm nhiệm vụ seeding..."):
+                            try:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                all_rows = wks_today.get_all_values()
+                                
+                                seeding_start_row = -1
+                                header_row = -1
+                                for i, r_val in enumerate(all_rows):
+                                    r_str = " ".join([str(x).upper() for x in r_val])
+                                    if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in r_str:
+                                        seeding_start_row = i + 1
+                                    if "LINK" in r_str and "PHỤ TRÁCH" in r_str and "KPI" in r_str:
+                                        header_row = i + 1
+                                
+                                fmt_requests = []
+                                rows_to_append = []
+                                
+                                if header_row == -1:
+                                    r1 = [""] * 14
+                                    r1[1] = "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN, MỒI BÌNH LUẬN, TƯƠNG TÁC"
+                                    r2 = [""] * 14
+                                    r2[1] = "Tương tác khán giả thì sử dụng tài khoản Vietnam Today, còn mồi bình luận thì sử dụng tài khoản cá nhân hoặc các tài khoản bên ngoài.\nKhi tương tác bằng nick Vietnam Today phải tuân thủ nghiêm ngặt mọi quy định về phát ngôn, đại diện phát ngôn của cơ quan."
+                                    r3 = ["STT", "NHIỆM VỤ", "LINK", "PHỤ TRÁCH", "KPI", "NHÂN SỰ", "KẾT QUẢ"] + [""] * 7
+                                    rows_to_append.extend([[""]*14, r1, r2, r3])
+                                    start_stt = 1
+                                else:
+                                    start_stt = 1
+                                    for r in reversed(all_rows[header_row:]):
+                                        if len(r) > 0 and str(r[0]).strip().isdigit():
+                                            start_stt = int(str(r[0]).strip()) + 1
+                                            break
+                                            
+                                new_task = [start_stt, s_nhiemvu, s_link, s_phutrach, s_kpi, s_nhansu, ""] + [""] * 7
+                                rows_to_append.append(new_task)
+                                
+                                start_append_row = len(all_rows) + 1
+                                wks_today.append_rows(rows_to_append)
+                                end_append_row = start_append_row + len(rows_to_append) - 1
+                                
+                                # Format Headers (Nếu vừa tạo mới)
+                                if header_row == -1:
+                                    fmt_requests.append({
+                                        "mergeCells": {
+                                            "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row, "endRowIndex": start_append_row + 1, "startColumnIndex": 1, "endColumnIndex": 14},
+                                            "mergeType": "MERGE_ALL"
+                                        }
+                                    })
+                                    fmt_requests.append({
+                                        "mergeCells": {
+                                            "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row + 1, "endRowIndex": start_append_row + 2, "startColumnIndex": 1, "endColumnIndex": 14},
+                                            "mergeType": "MERGE_ALL"
+                                        }
+                                    })
+                                    fmt_requests.append({
+                                        "repeatCell": {
+                                            "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row, "endRowIndex": start_append_row + 1, "startColumnIndex": 1, "endColumnIndex": 14},
+                                            "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER"}},
+                                            "fields": "userEnteredFormat(textFormat,horizontalAlignment)"
+                                        }
+                                    })
+                                    fmt_requests.append({
+                                        "repeatCell": {
+                                            "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row + 1, "endRowIndex": start_append_row + 2, "startColumnIndex": 1, "endColumnIndex": 14},
+                                            "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER"}},
+                                            "fields": "userEnteredFormat(textFormat,wrapStrategy,horizontalAlignment)"
+                                        }
+                                    })
+                                    fmt_requests.append({
+                                        "repeatCell": {
+                                            "range": {"sheetId": wks_today.id, "startRowIndex": start_append_row + 2, "endRowIndex": start_append_row + 3, "startColumnIndex": 0, "endColumnIndex": 7},
+                                            "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER", "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}},
+                                            "fields": "userEnteredFormat(textFormat,horizontalAlignment,borders)"
+                                        }
+                                    })
+                                
+                                task_row_idx = end_append_row
+                                fmt_requests.append({
+                                    "repeatCell": {
+                                        "range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 7},
+                                        "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE", "horizontalAlignment": "CENTER", "textFormat": {"fontFamily": "Times New Roman"}, "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}},
+                                        "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment,textFormat,borders)"
+                                    }
+                                })
+                                
+                                if fmt_requests:
+                                    wks_today.spreadsheet.batch_update({"requests": fmt_requests})
+                                    
+                                clear_app_caches()
+                                st.success("Đã thêm nhiệm vụ Seeding!"); time.sleep(1.5); st.rerun()
+                            except Exception as e:
+                                st.error(f"Lỗi thêm seeding: {e}")
 
 # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
 with tabs[1]:
