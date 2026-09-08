@@ -1973,8 +1973,8 @@ else:
                     )
                 else: 
                     st.warning(f"📭 Không tìm thấy dữ liệu phát sóng trong cột {selected_day} của Tab này.")
-        except Exception as e:
-            st.error(f"Lỗi khi đọc file Khung: {e}")
+            except Exception as e:
+                st.error(f"Lỗi khi đọc file Khung: {e}")
 
     # ================= CÁC TAB KHÁC =================
     with tabs[2]:
