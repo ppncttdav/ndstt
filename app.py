@@ -425,6 +425,7 @@ def load_du_lieu_app():
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_public_gsheet_as_excel(url):
+    # CHỈ DÙNG CHO PHẦN TẠO LPS TỰ ĐỘNG - KHÔNG ĐƯỢC ĐỘNG TỚI
     try:
         sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
         if not sheet_id_match: return None
@@ -435,87 +436,95 @@ def get_public_gsheet_as_excel(url):
     except Exception: pass
     return None
 
+# ================= THUẬT TOÁN ĐỌC SHEET LỊCH SIÊU TỐC QUA CSV =================
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_and_parse_schedules(url_ldp, url_btv):
+    # Đổi phương pháp tải file Excel (xlsx) sang tải CSV để đọc chính xác từng chữ hiển thị
+    # và bỏ qua hoàn toàn lỗi "mù định dạng ngày tháng" của Pandas.
     results = {"LDP": pd.DataFrame(), "BTV": pd.DataFrame()}
-    def _fetch_and_parse(url, kw):
+    
+    def _fetch_csv(url, kw):
         try:
-            excel_bytes = get_public_gsheet_as_excel(url)
-            if excel_bytes:
-                xls = pd.ExcelFile(io.BytesIO(excel_bytes))
-                target_sheet = xls.sheet_names[0]
-                if kw == "LDP":
-                    for sn in xls.sheet_names:
-                        if "LĐP" in sn.upper() or "LÃNH ĐẠO PHÒNG" in sn.upper(): target_sheet = sn; break
-                else:
-                    for sn in xls.sheet_names:
-                        if ("SỐ" in sn.upper() or "TRỰC" in sn.upper()) and "LĐP" not in sn.upper():
-                            target_sheet = sn; break
-                df = pd.read_excel(xls, sheet_name=target_sheet, header=None)
+            sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+            if not sheet_id_match: return kw, pd.DataFrame()
+            sheet_id = sheet_id_match.group(1)
+            
+            gid_match = re.search(r'gid=([0-9]+)', url)
+            gid = gid_match.group(1) if gid_match else "0"
+            
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+            res = requests.get(csv_url, timeout=15)
+            if res.status_code == 200:
+                res.encoding = 'utf-8' 
+                df = pd.read_csv(io.StringIO(res.text), header=None)
                 return kw, df
-        except: pass
+        except Exception as e:
+            logger.error(f"Lỗi tải CSV lịch {kw}: {e}")
+            pass
         return kw, pd.DataFrame()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
-            executor.submit(_fetch_and_parse, url_ldp, "LDP"),
-            executor.submit(_fetch_and_parse, url_btv, "BTV")
+            executor.submit(_fetch_csv, url_ldp, "LDP"),
+            executor.submit(_fetch_csv, url_btv, "BTV")
         ]
         for f in concurrent.futures.as_completed(futures):
             k, df = f.result()
             results[k] = df
     return results
 
-# Cập nhật thuật toán tìm kiếm đa không gian cho Lịch LĐP
 def get_ldp_from_df(df, target_date_obj, list_nv):
     if df is None or df.empty: return ""
     
-    m_str1 = f"tháng{target_date_obj.month}"
-    m_str2 = f"tháng{target_date_obj.month:02d}"
-    d_str = str(target_date_obj.day)
-    d_str_0 = f"{target_date_obj.day:02d}"
+    d = target_date_obj.day
+    m = target_date_obj.month
+    
+    m_str1 = f"tháng{m}"
+    m_str2 = f"tháng{m:02d}"
+    d_str1 = str(d)
+    d_str2 = f"{d:02d}"
     
     target_col = -1
     header_row = -1
     
-    # 1. Quét tìm dòng chứa tháng để làm mốc neo
-    for r in range(len(df)):
+    # Kỹ thuật quét ngược (Bottom-up):
+    # Vì file lịch nối dài tháng xuống dưới, quét ngược từ đáy lên sẽ bắt trúng tháng gần nhất!
+    for r in reversed(range(len(df))):
         row_str = "".join([str(x).strip().lower().replace(" ", "") for x in df.iloc[r].values])
         if m_str1 in row_str or m_str2 in row_str:
             # Tìm ngày trong chính dòng đó và 2 dòng tiếp theo
             for offset in [0, 1, 2]:
-                if r + offset < len(df):
-                    day_vals = [str(x).strip().replace(".0", "") for x in df.iloc[r + offset].values]
-                    if d_str in day_vals or d_str_0 in day_vals:
+                if r + offset >= len(df): break
+                day_vals = df.iloc[r + offset].values
+                for c_idx, d_val in enumerate(day_vals):
+                    if pd.isna(d_val): continue
+                    s_val = str(d_val).strip().replace(".0", "") 
+                    if s_val == d_str1 or s_val == d_str2 or s_val == f"0{d_str1}":
+                        target_col = c_idx
                         header_row = r + offset
-                        # Tìm chính xác cột của ngày đó
-                        for c_idx, val in enumerate(day_vals):
-                            if val == d_str or val == d_str_0:
-                                target_col = c_idx
-                                break
+                        break
                 if target_col != -1: break
         if target_col != -1: break
         
-    # 2. Gióng theo cột ngày xuống dưới để lấy BTV Trực
+    # Gióng xuống tìm LĐP Trực số
     if target_col != -1 and header_row != -1:
         for r in range(header_row + 1, min(header_row + 100, len(df))):
             val = str(df.iloc[r, target_col]).lower().strip()
-            if val and val != 'nan':
-                if "nghỉ" in val or "off" in val or "công tác" in val or "ốm" in val or "họp" in val: continue
-                if "số" in val or val == "x":
-                    name = ""
-                    # Tên BTV thường nằm ở 4 cột đầu tiên của hàng
-                    for c in range(min(4, len(df.columns))):
-                        n = str(df.iloc[r, c]).strip()
-                        if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
-                            name = n
-                            break
-                    if name:
-                        matched = match_nv(name, list_nv)
-                        if matched: return matched
+            if not val or val == 'nan': continue
+            if "nghỉ" in val or "off" in val or "công tác" in val or "ốm" in val or "họp" in val: continue
+            if "số" in val or val == "x" or "lđp" in val or "ldp" in val:
+                name = ""
+                # Tên thường ở 5 cột đầu tiên
+                for c in range(min(5, len(df.columns))):
+                    n = str(df.iloc[r, c]).strip()
+                    if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
+                        name = n
+                        break
+                if name:
+                    matched = match_nv(name, list_nv)
+                    if matched: return matched
     return ""
 
-# Cập nhật thuật toán quét theo khối dọc cho Lịch Trực Số (BTV/TCSX)
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     res_tcsx = ""
     res_btv = []
@@ -525,35 +534,39 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     m = target_date_obj.month
     y = target_date_obj.year
     
-    # Tính toán toàn bộ các format date có thể có trên sheet
-    date_patterns = [
-        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}/{y%100}", f"{d}/{m}/{y%100}",
-        f"{d:02d}/{m:02d}", f"{d}/{m}"
-    ]
+    p1 = f"{d:02d}/{m:02d}/{y}"
+    p2 = f"{d}/{m}/{y}"
+    p3 = f"{d:02d}/{m:02d}"
+    p4 = f"{d}/{m}"
+    p5 = f"{d:02d}/{m:02d}/{str(y)[-2:]}"
+    p6 = f"{d}/{m}/{str(y)[-2:]}"
     
     target_col = -1
     header_row = -1
     
-    # 1. Tìm chính xác dòng hiển thị Date
-    for r in range(len(df)):
+    # Quét ngược (Bottom-up) tương tự LĐP
+    for r in reversed(range(len(df))):
         for c in range(len(df.columns)):
-            val = str(df.iloc[r, c]).strip().lower()
-            if any(p == val or val.endswith(f" {p}") or val.startswith(f"{p} ") for p in date_patterns):
+            raw_val = df.iloc[r, c]
+            if pd.isna(raw_val): continue
+            
+            val = str(raw_val).strip().lower()
+            tokens = re.split(r'[\s\n]+', val)
+            if any(t in [p1, p2, p3, p4, p5, p6] for t in tokens):
                 target_col = c
                 header_row = r
                 break
         if target_col != -1: break
         
-    # 2. Quét hàng dọc từ Date xuống dưới để tìm phân ca
     if target_col != -1:
         for r in range(header_row + 1, min(header_row + 200, len(df))):
             val = str(df.iloc[r, target_col]).lower().strip()
             if not val or val == 'nan': continue
             
             name = ""
-            for c in range(min(4, len(df.columns))):
+            for c in range(min(5, len(df.columns))):
                 n = str(df.iloc[r, c]).strip()
-                if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower() and "thứ" not in n.lower() and "tháng" not in n.lower():
+                if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
                     name = n
                     break
             
@@ -1672,7 +1685,8 @@ else:
                                 
                                 clear_app_caches()
                                 st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
-                            except Exception as e: st.error(f"Lỗi thêm mới: {e}")
+                            except Exception as e:
+                                st.error(f"Lỗi thêm mới: {e}")
 
             # ================= KHU VỰC QUẢN LÝ SEEDING =================
             st.divider()
