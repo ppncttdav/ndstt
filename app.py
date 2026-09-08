@@ -466,43 +466,45 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
             results[k] = df
     return results
 
+# Cập nhật thuật toán tìm kiếm đa không gian cho Lịch LĐP
 def get_ldp_from_df(df, target_date_obj, list_nv):
     if df is None or df.empty: return ""
+    
+    m_str1 = f"tháng{target_date_obj.month}"
+    m_str2 = f"tháng{target_date_obj.month:02d}"
     d_str = str(target_date_obj.day)
-    d_str_02 = f"{target_date_obj.day:02d}"
-    m = target_date_obj.month
+    d_str_0 = f"{target_date_obj.day:02d}"
     
     target_col = -1
     header_row = -1
     
-    for r in range(1, len(df)):
-        row_vals_clean = [str(x).strip()[:-2] if str(x).strip().endswith('.0') else str(x).strip() for x in df.iloc[r].values]
+    # 1. Quét tìm dòng chứa tháng để làm mốc neo
+    for r in range(len(df)):
+        row_str = "".join([str(x).strip().lower().replace(" ", "") for x in df.iloc[r].values])
+        if m_str1 in row_str or m_str2 in row_str:
+            # Tìm ngày trong chính dòng đó và 2 dòng tiếp theo
+            for offset in [0, 1, 2]:
+                if r + offset < len(df):
+                    day_vals = [str(x).strip().replace(".0", "") for x in df.iloc[r + offset].values]
+                    if d_str in day_vals or d_str_0 in day_vals:
+                        header_row = r + offset
+                        # Tìm chính xác cột của ngày đó
+                        for c_idx, val in enumerate(day_vals):
+                            if val == d_str or val == d_str_0:
+                                target_col = c_idx
+                                break
+                if target_col != -1: break
+        if target_col != -1: break
         
-        if ("1" in row_vals_clean and "15" in row_vals_clean):
-            header_row = r
-            month_row_idx = r - 1
-            
-            current_month = -1
-            for c in range(len(df.columns)):
-                m_val = str(df.iloc[month_row_idx, c]).lower().strip()
-                m_match = re.search(r'tháng\s*0?(\d+)', m_val)
-                if m_match:
-                    current_month = int(m_match.group(1))
-                    
-                if (row_vals_clean[c] == d_str or row_vals_clean[c] == d_str_02) and current_month == m:
-                    target_col = c
-                    break
-                    
-            if target_col != -1:
-                break
-                
+    # 2. Gióng theo cột ngày xuống dưới để lấy BTV Trực
     if target_col != -1 and header_row != -1:
-        for r in range(header_row + 1, len(df)):
+        for r in range(header_row + 1, min(header_row + 100, len(df))):
             val = str(df.iloc[r, target_col]).lower().strip()
             if val and val != 'nan':
-                if "nghỉ" in val or "off" in val or "công tác" in val: continue
-                if "số" in val:
+                if "nghỉ" in val or "off" in val or "công tác" in val or "ốm" in val or "họp" in val: continue
+                if "số" in val or val == "x":
                     name = ""
+                    # Tên BTV thường nằm ở 4 cột đầu tiên của hàng
                     for c in range(min(4, len(df.columns))):
                         n = str(df.iloc[r, c]).strip()
                         if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
@@ -513,6 +515,7 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
                         if matched: return matched
     return ""
 
+# Cập nhật thuật toán quét theo khối dọc cho Lịch Trực Số (BTV/TCSX)
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     res_tcsx = ""
     res_btv = []
@@ -521,13 +524,17 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
     d = target_date_obj.day
     m = target_date_obj.month
     y = target_date_obj.year
+    
+    # Tính toán toàn bộ các format date có thể có trên sheet
     date_patterns = [
-        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}", f"{d}/{m}"
+        f"{d:02d}/{m:02d}/{y}", f"{d}/{m}/{y}", f"{d:02d}/{m:02d}/{y%100}", f"{d}/{m}/{y%100}",
+        f"{d:02d}/{m:02d}", f"{d}/{m}"
     ]
     
     target_col = -1
     header_row = -1
     
+    # 1. Tìm chính xác dòng hiển thị Date
     for r in range(len(df)):
         for c in range(len(df.columns)):
             val = str(df.iloc[r, c]).strip().lower()
@@ -537,8 +544,9 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
                 break
         if target_col != -1: break
         
+    # 2. Quét hàng dọc từ Date xuống dưới để tìm phân ca
     if target_col != -1:
-        for r in range(header_row + 1, len(df)):
+        for r in range(header_row + 1, min(header_row + 200, len(df))):
             val = str(df.iloc[r, target_col]).lower().strip()
             if not val or val == 'nan': continue
             
@@ -554,9 +562,10 @@ def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
                 if matched:
                     if "tcsx" in val:
                         res_tcsx = matched
-                    elif "số" in val or "btv" in val or "trực" in val or val == "x":
+                    elif "trực số" in val or "số" in val or "btv" in val or val == "x":
                         if "hỗ trợ" not in val and "ht" not in val and "công tác" not in val and "nghỉ" not in val and "off" not in val:
                             if matched not in res_btv: res_btv.append(matched)
+                            
     return res_tcsx, res_btv
 
 def lay_nhan_su_tu_lich_phuc_tap(target_date_obj, list_nv):
@@ -1590,80 +1599,80 @@ else:
                                         if len(r) > 0 and str(r[0]).strip().isdigit():
                                             start_stt = int(str(r[0]).strip()) + 1
 
-                                plats = ts_nentang if ts_nentang else [""]
-                                merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
-                                rows_to_add = []
-                                for idx_p, p in enumerate(plats):
-                                    if idx_p == 0:
-                                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
-                                    else:
-                                        row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
-                                    rows_to_add.append(row)
-                                    start_stt += 1 
-                                
-                                wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
-                                
-                                fmt_requests = []
-                                merge_requests = []
-                                
-                                fmt_requests.append({
-                                    "repeatCell": {
-                                        "range": {
-                                            "sheetId": wks_today.id, 
-                                            "startRowIndex": start_row_idx, 
-                                            "endRowIndex": start_row_idx + len(rows_to_add), 
-                                            "startColumnIndex": 0, 
-                                            "endColumnIndex": 14
-                                        },
-                                        "cell": {"userEnteredFormat": {
-                                            "wrapStrategy": "WRAP", 
-                                            "verticalAlignment": "MIDDLE",
-                                            "textFormat": {"fontFamily": "Times New Roman"},
-                                            "borders": {
-                                                "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
-                                                "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
-                                            }
-                                        }},
-                                        "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
-                                    }
-                                })
-                                
-                                fmt_requests.append({
-                                    "repeatCell": {
-                                        "range": {
-                                            "sheetId": wks_today.id, 
-                                            "startRowIndex": start_row_idx, 
-                                            "endRowIndex": start_row_idx + len(rows_to_add), 
-                                            "startColumnIndex": 0, 
-                                            "endColumnIndex": 1
-                                        },
-                                        "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                                        "fields": "userEnteredFormat(horizontalAlignment)"
-                                    }
-                                })
-                                
-                                wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-                                
-                                if len(rows_to_add) > 1:
-                                    cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-                                    for col_idx in cols_to_merge:
-                                        merge_requests.append({
-                                            "mergeCells": {
-                                                "range": {
-                                                    "sheetId": wks_today.id,
-                                                    "startRowIndex": start_row_idx,
-                                                    "endRowIndex": start_row_idx + len(rows_to_add),
-                                                    "startColumnIndex": col_idx,
-                                                    "endColumnIndex": col_idx + 1
-                                                },
-                                                "mergeType": "MERGE_COLUMNS"
-                                            }
-                                        })
-                                    wks_today.spreadsheet.batch_update({"requests": merge_requests})
-                                
-                                clear_app_caches()
-                                st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
-                            except Exception as e: st.error(f"Lỗi thêm mới: {e}")
+                            plats = ts_nentang if ts_nentang else [""]
+                            merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
+                            rows_to_add = []
+                            for idx_p, p in enumerate(plats):
+                                if idx_p == 0:
+                                    row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
+                                else:
+                                    row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
+                                rows_to_add.append(row)
+                                start_stt += 1 
+                            
+                            wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
+                            
+                            fmt_requests = []
+                            merge_requests = []
+                            
+                            fmt_requests.append({
+                                "repeatCell": {
+                                    "range": {
+                                        "sheetId": wks_today.id, 
+                                        "startRowIndex": start_row_idx, 
+                                        "endRowIndex": start_row_idx + len(rows_to_add), 
+                                        "startColumnIndex": 0, 
+                                        "endColumnIndex": 14
+                                    },
+                                    "cell": {"userEnteredFormat": {
+                                        "wrapStrategy": "WRAP", 
+                                        "verticalAlignment": "MIDDLE",
+                                        "textFormat": {"fontFamily": "Times New Roman"},
+                                        "borders": {
+                                            "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
+                                            "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
+                                        }
+                                    }},
+                                    "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
+                                }
+                            })
+                            
+                            fmt_requests.append({
+                                "repeatCell": {
+                                    "range": {
+                                        "sheetId": wks_today.id, 
+                                        "startRowIndex": start_row_idx, 
+                                        "endRowIndex": start_row_idx + len(rows_to_add), 
+                                        "startColumnIndex": 0, 
+                                        "endColumnIndex": 1
+                                    },
+                                    "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                                    "fields": "userEnteredFormat(horizontalAlignment)"
+                                }
+                            })
+                            
+                            wks_today.spreadsheet.batch_update({"requests": fmt_requests})
+                            
+                            if len(rows_to_add) > 1:
+                                cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                                for col_idx in cols_to_merge:
+                                    merge_requests.append({
+                                        "mergeCells": {
+                                            "range": {
+                                                "sheetId": wks_today.id,
+                                                "startRowIndex": start_row_idx,
+                                                "endRowIndex": start_row_idx + len(rows_to_add),
+                                                "startColumnIndex": col_idx,
+                                                "endColumnIndex": col_idx + 1
+                                            },
+                                            "mergeType": "MERGE_COLUMNS"
+                                        }
+                                    })
+                                wks_today.spreadsheet.batch_update({"requests": merge_requests})
+                            
+                            clear_app_caches()
+                            st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
+                        except Exception as e: st.error(f"Lỗi thêm mới: {e}")
 
             # ================= KHU VỰC QUẢN LÝ SEEDING =================
             st.divider()
