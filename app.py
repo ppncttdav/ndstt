@@ -1040,10 +1040,10 @@ else:
                 default_roster[1] = auto_ldp if auto_ldp else "--"
                 default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
                 default_roster[3] = auto_tcsx if auto_tcsx else "--"          # TRỰC LỊCH PHÁT SÓNG
-                default_roster[4] = auto_btv[1] if len(auto_btv) > 1 else "--" 
-                default_roster[5] = auto_btv[2] if len(auto_btv) > 2 else "--" 
-                default_roster[6] = auto_btv[3] if len(auto_btv) > 3 else "--" 
-                default_roster[7] = auto_btv[4] if len(auto_btv) > 4 else "--" 
+                default_roster[4] = auto_btv[4] if len(auto_btv) > 1 else "--" 
+                default_roster[5] = auto_btv[3] if len(auto_btv) > 2 else "--" 
+                default_roster[6] = auto_btv[1] if len(auto_btv) > 3 else "--" 
+                default_roster[7] = auto_btv[2] if len(auto_btv) > 4 else "--" 
 
                 with st.form("init_roster"):
                     cols = st.columns(3); roster_vals = []
