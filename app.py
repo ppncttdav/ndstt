@@ -1599,80 +1599,80 @@ else:
                                         if len(r) > 0 and str(r[0]).strip().isdigit():
                                             start_stt = int(str(r[0]).strip()) + 1
 
-                            plats = ts_nentang if ts_nentang else [""]
-                            merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
-                            rows_to_add = []
-                            for idx_p, p in enumerate(plats):
-                                if idx_p == 0:
-                                    row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
-                                else:
-                                    row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
-                                rows_to_add.append(row)
-                                start_stt += 1 
-                            
-                            wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
-                            
-                            fmt_requests = []
-                            merge_requests = []
-                            
-                            fmt_requests.append({
-                                "repeatCell": {
-                                    "range": {
-                                        "sheetId": wks_today.id, 
-                                        "startRowIndex": start_row_idx, 
-                                        "endRowIndex": start_row_idx + len(rows_to_add), 
-                                        "startColumnIndex": 0, 
-                                        "endColumnIndex": 14
-                                    },
-                                    "cell": {"userEnteredFormat": {
-                                        "wrapStrategy": "WRAP", 
-                                        "verticalAlignment": "MIDDLE",
-                                        "textFormat": {"fontFamily": "Times New Roman"},
-                                        "borders": {
-                                            "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
-                                            "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
-                                        }
-                                    }},
-                                    "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
-                                }
-                            })
-                            
-                            fmt_requests.append({
-                                "repeatCell": {
-                                    "range": {
-                                        "sheetId": wks_today.id, 
-                                        "startRowIndex": start_row_idx, 
-                                        "endRowIndex": start_row_idx + len(rows_to_add), 
-                                        "startColumnIndex": 0, 
-                                        "endColumnIndex": 1
-                                    },
-                                    "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                                    "fields": "userEnteredFormat(horizontalAlignment)"
-                                }
-                            })
-                            
-                            wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-                            
-                            if len(rows_to_add) > 1:
-                                cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-                                for col_idx in cols_to_merge:
-                                    merge_requests.append({
-                                        "mergeCells": {
-                                            "range": {
-                                                "sheetId": wks_today.id,
-                                                "startRowIndex": start_row_idx,
-                                                "endRowIndex": start_row_idx + len(rows_to_add),
-                                                "startColumnIndex": col_idx,
-                                                "endColumnIndex": col_idx + 1
-                                            },
-                                            "mergeType": "MERGE_COLUMNS"
-                                        }
-                                    })
-                                wks_today.spreadsheet.batch_update({"requests": merge_requests})
-                            
-                            clear_app_caches()
-                            st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
-                        except Exception as e: st.error(f"Lỗi thêm mới: {e}")
+                                plats = ts_nentang if ts_nentang else [""]
+                                merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
+                                rows_to_add = []
+                                for idx_p, p in enumerate(plats):
+                                    if idx_p == 0:
+                                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
+                                    else:
+                                        row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
+                                    rows_to_add.append(row)
+                                    start_stt += 1 
+                                
+                                wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
+                                
+                                fmt_requests = []
+                                merge_requests = []
+                                
+                                fmt_requests.append({
+                                    "repeatCell": {
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_idx, 
+                                            "endRowIndex": start_row_idx + len(rows_to_add), 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 14
+                                        },
+                                        "cell": {"userEnteredFormat": {
+                                            "wrapStrategy": "WRAP", 
+                                            "verticalAlignment": "MIDDLE",
+                                            "textFormat": {"fontFamily": "Times New Roman"},
+                                            "borders": {
+                                                "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, 
+                                                "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
+                                            }
+                                        }},
+                                        "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
+                                    }
+                                })
+                                
+                                fmt_requests.append({
+                                    "repeatCell": {
+                                        "range": {
+                                            "sheetId": wks_today.id, 
+                                            "startRowIndex": start_row_idx, 
+                                            "endRowIndex": start_row_idx + len(rows_to_add), 
+                                            "startColumnIndex": 0, 
+                                            "endColumnIndex": 1
+                                        },
+                                        "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                                        "fields": "userEnteredFormat(horizontalAlignment)"
+                                    }
+                                })
+                                
+                                wks_today.spreadsheet.batch_update({"requests": fmt_requests})
+                                
+                                if len(rows_to_add) > 1:
+                                    cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                                    for col_idx in cols_to_merge:
+                                        merge_requests.append({
+                                            "mergeCells": {
+                                                "range": {
+                                                    "sheetId": wks_today.id,
+                                                    "startRowIndex": start_row_idx,
+                                                    "endRowIndex": start_row_idx + len(rows_to_add),
+                                                    "startColumnIndex": col_idx,
+                                                    "endColumnIndex": col_idx + 1
+                                                },
+                                                "mergeType": "MERGE_COLUMNS"
+                                            }
+                                        })
+                                    wks_today.spreadsheet.batch_update({"requests": merge_requests})
+                                
+                                clear_app_caches()
+                                st.success("ĐÃ THÊM MỚI VÀ GỘP Ô THÀNH CÔNG!"); time.sleep(1.5); st.rerun()
+                            except Exception as e: st.error(f"Lỗi thêm mới: {e}")
 
             # ================= KHU VỰC QUẢN LÝ SEEDING =================
             st.divider()
