@@ -1821,11 +1821,6 @@ else:
                                 "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
                             }
                         )
-
-                # Chạy khối Bảng thống kê
-                render_bottom_tables(filter_opt)
-                st.divider()
-
                 with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
                     with st.form("add_news_form", clear_on_submit=True):
                         c1, c2 = st.columns([3, 1])
@@ -1858,6 +1853,13 @@ else:
                             time.sleep(2)
                             clear_cache_and_rerun()
 
+
+                
+                # Chạy khối Bảng thống kê
+                render_bottom_tables(filter_opt)
+                st.divider()
+
+                
                 # ================= KHU VỰC QUẢN LÝ SEEDING =================
                 st.markdown("##### 🌱 KHU VỰC QUẢN LÝ SEEDING & TƯƠNG TÁC")
                 st.caption("Quản lý các nhiệm vụ trả lời bình luận, mồi bình luận, tương tác trên nền tảng.")
