@@ -167,7 +167,6 @@ def queue_bg_scan(text, smart_status=""):
 
 # ================= BACKGROUND TASKS ĐỂ TĂNG TỐC GIAO DIỆN =================
 def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, ts_nguon, ts_nhansu, date_str_display, merged_link_duyet):
-    # Dùng Khóa (Lock) để tránh tin A và B ghi đè lên nhau nếu user tạo quá nhanh
     with SHEET_LOCK:
         try:
             sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -226,8 +225,6 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
                         }
                     })
                 wks_today.spreadsheet.batch_update({"requests": merge_requests})
-                
-            # Xóa cache ngầm để lần tải sau (do fragment) sẽ tự lấy dữ liệu mới
             clear_app_caches()
         except Exception as e: logger.error(f"Lỗi thêm bài ngầm: {e}")
 
@@ -511,7 +508,6 @@ VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": 
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
-# ================= TÍNH NĂNG DI CHUYỂN BÀI VIẾT =================
 def move_group_in_sheet(wks, src_start, src_end, dest_index):
     move_req = {
         "moveDimension": {
@@ -542,7 +538,6 @@ def move_group_in_sheet(wks, src_start, src_end, dest_index):
     if stt_updates:
         wks.update_cells(stt_updates)
 
-# ================= 1. BACKEND & XỬ LÝ DỮ LIỆU =================
 @st.cache_resource(ttl=3600, show_spinner=False)
 def get_gspread_client_cached():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -580,7 +575,6 @@ def safe_read_records_with_row(wks, retries=3, delay=0.4):
             else: time.sleep(delay * (attempt + 1))
     return pd.DataFrame()
 
-# DÒ TÌM CỘT TỰ ĐỘNG ĐỂ CHỐNG LỖI CẮT CỘT KHỎI SHEET
 @st.cache_data(ttl=15, show_spinner=False)
 def fetch_vo_truc_so(tab_name):
     sh = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -1373,11 +1367,10 @@ else:
                 st.write("")
                 filter_opt = st.pills("Bộ lọc", ["Tất cả", "🚨 Cảnh báo rủi ro", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
 
-                # ================= LỒNG KÍNH PHÂN MẢNH THỜI GIAN THỰC =================
-                @st.fragment(run_every="15s")
-                def real_time_dashboard_and_table(current_filter):
-                    _, df_content, _, _ = fetch_vo_truc_so(tab_name_current)
-                    if df_content.empty: return
+                # ================= KHỐI HÀM XỬ LÝ DỮ LIỆU CHUNG (DÙNG CHO FRAGMENT) =================
+                def get_realtime_summary(tab_name):
+                    _, df_content, _, _ = fetch_vo_truc_so(tab_name)
+                    if df_content.empty: return pd.DataFrame(), pd.DataFrame()
                     
                     split_idx = len(df_content)
                     for i, row in df_content.iterrows():
@@ -1445,7 +1438,12 @@ else:
                         queue_bg_scan(curr_txt, smart_status)
                     
                     df_summary = pd.DataFrame(summary_data)
-                    
+                    return df_summary, df_seeding
+
+                # ================= FRAGMENT 1: CHỈ TẢI LẠI BIỂU ĐỒ TRÊN CÙNG =================
+                @st.fragment(run_every="15s")
+                def render_top_dashboard(current_filter):
+                    df_summary, _ = get_realtime_summary(tab_name_current)
                     if not df_summary.empty:
                         m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
                         m1.metric("📌 Tổng bài", len(df_summary))
@@ -1480,51 +1478,11 @@ else:
                         fig_btv.update_layout(barmode='stack', yaxis_title=None, xaxis_title="Số lượng bài", margin=dict(l=0, r=0, t=10, b=0), height=200)
                         st.plotly_chart(fig_btv, use_container_width=True)
 
-                    st.write("")
-                    df_show = df_summary.copy()
-                    if current_filter != "Tất cả": df_show = df_show[df_show["Tiến độ"] == current_filter]
-                    
-                    st.dataframe(
-                        df_show, 
-                        use_container_width=True, 
-                        hide_index=True,
-                        column_config={
-                            "Sản phẩm": st.column_config.TextColumn("Sản phẩm", width="large"),
-                            "BTV": st.column_config.TextColumn("BTV", width="medium"),
-                            "Tiến độ": st.column_config.TextColumn("Tiến độ", width="medium"),
-                            "Nền tảng": st.column_config.TextColumn("Nền tảng", width="medium"),
-                        }
-                    )
-
-                    seeding_clean = []
-                    if not df_seeding.empty:
-                        for _, r in df_seeding.iterrows():
-                            task = str(r.get('NỘI DUNG', '')).strip()
-                            if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
-                            seeding_clean.append({
-                                "STT": str(r.get('STT', '')).replace('nan', '').strip(),
-                                "Nhiệm vụ": task,
-                                "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
-                                "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
-                                "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
-                                "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
-                            })
-                    if seeding_clean:
-                        st.markdown("---")
-                        st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ")
-                        st.dataframe(
-                            pd.DataFrame(seeding_clean), 
-                            use_container_width=True, 
-                            hide_index=True,
-                            column_config={
-                                "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
-                            }
-                        )
-
-                real_time_dashboard_and_table(filter_opt)
+                # Chạy khối Biểu đồ
+                render_top_dashboard(filter_opt)
                 st.divider()
 
-                # ================= 4. KHU VỰC DUYỆT BÀI CHI TIẾT =================
+                # ================= KHU VỰC XỬ LÝ & DUYỆT BÀI (NẰM GIỮA - TĨNH) =================
                 st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
                 st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cảnh báo rủi ro', 'Cần sửa' được đẩy lên đầu)")
                 
@@ -1815,6 +1773,58 @@ else:
                                         st.success("✅ Đã ghi nhận! Hệ thống đang cập nhật ngầm. (F5 sau 1 giây để xem thay đổi)")
                                         time.sleep(0.5)
                                         clear_cache_and_rerun()
+                
+                st.divider()
+
+                # ================= FRAGMENT 2: BẢNG THỐNG KÊ CHI TIẾT =================
+                @st.fragment(run_every="15s")
+                def render_bottom_tables(current_filter):
+                    df_summary, df_seeding = get_realtime_summary(tab_name_current)
+                    if not df_summary.empty:
+                        st.markdown("##### 📋 BẢNG THỐNG KÊ TIN BÀI")
+                        df_show = df_summary.copy()
+                        if current_filter != "Tất cả": df_show = df_show[df_show["Tiến độ"] == current_filter]
+                        
+                        st.dataframe(
+                            df_show, 
+                            use_container_width=True, 
+                            hide_index=True,
+                            column_config={
+                                "Sản phẩm": st.column_config.TextColumn("Sản phẩm", width="large"),
+                                "BTV": st.column_config.TextColumn("BTV", width="medium"),
+                                "Tiến độ": st.column_config.TextColumn("Tiến độ", width="medium"),
+                                "Nền tảng": st.column_config.TextColumn("Nền tảng", width="medium"),
+                            }
+                        )
+
+                    seeding_clean = []
+                    if not df_seeding.empty:
+                        for _, r in df_seeding.iterrows():
+                            task = str(r.get('NỘI DUNG', '')).strip()
+                            if task == "" or task.lower() in ['nan', '<na>', 'none']: continue
+                            seeding_clean.append({
+                                "STT": str(r.get('STT', '')).replace('nan', '').strip(),
+                                "Nhiệm vụ": task,
+                                "Link": str(r.get('ĐỊNH DẠNG', '')).replace('nan', '').strip(),
+                                "Phụ trách": str(r.get('NỀN TẢNG', '')).replace('nan', '').strip(),
+                                "KPI": str(r.get('STATUS', '')).replace('nan', '').strip(),
+                                "Tiến độ": str(r.get('CHECK', '')).replace('nan', '').strip()
+                            })
+                    if seeding_clean:
+                        st.markdown("---")
+                        st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ (CẬP NHẬT TRỰC TIẾP TỪ SHEET)")
+                        st.dataframe(
+                            pd.DataFrame(seeding_clean), 
+                            use_container_width=True, 
+                            hide_index=True,
+                            column_config={
+                                "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
+                            }
+                        )
+
+                # Chạy khối Bảng thống kê
+                render_bottom_tables(filter_opt)
+                st.divider()
 
                 with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
                     with st.form("add_news_form", clear_on_submit=True):
@@ -1849,7 +1859,6 @@ else:
                             clear_cache_and_rerun()
 
                 # ================= KHU VỰC QUẢN LÝ SEEDING =================
-                st.divider()
                 st.markdown("##### 🌱 KHU VỰC QUẢN LÝ SEEDING & TƯƠNG TÁC")
                 st.caption("Quản lý các nhiệm vụ trả lời bình luận, mồi bình luận, tương tác trên nền tảng.")
                 
