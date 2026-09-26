@@ -153,7 +153,6 @@ def queue_bg_scan(text, smart_status=""):
     api_key = get_ai_api_key()
     if not api_key: return
     
-    # [ĐÃ NÂNG CẤP MODEL THÔNG MINH NHẤT]
     model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip()
     today_str = get_vn_time().strftime("%d/%m/%Y")
     
@@ -165,7 +164,7 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
     try:
         sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
         wks_today = sh_trucso.worksheet(tab_name)
-        all_rows = wks_today.get("A1:N300") # Tối ưu API cực nhanh
+        all_rows = wks_today.get("A1:N300")
         
         start_stt = 1
         start_row_idx = 5
@@ -1053,18 +1052,6 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
     except Exception: pass
 
-def update_wks_canhan(action_type, data):
-    sh_main = ket_noi_sheet(SHEET_MAIN)
-    try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-    except: 
-        wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
-        wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
-        
-    if action_type == "update":
-        wks_canhan.update_cells(data)
-    elif action_type == "append":
-        wks_canhan.append_row(data)
-
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -1418,6 +1405,10 @@ else:
             df_main_st = pd.DataFrame()
             df_seeding_st = pd.DataFrame()
             
+            # --- [ĐÃ SỬA LỖI NAMEERROR Ở ĐÂY BẰNG CÁCH KHAI BÁO BIẾN SẴN] ---
+            dropdown_options = []
+            prod_mapping = {}
+            
             if not df_content_static.empty:
                 split_idx_st = len(df_content_static)
                 for i, row in df_content_static.iterrows():
@@ -1453,9 +1444,6 @@ else:
                 
                 unique_products = df_context_st['NỘI DUNG_GROUP'].unique()
                 valid_products = [p for p in unique_products if str(p).strip() != ""]
-                
-                dropdown_options = []
-                prod_mapping = {} 
                 
                 for prod in valid_products:
                     group = df_context_st[df_context_st['NỘI DUNG_GROUP'] == prod]
@@ -1650,7 +1638,7 @@ else:
                                     e_tcsx_ok = st.checkbox("✅ TCSX CHỐT DUYỆT BÀI", key=f"chk_tcsx_{date_str_display.replace('/', '')}") if is_shift_tcsx else False
                                 
                                 with c_ldp:
-                                    st.caption("LÃNH ĐẠO PHÒNG:")
+                                    st.caption("LÃĐ ĐẠO PHÒNG:")
                                     if all_old_ldp: st.success(all_old_ldp)
                                     else: st.caption("*Chưa có nhận xét*")
                                     
@@ -2019,7 +2007,7 @@ else:
                     if mails: 
                         st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={",".join(mails)}&su={urllib.parse.quote(tv_ten)}&body={urllib.parse.quote(tv_ghichu)}" target="_blank">📧 MỞ GMAIL ĐỂ GỬI BTV NGAY</a>', unsafe_allow_html=True)
                 
-                clear_app_caches() # Chỉ xóa Cache để tải lại lần sau, không st.rerun để giữ link Email trên màn hình
+                clear_app_caches()
 
         st.divider()
         da_filter = st.selectbox("LỌC DỰ ÁN:", ["-- TẤT CẢ --"]+list_duan)
