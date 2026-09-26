@@ -80,20 +80,21 @@ def _call_api(text, api_key, model_name, today_str):
 Hôm nay là ngày {today_str}.
 
 QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
-1. Về Lãnh đạo Việt Nam: Đồng chí Nguyễn Phú Trọng đã từ trần (tháng 7/2024). Đồng chí Tô Lâm là Tổng Bí thư Ban Chấp hành Trung ương Đảng Cộng sản Việt Nam. TUYỆT ĐỐI KHÔNG bắt lỗi danh xưng Tổng Bí thư của đồng chí Tô Lâm và không bao giờ yêu cầu sửa về đồng chí Nguyễn Phú Trọng.
+1. Luôn luôn update tin tức, thông tin mới nhất, tránh bị nhầm, lạc hậu, lỗi thời nhé.
 2. Về Lãnh đạo quốc tế & Sự kiện ngoại giao mới: 
-   - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin (ví dụ: Quan hệ Đối tác Chiến lược Việt Nam - Canada năm 2024).
-   - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, tuyệt đối không bắt lỗi 'không có bằng chứng'.
+   - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin.
+   - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể hoặc một sự kiện mới, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, tuyệt đối không bắt lỗi 'không có bằng chứng'.
 3. Phạm vi rà soát trọng tâm:
-   - Tập trung bắt lỗi: Chính tả tiếng Anh/tiếng Việt, ngữ pháp, câu cú lủng củng, format ngày tháng quốc tế, danh xưng tên riêng tiếng Việt chuẩn quốc tế (không dấu).
-   - Chỉ cảnh báo rủi ro nếu có yếu tố xuyên tạc chủ quyền biển đảo, chính trị, tôn giáo, phân biệt đối xử."""
+   - Tập trung bắt lỗi: Chính tả tiếng Anh/tiếng Việt, ngữ pháp, câu cú lủng củng, format ngày tháng chuẩn quốc tế (có thể chỉ có ngày tháng, hoặc ngày tháng năm), danh xưng tên riêng tiếng Việt chuẩn quốc tế (không dấu).
+   - Cảnh báo rủi ro nếu có yếu tố xuyên tạc chủ quyền biển đảo, chính trị, tôn giáo, phân biệt đối xử.
+   - Thêm cảnh báo nếu nội dung phi logic hoặc cách viết chưa tốt, từ ngữ lặp hoặc sai sót... kèm gợi ý cách sửa."""
 
     user_prompt = f"""
     Rà soát nội dung tin tức/bài đăng MXH dưới đây của Vietnam Today:
     
     YÊU CẦU:
     - Nếu nội dung chuẩn xác, không có lỗi ngữ pháp/chính tả nghiêm trọng, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
-    - Nếu cần sửa: Gạch đầu dòng ngắn gọn lỗi chính tả/ngữ pháp và cách sửa. Không dài dòng khen ngợi, không bịa đặt hoặc bắt lỗi sai kiến thức thời sự mới.
+    - Nếu cần sửa: Gạch đầu dòng ngắn gọn lỗi chính tả/ngữ pháp, các lỗi hoặc nhận xét khác, và kèm theo cách sửa. Không dài dòng khen ngợi, không bịa đặt hoặc bắt lỗi sai kiến thức thời sự mới.
 
     NỘI DUNG CẦN RÀ SOÁT:
     {text}
