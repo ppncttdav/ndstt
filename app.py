@@ -225,25 +225,33 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
         sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
         wks_today = sh_trucso.worksheet(tab_name)
         
-        # Dò cột tự động để chống lỗi khi người dùng chèn thêm cột vào Google Sheet
-        headers = [str(h).strip().upper() for h in wks_today.row_values(5)]
+        # Dò cột động để chống lỗi chèn cột mới
+        all_vals = wks_today.get_all_values()
+        header_idx = 3
+        for idx in range(min(10, len(all_vals))):
+            row_upper = [str(x).strip().upper() for x in all_vals[idx]]
+            if "STATUS" in row_upper or "NỘI DUNG" in row_upper:
+                header_idx = idx
+                break
+        headers = [str(h).strip().upper() for h in all_vals[header_idx]]
         
         def get_col(name, fallback):
             try: return headers.index(name.upper()) + 1
             except ValueError: return fallback
             
         col_nd = get_col("NỘI DUNG", 2)
+        col_st = get_col("STATUS", 5)
         col_ng = get_col("NGUỒN", 7)
         col_ns = get_col("NHÂN SỰ", 8)
         col_tcsx = get_col("TCSX", 9)
         col_ldp = get_col("LĐP", 10)
-        col_link = get_col("LINK DUYỆT", 14)
-        col_st = get_col("STATUS", 5)
         col_time = get_col("GIỜ ĐĂNG", 11)
         col_date = get_col("NGÀY ĐĂNG", 12)
         col_lsp = get_col("LINK SẢN PHẨM", 13)
+        col_link = get_col("LINK DUYỆT", 14)
 
         first_sheet_row = first_row_idx + 6
+        
         cells_to_update = [
             gspread.Cell(first_sheet_row, col_nd, e_nd), gspread.Cell(first_sheet_row, col_ng, e_ng),
             gspread.Cell(first_sheet_row, col_ns, e_ns), gspread.Cell(first_sheet_row, col_tcsx, final_tcsx),
@@ -571,9 +579,21 @@ def fetch_vo_truc_so(tab_name):
             roster_names = (data[2] + [""] * 8)[:8] if len(data) > 2 else [""] * 8
             
             if len(data) > 5: 
-                headers = [str(h).strip().upper() for h in data[4]]
+                # Chống lỗi chèn/xóa cột: Quét động dòng chứa Header
+                header_idx = 3
+                for idx in range(min(10, len(data))):
+                    row_upper = [str(x).strip().upper() for x in data[idx]]
+                    if "STATUS" in row_upper or "NỘI DUNG" in row_upper:
+                        header_idx = idx
+                        break
+                
+                headers = [str(h).strip().upper() for h in data[header_idx]]
                 clean_data = []
-                for row in data[5:]:
+                
+                start_data_idx = header_idx + 2
+                if start_data_idx >= len(data): start_data_idx = 5
+                
+                for row in data[start_data_idx:]:
                     clean_row = []
                     for col_name in CONTENT_HEADER:
                         try:
@@ -828,11 +848,13 @@ def get_smart_status(group_df):
     ldp_cmts = " ".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     all_cmts = tcsx_cmts + " " + ldp_cmts
     
+    # Rà quét link trên toàn bộ nhóm (tránh việc BTV gõ nhầm xuống dòng 2 của merge cells)
+    link_duyet_vals = group_df['LINK DUYỆT'].replace('', pd.NA).dropna().astype(str).tolist()
+    raw_link_duyet = "".join(link_duyet_vals)
+    has_link = len(raw_link_duyet) > 5
+    
     first_row = group_df.iloc[0]
     status = str(first_row.get('STATUS', '')).lower()
-    link_duyet = str(first_row.get('LINK DUYỆT', ''))
-    
-    has_link = len(link_duyet) > 5
     
     if any(s in status for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]): return "✅ Đã duyệt"
     if "rủi ro" in status: return "🚨 Cảnh báo rủi ro"
@@ -1172,8 +1194,8 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
-    # --- [GIẢI PHÁP TỪ ĐIỂN TABS CHỐNG LỖI INDEXERROR] ---
-    list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS", "🌐 IMS VTV"]
+    # --- [ĐÃ XÓA HOÀN TOÀN IMS] ---
+    list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS"]
     if role == 'LanhDao': 
         list_tabs.extend(["✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "📊 DASHBOARD", "📜 NHẬT KÝ"])
         
@@ -1211,11 +1233,9 @@ else:
                     default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
                     default_roster[3] = auto_tcsx if auto_tcsx else "--"          
                     
-                    # Mặc định KHÓA TRỐNG (số 4: Thư ký tòa soạn 2, số 5: Sản xuất video clip, LPS)
                     default_roster[4] = "--" 
                     default_roster[5] = "--" 
                     
-                    # Ưu tiên các nhân sự BTV còn lại vào 2 ô cuối (Cổng TTĐT và App)
                     default_roster[6] = auto_btv[1] if len(auto_btv) > 1 else "--" 
                     default_roster[7] = auto_btv[2] if len(auto_btv) > 2 else "--" 
 
@@ -1541,7 +1561,6 @@ else:
                                     
                             st.write("---")
                             
-                            # --- TRÍCH XUẤT TEXT & LINK MẠNH MẼ KHÔNG SỢ GỘP Ô ---
                             link_duyet_vals = [str(x) for x in group_df['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
                             raw_link_duyet = "\n\n".join(link_duyet_vals)
                             current_text, current_link = split_text_link(raw_link_duyet)
@@ -2109,7 +2128,6 @@ else:
             sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
             if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
 
-    
     if "📊 DASHBOARD" in tab_dict:
         with tab_dict["📊 DASHBOARD"]:
             st.header("📊 DASHBOARD TỔNG QUAN")
