@@ -1807,7 +1807,8 @@ else:
                                         clear_cache_and_rerun()
 
                 with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
-                    with st.form("add_news_form"):
+                    # Bổ sung clear_on_submit=True để tự động xóa trắng form sau khi bấm gửi
+                    with st.form("add_news_form", clear_on_submit=True):
                         c1, c2 = st.columns([3, 1])
                         ts_noidung = c1.text_area("Tên bài / Nội dung", placeholder="Nhập nội dung...")
                         ts_dinhdang = c2.selectbox("Định dạng", OPTS_DINH_DANG)
@@ -1834,8 +1835,9 @@ else:
                             # Chạy ngầm đa luồng để giao diện Load ngay lập tức
                             AI_ENGINE["executor"].submit(bg_add_news, tab_name_current, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, ts_nguon, ts_nhansu, date_str_display, merged_link_duyet)
                             
-                            st.success("✅ Đã ghi nhận! Hệ thống đang trộn dòng và thêm bài ngầm. (F5 sau 1 giây để xem thay đổi)")
-                            time.sleep(0.5)
+                            # Hiển thị thông báo chứa tên bài viết và hướng dẫn
+                            st.success(f"✅ Đã thêm bài **'{ts_noidung}'**. Google Sheet đang tự động cập nhật và căn chỉnh ô. Bạn có thể tiếp tục thêm tin khác vào vỏ.")
+                            time.sleep(2) # Dừng 2 giây để người dùng kịp đọc thông báo
                             clear_cache_and_rerun()
 
                 # ================= KHU VỰC QUẢN LÝ SEEDING =================
