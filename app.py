@@ -469,7 +469,6 @@ VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDo
 
 # ================= TÍNH NĂNG DI CHUYỂN BÀI VIẾT (API GOOGLE SHEETS) =================
 def move_group_in_sheet(wks, src_start, src_end, dest_index):
-    # API của Google cho phép chuyển cả khối dòng (cùng màu sắc, ô gộp) đến vị trí mới
     move_req = {
         "moveDimension": {
             "source": {
@@ -483,7 +482,6 @@ def move_group_in_sheet(wks, src_start, src_end, dest_index):
     }
     wks.spreadsheet.batch_update({"requests": [move_req]})
     
-    # Sửa lại toàn bộ cột STT cho chuẩn xác sau khi di chuyển
     all_rows = wks.get_all_values()
     stt_updates = []
     current_stt = 1
@@ -824,7 +822,7 @@ def get_smart_status(group_df):
     tcsx_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', tcsx_cmts)
     ldp_ok = re.search(r'\bok\b|\bokie\b|\bokay\b|\boke\b', ldp_cmts)
     
-    btv_keywords = ["đã sửa", "đã update", "upd", "đã chỉnh", "đã thay", "e đã", "em đã", "đã xong", "đã bổ sung", "đã cắt"]
+    btv_keywords = ["đã sửa", "đã update", "upd", "đã chỉnh", "đã thay", "e đã", "em đã", "đã xong", "đã bổ cải", "đã cắt"]
     btv_fixed = any(kw in all_cmts for kw in btv_keywords)
     
     neutral_phrases = ["đã xem", "xem rồi", "good", "được", "tks", "cảm ơn", "ok", "okie", "oke", "okay"]
@@ -841,6 +839,23 @@ def get_smart_status(group_df):
     if tcsx_ok or "lđp" in status: return "⏳ Chờ LĐP duyệt"
     if has_link or "tcsx" in status: return "👀 Chờ TCSX duyệt"
     return "📝 BTV đang hoàn thiện"
+
+def get_priority_score(status):
+    if "🚨 Cảnh báo" in status: return 0
+    if "🔴 Cần sửa" in status: return 1
+    if "🔄 BTV đã sửa" in status: return 2
+    if "⏳ Chờ LĐP" in status: return 3
+    if "👀 Chờ TCSX" in status: return 4
+    if "📝 BTV đang" in status: return 5
+    if "✅ Đã duyệt" in status: return 6
+    return 7
+
+def format_title_name(text):
+    text = text.upper().replace("VIBES OF VN", "VIBES OF VIETNAM")
+    text = text.title()
+    replacements = { " Of ": " of ", " At ": " at ", " A ": " a ", " An ": " an ", " The ": " the ", " In ": " in ", " On ": " on ", " To ": " to ", " And ": " and " }
+    for old, new in replacements.items(): text = text.replace(old, new)
+    return text
 
 def parse_khung_cell(cell_val):
     if pd.isna(cell_val) or str(cell_val).strip() == "": return "", ""
@@ -1052,6 +1067,18 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
     except Exception: pass
 
+def update_wks_canhan(action_type, data):
+    sh_main = ket_noi_sheet(SHEET_MAIN)
+    try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+    except: 
+        wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+        wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+        
+    if action_type == "update":
+        wks_canhan.update_cells(data)
+    elif action_type == "append":
+        wks_canhan.append_row(data)
+
 # ================= 2. AUTH & GIAO DIỆN =================
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -1139,8 +1166,8 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
-    list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS", "✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "🌐 IMS VTV"]
-    if role == 'LanhDao': list_tabs.extend(["📊 DASHBOARD", "📜 NHẬT KÝ"])
+    list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS"]
+    if role == 'LanhDao': list_tabs.extend(["✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "📊 DASHBOARD", "📜 NHẬT KÝ"])
     tabs = st.tabs(list_tabs)
 
     # ================= TAB 0: VỎ TRỰC SỐ =================
@@ -1173,20 +1200,13 @@ else:
                 default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
                 default_roster[3] = auto_tcsx if auto_tcsx else "--"          
                 
-                # Mặc định để trống (số 4: Thư ký tòa soạn 2, số 5: Sản xuất video clip, LPS)
+                # Mặc định KHÓA TRỐNG (số 4: Thư ký tòa soạn 2, số 5: Sản xuất video clip, LPS)
                 default_roster[4] = "--" 
                 default_roster[5] = "--" 
                 
-                # Ưu tiên điền vào 2 ô cuối (Cổng TTĐT và App) trước
+                # Ưu tiên các nhân sự BTV còn lại vào 2 ô cuối (Cổng TTĐT và App)
                 default_roster[6] = auto_btv[1] if len(auto_btv) > 1 else "--" 
                 default_roster[7] = auto_btv[2] if len(auto_btv) > 2 else "--" 
-                
-                # Nếu có 4 BTV trở lên, fill ngược lại vào ô Sản xuất video clip (số 5)
-                if len(auto_btv) > 3:
-                    default_roster[5] = auto_btv[3]
-                # Nếu có 5 BTV trở lên, fill tiếp vào Thư ký tòa soạn 2 (số 4)
-                if len(auto_btv) > 4:
-                    default_roster[4] = auto_btv[4]
 
                 with st.form("init_roster"):
                     cols = st.columns(3); roster_vals = []
@@ -1638,7 +1658,7 @@ else:
                                     e_tcsx_ok = st.checkbox("✅ TCSX CHỐT DUYỆT BÀI", key=f"chk_tcsx_{date_str_display.replace('/', '')}") if is_shift_tcsx else False
                                 
                                 with c_ldp:
-                                    st.caption("LÃĐ ĐẠO PHÒNG:")
+                                    st.caption("LÃNH ĐẠO PHÒNG:")
                                     if all_old_ldp: st.success(all_old_ldp)
                                     else: st.caption("*Chưa có nhận xét*")
                                     
@@ -2073,13 +2093,6 @@ else:
         to = st.multiselect("ĐẾN:", df_users['Email'].tolist())
         sub = st.text_input("TIÊU ĐỀ"); bod = st.text_area("Nội dung")
         if st.button("GỬI EMAIL"): st.markdown(f'<script>window.open("https://mail.google.com/mail/u/{tk}/?view=cm&fs=1&to={",".join(to)}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(bod)}", "_blank");</script>', unsafe_allow_html=True)
-
-    with tabs[7]:
-        st.header("🌐 HỆ THỐNG QUẢN LÝ BÀI VIẾT (IMS)")
-        st.info("Truy cập IMS VTV để xuất bản bài viết. Trình duyệt sẽ tự động lưu phiên đăng nhập cá nhân của bạn cho các lần sau.")
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.link_button("🚀 TRUY CẬP VÀ XUẤT BẢN TRÊN IMS VTV", "https://imsvntoday.vtv.vn/News/List/2", type="primary", use_container_width=True)
 
     if role == 'LanhDao':
         with tabs[8]:
