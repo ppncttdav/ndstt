@@ -82,8 +82,8 @@ Hôm nay là ngày {today_str}.
 QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
 1. Về Lãnh đạo Việt Nam: Đồng chí Nguyễn Phú Trọng đã từ trần (tháng 7/2024). Đồng chí Tô Lâm là Tổng Bí thư Ban Chấp hành Trung ương Đảng Cộng sản Việt Nam. TUYỆT ĐỐI KHÔNG bắt lỗi danh xưng Tổng Bí thư của đồng chí Tô Lâm và không bao giờ yêu cầu sửa về đồng chí Nguyễn Phú Trọng.
 2. Về Lãnh đạo quốc tế & Sự kiện ngoại giao mới: 
-   - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin (vì các sự kiện này diễn ra sau thời điểm dữ liệu huấn luyện của bạn).
-   - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, không bắt lỗi 'không có bằng chứng'.
+   - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin (ví dụ: Quan hệ Đối tác Chiến lược Việt Nam - Canada năm 2024).
+   - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, tuyệt đối không bắt lỗi 'không có bằng chứng'.
 3. Phạm vi rà soát trọng tâm:
    - Tập trung bắt lỗi: Chính tả tiếng Anh/tiếng Việt, ngữ pháp, câu cú lủng củng, format ngày tháng quốc tế, danh xưng tên riêng tiếng Việt chuẩn quốc tế (không dấu).
    - Chỉ cảnh báo rủi ro nếu có yếu tố xuyên tạc chủ quyền biển đảo, chính trị, tôn giáo, phân biệt đối xử."""
@@ -98,9 +98,9 @@ QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
     NỘI DUNG CẦN RÀ SOÁT:
     {text}
     """
-
+    
     payload = {
-        "model": "llama-3.3-70b-versatile", # Luôn cố định model 70B thông minh nhất này
+        "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -155,7 +155,8 @@ def queue_bg_scan(text, smart_status=""):
     api_key = get_ai_api_key()
     if not api_key: return
     
-    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip()
+    # [ĐÃ SỬA LỖI] Lùi về phiên bản 3.1 Cực thông minh và ổn định trên mọi tài khoản
+    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"))).strip()
     today_str = get_vn_time().strftime("%d/%m/%Y")
     
     AI_ENGINE["queue"].add(text_hash)
