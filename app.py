@@ -75,12 +75,11 @@ AI_ENGINE = init_ai_engine()
 def _call_api(text, api_key, model_name, today_str):
     url = "https://api.groq.com/openai/v1/chat/completions"
     
-    # BỔ SUNG BỘ TRI THỨC BẮT BUỘC ĐỂ TRÁNH ẢO GIÁC LÃNH ĐẠO VÀ SỰ KIỆN MỚI
     system_prompt = f"""Bạn là Thư ký tòa soạn kỳ cựu của kênh Vietnam Today (VTV International). 
 Hôm nay là ngày {today_str}.
 
 QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
-1. Luôn luôn update tin tức, thông tin mới nhất, tránh bị nhầm, lạc hậu, lỗi thời nhé.
+1. Luôn luôn update tin tức, thông tin mới nhất, tránh bị nhầm, lạc hậu, lỗi thời.
 2. Về Lãnh đạo quốc tế & Sự kiện ngoại giao mới: 
    - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin.
    - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể hoặc một sự kiện mới, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, tuyệt đối không bắt lỗi 'không có bằng chứng'.
@@ -156,7 +155,6 @@ def queue_bg_scan(text, smart_status=""):
     api_key = get_ai_api_key()
     if not api_key: return
     
-    # [ĐÃ SỬA LỖI] Lùi về phiên bản 3.1 Cực thông minh và ổn định trên mọi tài khoản
     model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"))).strip()
     today_str = get_vn_time().strftime("%d/%m/%Y")
     
@@ -819,7 +817,6 @@ def tu_dong_cap_nhat_thong_ke(date_str, roster):
             format_cell_range(wks_stats, f"A{last_row}:I{last_row}", CellFormat(textFormat=TextFormat(fontFamily="Times New Roman"), backgroundColor=Color(1, 1, 1)))
     except Exception: pass
 
-# --- CẬP NHẬT: REGEX BẮT MỌI LOẠI LINK TRONG VĂN BẢN ---
 def split_text_link(merged_text):
     if pd.isna(merged_text) or not str(merged_text).strip(): return "", ""
     text = str(merged_text)
@@ -852,7 +849,6 @@ def get_smart_status(group_df):
     ldp_cmts = " ".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist()).lower()
     all_cmts = tcsx_cmts + " " + ldp_cmts
     
-    # Rà quét link trên toàn bộ nhóm (tránh việc BTV gõ nhầm xuống dòng 2 của merge cells)
     link_duyet_vals = group_df['LINK DUYỆT'].replace('', pd.NA).dropna().astype(str).tolist()
     raw_link_duyet = "".join(link_duyet_vals)
     has_link = len(raw_link_duyet) > 5
@@ -1209,13 +1205,77 @@ else:
     # ================= TAB 0: VỎ TRỰC SỐ =================
     if "📝 VỎ TRỰC SỐ" in tab_dict:
         with tab_dict["📝 VỎ TRỰC SỐ"]:
+            
+            # --- KHỐI HƯỚNG DẪN SỬ DỤNG (TUTORIAL WIZARD) ---
+            if 'show_tutorial' not in st.session_state:
+                st.session_state['show_tutorial'] = False
+            if 'tut_step' not in st.session_state:
+                st.session_state['tut_step'] = 1
+
+            def next_step(): st.session_state['tut_step'] += 1
+            def prev_step(): st.session_state['tut_step'] -= 1
+            def close_tut(): st.session_state['show_tutorial'] = False
+            def open_tut(): 
+                st.session_state['show_tutorial'] = True
+                st.session_state['tut_step'] = 1
+            
             c_nav1, c_nav2 = st.columns([1, 4])
             with c_nav1: target_date = st.date_input("📅 CHỌN NGÀY LÀM VIỆC:", value=get_vn_time().date(), format="DD/MM/YYYY")
             
             tab_name_current = target_date.strftime("%d/%m/%Y") 
             date_str_display = target_date.strftime("%d/%m/%Y")
             
-            with c_nav2: st.header(f"📝 VỎ TRỰC SỐ NGÀY: {date_str_display}")
+            with c_nav2: 
+                c_title, c_btn = st.columns([3, 1])
+                c_title.header(f"📝 VỎ TRỰC SỐ NGÀY: {date_str_display}")
+                c_btn.button("💡 Hướng dẫn sử dụng", on_click=open_tut, type="primary", use_container_width=True)
+
+            if st.session_state['show_tutorial']:
+                st.markdown("---")
+                with st.container(border=True):
+                    step = st.session_state['tut_step']
+                    
+                    if step == 1:
+                        st.subheader("🎓 BƯỚC 1: KHỞI TẠO VỎ TRỰC SỐ")
+                        st.info("**Tại sao phải tạo Vỏ?** Để tránh phải copy/paste thủ công trên Google Sheet mỗi ngày. Thay vì dùng Excel, Web sẽ tự động hóa mọi thứ cho bạn.")
+                        st.markdown("""
+                        - **Cách làm:** Mỗi sáng, bạn chỉ cần mở web, chọn ngày ở góc trái.
+                        - Hệ thống sẽ **tự động đọc Lịch LĐP và Lịch TCSX** để điền sẵn tên các nhân sự trực trong ngày.
+                        - Bạn chỉ việc bấm nút **🚀 TẠO VỎ TRỰC SỐ MỚI**. Form trực số chuẩn định dạng sẽ xuất hiện ngay lập tức.
+                        """)
+                    elif step == 2:
+                        st.subheader("🎓 BƯỚC 2: THÊM BÀI ĐĂNG MỚI")
+                        st.info("**Quên chuyện lùi dòng, lệch ô đi!** Hệ thống sẽ tự động thêm và Gộp ô (Merge Cells) cực chuẩn.")
+                        st.markdown("""
+                        - Kéo xuống phần **➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ**.
+                        - Nhập *Tên bài, Định dạng, Nền tảng (có thể chọn nhiều)* và dán **Link Drive / Nội dung Text**.
+                        - Bấm Thêm. Ngay lập tức, bài viết của bạn sẽ xuất hiện trên bảng theo nhóm rất trực quan.
+                        """)
+                    elif step == 3:
+                        st.subheader("🎓 BƯỚC 3: CẬP NHẬT TRẠNG THÁI & AI RÀ SOÁT LỖI")
+                        st.info("Khu vực xịn sò nhất của Web: Chỉnh sửa trạng thái, giờ lên bài và nhờ AI soát lỗi.")
+                        st.markdown("""
+                        - Tại mục **🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI**, chọn bài viết bạn muốn chỉnh sửa từ thanh Dropdown (Các bài đang lỗi sẽ bị đẩy lên đầu tiên).
+                        - **Trạng thái từng nền tảng:** Bạn có thể set giờ lên bài cho từng nền tảng Facebook, Youtube độc lập.
+                        - **Cảnh báo AI:** Ngay bên dưới, AI sẽ tự động đọc Text của bạn, báo ngay nếu sai danh xưng Lãnh đạo hoặc viết sai chính tả. Trợ thủ đắc lực cho mọi BTV!
+                        """)
+                    elif step == 4:
+                        st.subheader("🎓 BƯỚC 4: QUẢN LÝ NHIỆM VỤ SEEDING")
+                        st.info("Nhẹ nhàng và nhanh chóng quản lý các yêu cầu tương tác, seeding.")
+                        st.markdown("""
+                        - Cuối trang là khu vực **🌱 QUẢN LÝ SEEDING**.
+                        - Mọi người có thể vào để cập nhật *Kết quả seeding* ngay trên ô bảng như thao tác với Excel.
+                        - Nhớ bấm nút **💾 LƯU CẬP NHẬT** để lưu lại lên máy chủ nhé. Chúc bạn một ngày làm việc tuyệt vời!
+                        """)
+                    
+                    st.write("")
+                    col_btn_p, col_btn_n, col_btn_c = st.columns([1, 1, 8])
+                    if step > 1: col_btn_p.button("⬅️ Quay lại", on_click=prev_step)
+                    if step < 4: col_btn_n.button("Tiếp theo ➡️", on_click=next_step)
+                    else: col_btn_n.button("🚀 Bắt đầu ngay", type="primary", on_click=close_tut)
+                    col_btn_c.button("❌ Đóng hướng dẫn", on_click=close_tut)
+                st.markdown("---")
+            # --- KẾT THÚC KHỐI HƯỚNG DẪN SỬ DỤNG ---
 
             is_shift_admin = (role in ['LanhDao', 'ToChucSanXuat'])
             
@@ -1237,9 +1297,11 @@ else:
                     default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
                     default_roster[3] = auto_tcsx if auto_tcsx else "--"          
                     
+                    # Mặc định KHÓA TRỐNG (số 4: Thư ký tòa soạn 2, số 5: Sản xuất video clip, LPS)
                     default_roster[4] = "--" 
                     default_roster[5] = "--" 
                     
+                    # Ưu tiên các nhân sự BTV còn lại vào 2 ô cuối (Cổng TTĐT và App)
                     default_roster[6] = auto_btv[1] if len(auto_btv) > 1 else "--" 
                     default_roster[7] = auto_btv[2] if len(auto_btv) > 2 else "--" 
 
@@ -1670,7 +1732,7 @@ else:
                                     e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
                                     
                                     st.markdown("---")
-                                    if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
+                                    if current_link: st.link_button("▶️ M mở LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
                                     e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
                                     e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
                                     
