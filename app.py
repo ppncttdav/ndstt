@@ -75,30 +75,32 @@ AI_ENGINE = init_ai_engine()
 def _call_api(text, api_key, model_name, today_str):
     url = "https://api.groq.com/openai/v1/chat/completions"
     
-    system_prompt = f"Bạn là một Thư ký tòa soạn/Biên tập viên kỳ cựu của kênh truyền hình đối ngoại, quốc tế Vietnam Today. Vietnam Today là kênh truyền hình chính của Ban Truyền hình đối ngoại (VTV International), Đài truyền hình Việt Nam (VTV), vô cùng khắt khe và ưu tiên an toàn xuất bản. LƯU Ý TỐI QUAN TRỌNG: Hôm nay là ngày {today_str}. Bạn BẮT BUỘC phải dùng mốc thời gian này làm hệ quy chiếu hiện tại để tính toán số năm, đối chiếu các ngày lễ kỷ niệm, sự kiện và kiểm chứng mọi mốc thời gian trong văn bản."
+    # BỔ SUNG BỘ TRI THỨC BẮT BUỘC ĐỂ TRÁNH ẢO GIÁC LÃNH ĐẠO VÀ SỰ KIỆN MỚI
+    system_prompt = f"""Bạn là Thư ký tòa soạn kỳ cựu của kênh Vietnam Today (VTV International). 
+Hôm nay là ngày {today_str}.
+
+QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
+1. Về Lãnh đạo Việt Nam: Đồng chí Nguyễn Phú Trọng đã từ trần (tháng 7/2024). Đồng chí Tô Lâm là Tổng Bí thư Ban Chấp hành Trung ương Đảng Cộng sản Việt Nam. TUYỆT ĐỐI KHÔNG bắt lỗi danh xưng Tổng Bí thư của đồng chí Tô Lâm và không bao giờ yêu cầu sửa về đồng chí Nguyễn Phú Trọng.
+2. Về Lãnh đạo quốc tế & Sự kiện ngoại giao mới: 
+   - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin (vì các sự kiện này diễn ra sau thời điểm dữ liệu huấn luyện của bạn).
+   - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, không bắt lỗi 'không có bằng chứng'.
+3. Phạm vi rà soát trọng tâm:
+   - Tập trung bắt lỗi: Chính tả tiếng Anh/tiếng Việt, ngữ pháp, câu cú lủng củng, format ngày tháng quốc tế, danh xưng tên riêng tiếng Việt chuẩn quốc tế (không dấu).
+   - Chỉ cảnh báo rủi ro nếu có yếu tố xuyên tạc chủ quyền biển đảo, chính trị, tôn giáo, phân biệt đối xử."""
 
     user_prompt = f"""
-    Nhiệm vụ: rà soát nội dung tin tức/bài đăng MXH dưới đây...
-
-    Kiểm tra theo thứ tự:
-    1. Rủi ro chính trị, ngoại giao, chủ quyền, danh xưng chính thức.
-    2. Logic, mâu thuẫn, dữ kiện thiếu căn cứ hoặc diễn đạt có thể gây hiểu sai.
-    3. Bản quyền, nhạy cảm văn hóa/tôn giáo, phân biệt đối xử.
-    4. Chính tả, ngữ pháp, diễn đạt lủng củng.
-    5. Nội dung cập nhật bị muộn, cũ, hoặc thông tin đã có sự thay đổi.
-    6. Cách viết đã chuẩn quốc tế, đã thật sự thu hút khán giả chưa?
-    7. Chuẩn định dạng ngày theo ví dụ: 10 August, 2026 hoặc bỏ năm đi cũng được.
-    8. Đối với tên riêng tiếng Việt, viết như format tiếng Anh.
-
-    Yêu cầu định dạng: Thẳng thắn, gạch đầu dòng rõ ràng, chỉ ra ý cần sửa và đề xuất cách sửa. Viết gọn gàng súc tích, không khen ngợi dài dòng, chỉ nói những mục phải sửa, cái nào đúng rồi thì thôi không cần đề cập cho gọn gàng.
-    Nếu không phát hiện rủi ro nào đáng kể, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
+    Rà soát nội dung tin tức/bài đăng MXH dưới đây của Vietnam Today:
+    
+    YÊU CẦU:
+    - Nếu nội dung chuẩn xác, không có lỗi ngữ pháp/chính tả nghiêm trọng, trả đúng 1 câu duy nhất: "Nội dung ít rủi ro".
+    - Nếu cần sửa: Gạch đầu dòng ngắn gọn lỗi chính tả/ngữ pháp và cách sửa. Không dài dòng khen ngợi, không bịa đặt hoặc bắt lỗi sai kiến thức thời sự mới.
 
     NỘI DUNG CẦN RÀ SOÁT:
     {text}
     """
-    
+
     payload = {
-        "model": model_name,
+        "model": "llama-3.3-70b-versatile", # Luôn cố định model 70B thông minh nhất này
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
