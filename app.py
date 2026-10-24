@@ -1480,9 +1480,7 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
             format="DD/MM/YYYY",
             key=f"{key_prefix}_date"
         )
-        if c_reload.button("🔄 Làm mới", use_container_width=True):
-                    clear_trucso_cache()
-                    st.rerun()
+        
     with c_ctrl2:
         view_type = st.radio(
             "Chế độ hiển thị:",
