@@ -2068,7 +2068,7 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
-    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)", "📺 TẠO LPS"]
+    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ LỊCH BÀI ĐĂNG", "📺 TẠO LPS"]
     if role == 'LanhDao': 
         list_tabs.extend(["✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "📊 DASHBOARD", "📜 NHẬT KÝ"])
         
@@ -2878,8 +2878,8 @@ else:
                             clear_cache_and_rerun()
 
     # ================= TAB MỚI: KẾ HOẠCH ĐĂNG ĐA NỀN TẢNG (META PLANNER) =================
-    if "🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)" in tab_dict:
-        with tab_dict["🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)"]:
+    if "🗓️ LỊCH BÀI ĐĂNG" in tab_dict:
+        with tab_dict["🗓️ LỊCH BÀI ĐĂNG"]:
             render_meta_planner_section(
                 target_date if 'target_date' in locals() else get_vn_today(),
                 tab_name_current if 'tab_name_current' in locals() else get_vn_today().strftime("%d/%m/%Y"),
