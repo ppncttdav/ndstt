@@ -4,7 +4,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import streamlit.components.v1 as components
 import urllib.parse
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time as dt_time, timedelta
 import pytz
 import requests
 import plotly.express as px
@@ -20,6 +20,8 @@ import os
 import concurrent.futures
 import json
 import threading
+import unicodedata
+import html as html_lib
 
 # --- THƯ VIỆN ĐỊNH DẠNG SHEET ---
 from gspread_formatting import *
@@ -27,7 +29,7 @@ from gspread_formatting import *
 # ================= CẤU HÌNH HỆ THỐNG =================
 st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_icon="🏢", layout="wide")
 
-# --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & ÉP WRAP TEXT ---
+# --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
 st.markdown("""
     <style>
     /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
@@ -36,6 +38,137 @@ st.markdown("""
         filter: none !important;
         transition: none !important;
         pointer-events: auto !important;
+    }
+    /* CSS cho Bảng cuộn Timeline & Meta Planner */
+    .meta-planner-wrap {
+        border: 1px solid #dfe3e8;
+        border-radius: 12px;
+        background: #f8f9fa;
+        max-height: 640px;
+        overflow: auto;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+    .meta-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+    }
+    .meta-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: #ffffff;
+        color: #1c1e21;
+        font-weight: 700;
+        padding: 12px 10px;
+        border-bottom: 2px solid #e4e6eb;
+        border-right: 1px solid #eef0f3;
+        text-align: center;
+        min-width: 195px;
+    }
+    .meta-table thead th.time-col-hdr {
+        position: sticky;
+        left: 0;
+        z-index: 30;
+        min-width: 92px;
+        max-width: 92px;
+        background: #f0f2f5;
+    }
+    .meta-table tbody td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #ebedf0;
+        border-right: 1px solid #eef0f3;
+        vertical-align: top;
+        background: #ffffff;
+    }
+    .meta-table tbody tr.slot-busy td {
+        background: #fbfcfe;
+    }
+    .meta-table tbody td.time-cell {
+        position: sticky;
+        left: 0;
+        z-index: 10;
+        background: #f7f8fa;
+        font-weight: 700;
+        color: #4b4f56;
+        text-align: center;
+        vertical-align: middle;
+        border-right: 2px solid #dfe3e8;
+        font-size: 12.5px;
+    }
+    .meta-card {
+        background: #ffffff;
+        border: 1px solid #d8dfea;
+        border-left: 4px solid #1877f2;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        text-align: left;
+    }
+    .meta-card.conflict {
+        border: 1.5px solid #dc3545 !important;
+        border-left: 5px solid #dc3545 !important;
+        background: #fff5f5 !important;
+    }
+    .meta-card.cross-warn {
+        border: 1.5px solid #fd7e14 !important;
+        border-left: 5px solid #fd7e14 !important;
+        background: #fff9f2 !important;
+    }
+    .meta-card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+        font-size: 11.5px;
+        font-weight: 700;
+    }
+    .meta-time-badge {
+        background: #e7f3ff;
+        color: #1877f2;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 700;
+    }
+    .meta-time-badge.conflict-badge {
+        background: #dc3545;
+        color: #ffffff;
+    }
+    .meta-card-title {
+        font-weight: 600;
+        color: #1c1e21;
+        font-size: 12.5px;
+        line-height: 1.35;
+        margin-bottom: 4px;
+        word-break: break-word;
+    }
+    .meta-card-sub {
+        font-size: 11px;
+        color: #65676b;
+        display: flex;
+        justify-content: space-between;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+    .slot-empty-pill {
+        color: #b0b3b8;
+        font-size: 11px;
+        text-align: center;
+        padding: 6px 2px;
+        border: 1px dashed #e4e6eb;
+        border-radius: 6px;
+    }
+    .slot-cooldown-pill {
+        color: #d97706;
+        background: #fffbeb;
+        font-size: 11px;
+        text-align: center;
+        padding: 5px 4px;
+        border: 1px dashed #fcd34d;
+        border-radius: 6px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -78,7 +211,8 @@ def init_ai_engine():
         "executor": concurrent.futures.ThreadPoolExecutor(max_workers=5),
         "backup_users": pd.DataFrame(),
         "backup_trucso": {},
-        "backup_app_data": None
+        "backup_app_data": None,
+        "optimistic_posts": []
     }
 
 AI_ENGINE = init_ai_engine()
@@ -176,7 +310,7 @@ def queue_bg_scan(text, smart_status=""):
     AI_ENGINE["executor"].submit(_bg_task, text, api_key, model_name, today_str, text_hash)
 
 # ================= BACKGROUND TASKS ĐỂ TĂNG TỐC GIAO DIỆN =================
-def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, ts_nguon, ts_nhansu, date_str_display, merged_link_duyet):
+def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, ts_nguon, ts_nhansu, post_time_str, post_date_str, merged_link_duyet):
     with SHEET_LOCK:
         try:
             sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -195,8 +329,10 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
 
             rows_to_add = []
             for idx_p, p in enumerate(plats):
-                if idx_p == 0: row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", date_str_display, "", merged_link_duyet]
-                else: row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
+                if idx_p == 0:
+                    row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", post_time_str, post_date_str, "", merged_link_duyet]
+                else:
+                    row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", post_time_str, post_date_str, "", ""]
                 rows_to_add.append(row)
                 start_stt += 1 
             
@@ -226,7 +362,8 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
             if fmt_requests: wks_today.spreadsheet.batch_update({"requests": fmt_requests})
             
             if len(rows_to_add) > 1:
-                cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                # Không merge cột 10 (GIỜ ĐĂNG), 11 (NGÀY ĐĂNG), 12 (LINK SP) để mỗi nền tảng giữ được lịch đăng riêng
+                cols_to_merge = [1, 5, 6, 7, 8, 9, 13]
                 for col_idx in cols_to_merge:
                     merge_requests.append({
                         "mergeCells": {
@@ -235,8 +372,14 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
                         }
                     })
                 wks_today.spreadsheet.batch_update({"requests": merge_requests})
+            # Dọn bài tạm trong optimistic_posts sau khi đã ghi xong lên Sheet
+            AI_ENGINE["optimistic_posts"] = [
+                op for op in AI_ENGINE.get("optimistic_posts", [])
+                if not (op.get("tab_name") == tab_name and op.get("title") == ts_noidung)
+            ]
             clear_trucso_cache()
-        except Exception as e: logger.error(f"Lỗi thêm bài ngầm: {e}")
+        except Exception as e:
+            logger.error(f"Lỗi thêm bài ngầm: {e}")
 
 def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_ldp, merged_link_duyet_update, platform_updates):
     with SHEET_LOCK:
@@ -289,6 +432,22 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
             wks_today.update_cells(cells_to_update)
             clear_trucso_cache()
         except Exception: pass
+
+def bg_quick_reschedule(tab_name, row_indices, new_time_str, new_date_str):
+    with SHEET_LOCK:
+        try:
+            sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+            wks_today = sh_trucso.worksheet(tab_name)
+            cells = []
+            for r_idx in row_indices:
+                sheet_row = int(r_idx) + 6
+                cells.append(gspread.Cell(sheet_row, 11, new_time_str))
+                cells.append(gspread.Cell(sheet_row, 12, new_date_str))
+            if cells:
+                wks_today.update_cells(cells)
+            clear_trucso_cache()
+        except Exception as e:
+            logger.error(f"Lỗi đổi lịch nhanh: {e}")
 
 def bg_add_seeding(tab_name, s_nhiemvu, s_link, s_phutrach, s_kpi, s_nhansu):
     with SHEET_LOCK:
@@ -428,7 +587,6 @@ def generate_secure_token(username):
         hashlib.sha256,
     ).hexdigest()
 
-# Chỉ xóa cache của Vỏ Trực Số khi thao tác bài viết để tránh vượt Quota 429 của Google
 def clear_trucso_cache():
     try: _fetch_vo_truc_so_cached.clear()
     except Exception: pass
@@ -457,13 +615,21 @@ def get_short_name(full_name):
     parts = full_name.strip().split()
     return " ".join(parts[-2:]) if len(parts) >= 2 else full_name
 
+def _clean_vn_str(s):
+    if not s: return ""
+    s = unicodedata.normalize("NFC", str(s).strip().lower())
+    replacements = {"òa": "oà", "óa": "oá", "ỏa": "oả", "õa": "oã", "ọa": "oạ", "ùy": "uỳ", "úy": "uý", "ủy": "uỷ", "ũy": "uỹ", "ụy": "uỵ"}
+    for k, v in replacements.items():
+        s = s.replace(k, v)
+    return re.sub(r"\s+", " ", s)
+
 def normalize_btv_names_strict(name_str, list_nv):
     if pd.isna(name_str) or str(name_str).strip() == "": return "Chưa phân công"
-    raw_str = str(name_str).lower()
+    raw_str = _clean_vn_str(name_str)
     found_names = []
     sorted_nv = sorted(list_nv, key=len, reverse=True)
     for nv in sorted_nv:
-        nv_lower = nv.lower()
+        nv_lower = _clean_vn_str(nv)
         parts = nv_lower.split()
         short_nv = " ".join(parts[-2:]) if len(parts) >= 2 else nv_lower
         if nv_lower in raw_str:
@@ -477,15 +643,24 @@ def normalize_btv_names_strict(name_str, list_nv):
 
 def match_nv(name, list_nv):
     if not name or str(name).strip() == "": return ""
-    n_lower = str(name).lower().strip()
+    n_clean = _clean_vn_str(name)
+    # 1. Khớp chính xác toàn bộ họ tên
     for nv in list_nv:
-        if n_lower == str(nv).lower().strip(): return nv
-    if len(n_lower) >= 2:
+        if n_clean == _clean_vn_str(nv):
+            return nv
+    # 2. Khớp 2 từ cuối (VD: "Gia Huy" -> "Lưu Gia Huy", "Quang Minh" -> "Nguyễn Quang Minh")
+    for nv in list_nv:
+        nv_clean = _clean_vn_str(nv)
+        parts = nv_clean.split()
+        if len(parts) >= 2 and " ".join(parts[-2:]) == n_clean:
+            return nv
+    # 3. Khớp chuỗi con an toàn
+    if len(n_clean) >= 3:
         for nv in list_nv:
-            nv_lower = str(nv).lower().strip()
-            if n_lower in nv_lower or nv_lower in n_lower: 
+            nv_clean = _clean_vn_str(nv)
+            if n_clean in nv_clean or nv_clean in n_clean:
                 return nv
-    return name.title()
+    return str(name).strip().title()
 
 def get_lanh_dao_ban(d_obj):
     wd = d_obj.weekday()
@@ -531,6 +706,19 @@ ROLES_HEADER = [
 
 OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
 OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Threads", "LinkedIn", "Instagram", "Web", "App"]
+MANDATORY_PLATFORMS = ["Facebook", "LinkedIn", "Youtube", "Instagram"]
+OPTIONAL_PLATFORMS = [p for p in OPTS_NEN_TANG if p not in MANDATORY_PLATFORMS]
+
+PLATFORM_BADGE_STYLE = {
+    "Facebook": ("🌐 Facebook", "#1877f2"),
+    "LinkedIn": ("💼 LinkedIn", "#0a66c2"),
+    "Youtube": ("▶️ Youtube", "#ff0000"),
+    "Instagram": ("📸 Instagram", "#e1306c"),
+    "TikTok": ("🎵 TikTok", "#111111"),
+    "Threads": ("🧵 Threads", "#333333"),
+    "Web": ("📰 Web", "#d97706"),
+    "App": ("📱 App", "#ea580c"),
+}
 
 OPTS_STATUS_TRUCSO = [
     "Gửi duyệt TCSX", "Gửi duyệt LĐP", "Scheduled", "Đã đăng", "Posted",
@@ -690,13 +878,27 @@ def _fetch_vo_truc_so_cached(tab_name):
 
 def fetch_vo_truc_so(tab_name):
     try:
-        return _fetch_vo_truc_so_cached(tab_name)
+        exists, df, roster_names, r_roles = _fetch_vo_truc_so_cached(tab_name)
     except Exception:
         try: _fetch_vo_truc_so_cached.clear()
         except Exception: pass
         if tab_name in AI_ENGINE["backup_trucso"]:
-            return AI_ENGINE["backup_trucso"][tab_name]
-        return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+            exists, df, roster_names, r_roles = AI_ENGINE["backup_trucso"][tab_name]
+        else:
+            return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+
+    # Ghép thêm các bài vừa bấm Thêm (Optimistic UI) đang chờ Google Sheet xử lý ngầm
+    opt_rows = [op for op in AI_ENGINE.get("optimistic_posts", []) if op.get("tab_name") == tab_name]
+    if exists and opt_rows:
+        existing_titles = set(df["NỘI DUNG"].astype(str).str.strip().tolist()) if not df.empty else set()
+        extra_records = []
+        for op in opt_rows:
+            if op["title"].strip() not in existing_titles:
+                extra_records.extend(op["rows"])
+        if extra_records:
+            df_extra = pd.DataFrame(extra_records, columns=CONTENT_HEADER)
+            df = pd.concat([df, df_extra], ignore_index=True)
+    return exists, df, roster_names, r_roles
 
 fetch_vo_truc_so.clear = _fetch_vo_truc_so_cached.clear
 
@@ -720,7 +922,6 @@ def load_tai_khoan():
         LAST_GSHEET_ERROR = str(e)
         try: _fetch_tai_khoan_cached.clear()
         except Exception: pass
-        # Dùng ngay bản sao dự phòng trong RAM nếu Google Sheets bị quá tải tạm thời (429)
         if isinstance(AI_ENGINE.get("backup_users"), pd.DataFrame) and not AI_ENGINE["backup_users"].empty:
             return AI_ENGINE["backup_users"]
         return pd.DataFrame()
@@ -798,47 +999,107 @@ def fetch_and_parse_schedules(url_ldp, url_btv):
             results[k] = df
     return results
 
+# ================= THUẬT TOÁN ĐỌC LỊCH TRỰC LĐP (CHUẨN DẢI NGANG 6 THÁNG) =================
 def get_ldp_from_df(df, target_date_obj, list_nv):
-    if df is None or df.empty: return ""
-    d_str1 = str(target_date_obj.day)
-    d_str2 = f"{target_date_obj.day:02d}"
+    if df is None or df.empty:
+        return ""
+    d_int = target_date_obj.day
+    d_str1 = str(d_int)
+    d_str2 = f"{d_int:02d}"
     m = target_date_obj.month
+    y = target_date_obj.year
+
+    # Mẫu regex tìm đúng "THÁNG m" (không bị nhầm tháng 1 với tháng 10, 11, 12)
+    month_pattern = re.compile(rf"tháng\s*0?{m}(?!\d)", re.IGNORECASE)
+    any_month_pattern = re.compile(r"tháng\s*0?\d{1,2}", re.IGNORECASE)
+
+    candidate_blocks = []
+    for r in reversed(range(len(df))):
+        row_series = df.iloc[r]
+        month_cols_in_row = []
+        for c_idx, val in enumerate(row_series):
+            if pd.isna(val):
+                continue
+            s_val = str(val).strip()
+            if any_month_pattern.search(s_val):
+                month_cols_in_row.append((c_idx, s_val))
+        if not month_cols_in_row:
+            continue
+
+        for idx_m, (c_start, s_text) in enumerate(month_cols_in_row):
+            if month_pattern.search(s_text):
+                # Nếu tiêu đề có ghi năm (VD: THÁNG 10/2026) thì kiểm tra khớp năm
+                years_found = re.findall(r"20\d{2}", s_text)
+                year_match = (not years_found) or (str(y) in years_found)
+                c_end = month_cols_in_row[idx_m + 1][0] if (idx_m + 1) < len(month_cols_in_row) else len(df.columns)
+                candidate_blocks.append((1 if year_match else 0, r, c_start, c_end))
+
+    # Ưu tiên khối khớp đúng năm và nằm ở phía dưới (mới nhất)
+    candidate_blocks.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
     target_col = -1
     header_row = -1
-    for r in reversed(range(len(df))):
-        row_vals = [str(x).strip().lower().replace(" ", "") for x in df.iloc[r].values]
-        row_str = "".join(row_vals)
-        if f"tháng{m}" in row_str or f"tháng{m:02d}" in row_str:
-            for offset in [0, 1, 2]:
-                if r + offset >= len(df): continue
-                check_vals = df.iloc[r + offset].values
-                for c_idx, d_val in enumerate(check_vals):
-                    if pd.isna(d_val): continue
-                    s_val = str(d_val).strip()
-                    if s_val.endswith(".0"): s_val = s_val[:-2]
-                    if s_val == d_str1 or s_val == d_str2 or s_val == f"0{d_str1}":
-                        target_col = c_idx
-                        header_row = r + offset
+
+    for _, r_month, c_start, c_end in candidate_blocks:
+        for offset in (1, 2, 0):
+            r_day = r_month + offset
+            if r_day >= len(df):
+                continue
+            seen_late_day = False
+            for c_idx in range(c_start, min(c_end, len(df.columns))):
+                d_val = df.iloc[r_day, c_idx]
+                if pd.isna(d_val):
+                    continue
+                s_val = str(d_val).strip()
+                if s_val.endswith(".0"):
+                    s_val = s_val[:-2]
+                # Tránh tràn sang tháng kế tiếp nếu tiêu đề tháng kế tiếp bị gộp/ẩn
+                if s_val.isdigit():
+                    day_num = int(s_val)
+                    if day_num >= 27:
+                        seen_late_day = True
+                    elif day_num == 1 and seen_late_day and c_idx > c_start + 5:
                         break
-                if target_col != -1: break
-        if target_col != -1: break
-        
+                if s_val in (d_str1, d_str2, f"0{d_str1}"):
+                    target_col = c_idx
+                    header_row = r_day
+                    break
+            if target_col != -1:
+                break
+        if target_col != -1:
+            break
+
     if target_col != -1 and header_row != -1:
-        for r in range(header_row + 1, min(header_row + 100, len(df))):
-            val = str(df.iloc[r, target_col]).lower().strip()
-            if not val or val == 'nan': continue
-            if any(x in val for x in ["nghỉ", "off", "công tác", "ốm", "họp"]): continue
-            
-            if "số" in val or val == "x" or "lđp" in val or "ldp" in val:
+        for r in range(header_row + 1, min(header_row + 45, len(df))):
+            # Dừng nếu chạm vào dải tiêu đề tháng tiếp theo ở phía dưới
+            row_ sample_str = " ".join([str(df.iloc[r, c]).lower() for c in range(min(15, len(df.columns))) if not pd.isna(df.iloc[r, c])])
+            if "tháng " in row_sample_str and ("202" in row_sample_str or "/" in row_sample_str):
+                break
+
+            raw_cell = df.iloc[r, target_col]
+            if pd.isna(raw_cell):
+                continue
+            val = _clean_vn_str(raw_cell)
+            if not val or val == "nan":
+                continue
+            # Bỏ qua nếu đang đi công tác nước ngoài, nghỉ phép, ốm
+            if any(x in val for x in ["nghỉ", "off", "công tác", "ốm", "italia", "nhật", "séc"]):
+                continue
+
+            # Nhận diện người trực "Số" (bao gồm: "Số", "Số - Họp", "Số - Họp - input", "Số - trực phóng sự"...)
+            if re.search(r"\bsố\b", val) or "trực số" in val or val in ("x", "lđp", "ldp"):
                 name = ""
-                for c in range(min(5, len(df.columns))):
+                for c in [1, 0, 2, 3, 4]:
+                    if c >= len(df.columns):
+                        continue
                     n = str(df.iloc[r, c]).strip()
-                    if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower():
+                    if n and n.lower() != "nan" and not n.replace(".", "").isdigit() and len(n) > 2 and "stt" not in n.lower() and "họ và tên" not in n.lower():
                         name = n
                         break
                 if name:
                     matched = match_nv(name, list_nv)
-                    if matched: return matched
+                    if matched:
+                        return matched
     return ""
 
 def get_btv_tcsx_from_df(df, target_date_obj, list_nv):
@@ -1042,6 +1303,465 @@ def format_time_col(t):
         return t.strftime("%H:%M:%S")
     except: return str(t)
 
+# ================= HÀM BÓC TÁCH & HIỂN THỊ META PLANNER TIMELINE (30 PHÚT) =================
+def _parse_post_time(val_str):
+    if pd.isna(val_str): return None
+    s = str(val_str).strip().lower()
+    if not s or s in ("nan", "<na>", "none"): return None
+    s = s.replace("h", ":").replace("g", ":")
+    m = re.search(r"(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?", s)
+    if not m: return None
+    try:
+        hh = int(m.group(1))
+        mm = int(m.group(2)) if m.group(2) is not None else 0
+        ss = int(m.group(3)) if m.group(3) is not None else 0
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return dt_time(hh, mm, ss)
+    except Exception:
+        return None
+    return None
+
+def _parse_post_date(val_str, fallback_date):
+    if pd.isna(val_str): return fallback_date
+    s = str(val_str).strip()
+    if not s or s.lower() in ("nan", "<na>", "none"): return fallback_date
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    m = re.search(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", s)
+    if m:
+        try:
+            d_i = int(m.group(1))
+            m_i = int(m.group(2))
+            y_i = int(m.group(3)) if m.group(3) else fallback_date.year
+            if y_i < 100: y_i += 2000
+            return date(y_i, m_i, d_i)
+        except Exception:
+            pass
+    return fallback_date
+
+def _canonical_platform(p_str):
+    s = str(p_str or "").strip()
+    if not s: return ""
+    s_low = s.lower()
+    for std_p in OPTS_NEN_TANG:
+        if std_p.lower() == s_low:
+            return std_p
+    if "face" in s_low or s_low == "fb": return "Facebook"
+    if "you" in s_low or s_low == "yt": return "Youtube"
+    if "linked" in s_low: return "LinkedIn"
+    if "insta" in s_low or s_low == "ig": return "Instagram"
+    if "tik" in s_low: return "TikTok"
+    if "thread" in s_low: return "Threads"
+    if "web" in s_low: return "Web"
+    if "app" in s_low: return "App"
+    return s
+
+def extract_posts_from_tab(tab_name, list_nv):
+    try:
+        fallback_d = datetime.strptime(tab_name, "%d/%m/%Y").date()
+    except Exception:
+        fallback_d = get_vn_today()
+    exists, df_content, _, _ = fetch_vo_truc_so(tab_name)
+    if not exists or df_content.empty:
+        return []
+
+    split_idx = len(df_content)
+    for i, row in df_content.iterrows():
+        b_val = str(row.get('NỘI DUNG', '')).strip().upper()
+        if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in b_val:
+            split_idx = i
+            break
+        c_val = str(row.get('ĐỊNH DẠNG', '')).strip().upper()
+        d_val = str(row.get('NỀN TẢNG', '')).strip().upper()
+        if 'LINK' in c_val and 'PHỤ TRÁCH' in d_val:
+            split_idx = i
+            break
+
+    df_main = df_content.iloc[:split_idx].copy()
+    if df_main.empty:
+        return []
+
+    def is_valid_r(row):
+        stt = str(row.get('STT', '')).strip()
+        nd = str(row.get('NỘI DUNG', '')).strip()
+        nt = str(row.get('NỀN TẢNG', '')).strip()
+        return any(x not in ('', 'nan', '<NA>', 'None') for x in (stt, nd, nt))
+
+    df_main = df_main[df_main.apply(is_valid_r, axis=1)]
+    if df_main.empty:
+        return []
+
+    df_main['NỘI DUNG_GROUP'] = df_main['NỘI DUNG'].replace('', pd.NA).ffill()
+    df_main = df_main.dropna(subset=['NỘI DUNG_GROUP'])
+    df_main = df_main[df_main['NỘI DUNG_GROUP'].astype(str).str.strip() != ""]
+
+    df_main['NHÂN SỰ_FILL'] = df_main['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("Chưa phân công")
+    df_main['ĐỊNH DẠNG_FILL'] = df_main['ĐỊNH DẠNG'].replace('', pd.NA).ffill().fillna("")
+
+    records = []
+    for prod, grp in df_main.groupby('NỘI DUNG_GROUP', sort=False):
+        smart_st = get_smart_status(grp)
+        # Kế thừa GIỜ ĐĂNG / NGÀY ĐĂNG từ dòng đầu của bài viết nếu các dòng nền tảng bị gộp ô
+        first_time_raw = ""
+        first_date_raw = ""
+        for _, r0 in grp.iterrows():
+            if not first_time_raw and str(r0.get('GIỜ ĐĂNG', '')).strip():
+                first_time_raw = str(r0.get('GIỜ ĐĂNG', '')).strip()
+            if not first_date_raw and str(r0.get('NGÀY ĐĂNG', '')).strip():
+                first_date_raw = str(r0.get('NGÀY ĐĂNG', '')).strip()
+
+        row_indices = list(grp.index)
+        for idx_r, r in grp.iterrows():
+            plat = _canonical_platform(r.get('NỀN TẢNG', ''))
+            if not plat:
+                continue
+            raw_t = str(r.get('GIỜ ĐĂNG', '')).strip() or first_time_raw
+            raw_d = str(r.get('NGÀY ĐĂNG', '')).strip() or first_date_raw
+            t_obj = _parse_post_time(raw_t)
+            d_obj = _parse_post_date(raw_d, fallback_d)
+            st_row = str(r.get('STATUS', '')).strip() or smart_st
+            btv_norm = normalize_btv_names_strict(r.get('NHÂN SỰ_FILL', ''), list_nv)
+            records.append({
+                "tab_source": tab_name,
+                "row_idx": idx_r,
+                "group_indices": row_indices,
+                "title": str(prod).strip(),
+                "format": str(r.get('ĐỊNH DẠNG_FILL', '')).strip(),
+                "platform": plat,
+                "status": st_row,
+                "smart_status": smart_st,
+                "btv": btv_norm,
+                "post_date": d_obj,
+                "post_date_str": d_obj.strftime("%d/%m/%Y"),
+                "post_time": t_obj,
+                "post_time_str": t_obj.strftime("%H:%M") if t_obj else "",
+            })
+    return records
+
+def collect_planner_posts(target_dates, list_nv, extra_source_tabs=None):
+    tabs_to_scan = []
+    for d in target_dates:
+        t_str = d.strftime("%d/%m/%Y")
+        if t_str not in tabs_to_scan:
+            tabs_to_scan.append(t_str)
+    if extra_source_tabs:
+        for t_str in extra_source_tabs:
+            if t_str and t_str not in tabs_to_scan:
+                tabs_to_scan.append(t_str)
+    # Quét thêm các tab đã có sẵn trong bộ nhớ RAM (để bắt các bài làm trước hẹn lịch đăng sang ngày khác)
+    for cached_tab in list(AI_ENGINE.get("backup_trucso", {}).keys()):
+        if cached_tab not in tabs_to_scan:
+            tabs_to_scan.append(cached_tab)
+
+    all_posts = []
+    seen_keys = set()
+    target_set = set(target_dates)
+    for t_name in tabs_to_scan:
+        for item in extract_posts_from_tab(t_name, list_nv):
+            if item["post_date"] in target_set:
+                uniq_k = (item["tab_source"], item["row_idx"], item["platform"], item["title"])
+                if uniq_k not in seen_keys:
+                    seen_keys.add(uniq_k)
+                    all_posts.append(item)
+    return all_posts
+
+def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_prefix="main_planner"):
+    st.markdown("#### 🗓️ CÔNG CỤ LẬP KẾ HOẠCH & ĐIỀU PHỐI GIỜ ĐĂNG (GIÃN CÁCH 30 PHÚT)")
+    st.caption("Giúp TCSX và BTV kiểm soát lịch đăng trên mọi nền tảng, tự động phát hiện các bài đăng trùng hoặc sát giờ nhau (< 30 phút) để điều phối hợp lý.")
+
+    c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([1.1, 1.5, 2.4])
+    with c_ctrl1:
+        planner_date = st.date_input(
+            "📅 Ngày xem lịch đăng:",
+            value=default_date,
+            format="DD/MM/YYYY",
+            key=f"{key_prefix}_date"
+        )
+    with c_ctrl2:
+        view_type = st.radio(
+            "Chế độ hiển thị:",
+            ["📐 Timeline 30 Phút (Đa nền tảng)", "📅 Lịch Tuần (Kiểu Meta Planner)"],
+            horizontal=False,
+            key=f"{key_prefix}_view"
+        )
+    with c_ctrl3:
+        st.markdown(
+            "🔒 **Nền tảng cố định (Luôn hiển thị):** `Facebook` • `LinkedIn` • `Youtube` • `Instagram`"
+        )
+        opt_selected = st.multiselect(
+            "➕ Tùy chọn hiện thêm các nền tảng khác:",
+            options=OPTIONAL_PLATFORMS,
+            default=["TikTok", "Threads", "Web", "App"],
+            key=f"{key_prefix}_opt_plats"
+        )
+
+    active_platforms = MANDATORY_PLATFORMS + [p for p in OPTIONAL_PLATFORMS if p in opt_selected]
+
+    if "Timeline 30 Phút" in view_type:
+        # Lấy toàn bộ bài có NGÀY ĐĂNG == planner_date (từ vỏ ngày đó + vỏ hiện tại + cache)
+        posts_day = collect_planner_posts(
+            [planner_date],
+            list_nv,
+            extra_source_tabs=[current_trucso_tab, get_vn_today().strftime("%d/%m/%Y")]
+        )
+        scheduled_posts = [p for p in posts_day if p["post_time"] is not None and p["platform"] in active_platforms]
+        unscheduled_posts = [p for p in posts_day if p["post_time"] is None and p["platform"] in active_platforms]
+
+        # Kiểm tra xung đột giãn cách < 30 phút
+        same_plat_conflicts = set()
+        cross_plat_warnings = set()
+        conflict_messages = []
+
+        # 1. Xung đột trên CÙNG nền tảng (< 30 phút)
+        for plat in active_platforms:
+            p_list = sorted(
+                [p for p in scheduled_posts if p["platform"] == plat],
+                key=lambda x: (x["post_time"].hour * 60 + x["post_time"].minute)
+            )
+            for idx_a in range(len(p_list)):
+                for idx_b in range(idx_a + 1, len(p_list)):
+                    pa, pb = p_list[idx_a], p_list[idx_b]
+                    min_a = pa["post_time"].hour * 60 + pa["post_time"].minute
+                    min_b = pb["post_time"].hour * 60 + pb["post_time"].minute
+                    diff = abs(min_b - min_a)
+                    if diff < 30:
+                        same_plat_conflicts.add((pa["tab_source"], pa["row_idx"]))
+                        same_plat_conflicts.add((pb["tab_source"], pb["row_idx"]))
+                        conflict_messages.append(
+                            f"🚨 **{plat} ({pa['post_time_str']} & {pb['post_time_str']})**: Bài *\"{pa['title'][:45]}\"* và *\"{pb['title'][:45]}\"* cách nhau **{diff} phút** (< 30 phút)!"
+                        )
+
+        # 2. Xung đột GIỮA CÁC nền tảng khác nhau (< 30 phút)
+        all_sorted = sorted(
+            scheduled_posts,
+            key=lambda x: (x["post_time"].hour * 60 + x["post_time"].minute)
+        )
+        for idx_a in range(len(all_sorted)):
+            for idx_b in range(idx_a + 1, len(all_sorted)):
+                pa, pb = all_sorted[idx_a], all_sorted[idx_b]
+                if pa["platform"] == pb["platform"]:
+                    continue
+                if pa["title"] == pb["title"]:
+                    continue
+                min_a = pa["post_time"].hour * 60 + pa["post_time"].minute
+                min_b = pb["post_time"].hour * 60 + pb["post_time"].minute
+                diff = abs(min_b - min_a)
+                if diff < 30:
+                    cross_plat_warnings.add((pa["tab_source"], pa["row_idx"]))
+                    cross_plat_warnings.add((pb["tab_source"], pb["row_idx"]))
+
+        # Thanh tóm tắt trạng thái
+        k1, k2, k3, k4 = st.columns([1, 1, 1, 1.5])
+        k1.metric("📌 Lượt đăng đã xếp giờ", len(scheduled_posts))
+        k2.metric("⏳ Chưa xếp giờ đăng", len(unscheduled_posts))
+        k3.metric("🚨 Vi phạm giãn cách <30p", len(conflict_messages))
+        with k4:
+            slot_filter = st.selectbox(
+                "🔍 Khung giờ hiển thị trên bảng cuộn:",
+                ["Khung giờ hoạt động (06:00 - 23:30)", "Toàn bộ 24 giờ (00:00 - 23:30)", "Chỉ hiện các khung giờ đã có bài"],
+                index=0,
+                key=f"{key_prefix}_slot_filter"
+            )
+
+        if conflict_messages:
+            with st.container(border=True):
+                st.error("⚠️ **PHÁT HIỆN BÀI ĐĂNG TRÙNG HOẶC QUÁ SÁT GIỜ (< 30 PHÚT):**")
+                for msg in conflict_messages[:8]:
+                    st.markdown(f"- {msg}")
+
+        # Xây dựng danh sách 48 block 30 phút trong ngày
+        all_slots = []
+        for h in range(24):
+            for m_slot in (0, 30):
+                all_slots.append((h, m_slot, h * 60 + m_slot, f"{h:02d}:{m_slot:02d}"))
+
+        # Map bài đăng vào từng block 30 phút: [slot_idx][platform]
+        slot_map = {s[3]: {p: [] for p in active_platforms} for s in all_slots}
+        occupied_minutes_by_plat = {p: [] for p in active_platforms}
+
+        for p_item in scheduled_posts:
+            total_m = p_item["post_time"].hour * 60 + p_item["post_time"].minute
+            slot_h = p_item["post_time"].hour
+            slot_m = 30 if p_item["post_time"].minute >= 30 else 0
+            slot_label = f"{slot_h:02d}:{slot_m:02d}"
+            if slot_label in slot_map and p_item["platform"] in slot_map[slot_label]:
+                slot_map[slot_label][p_item["platform"]].append(p_item)
+                occupied_minutes_by_plat[p_item["platform"]].append((total_m, p_item["post_time_str"], p_item["title"]))
+
+        # Lọc các dòng giờ hiển thị
+        visible_slots = []
+        for h, m_slot, total_m, s_label in all_slots:
+            has_any_post = any(len(slot_map[s_label][p]) > 0 for p in active_platforms)
+            if slot_filter == "Chỉ hiện các khung giờ đã có bài":
+                if has_any_post:
+                    visible_slots.append((h, m_slot, total_m, s_label, has_any_post))
+            elif slot_filter == "Khung giờ hoạt động (06:00 - 23:30)":
+                if h >= 6 or has_any_post:
+                    visible_slots.append((h, m_slot, total_m, s_label, has_any_post))
+            else:
+                visible_slots.append((h, m_slot, total_m, s_label, has_any_post))
+
+        if not visible_slots:
+            st.info(f"📭 Chưa có bài viết nào được đặt Giờ đăng trong ngày {planner_date.strftime('%d/%m/%Y')}.")
+        else:
+            # Render bảng HTML cuộn mượt chuẩn Meta Planner
+            html_parts = ['<div class="meta-planner-wrap"><table class="meta-table"><thead><tr>']
+            html_parts.append('<th class="time-col-hdr">⏰ KHUNG GIỜ<br><span style="font-size:10.5px;font-weight:500;color:#65676b;">(Block 30p)</span></th>')
+            for plat in active_platforms:
+                p_label, p_color = PLATFORM_BADGE_STYLE.get(plat, (plat, "#1877f2"))
+                plat_count = sum(len(slot_map[s[3]][plat]) for s in all_slots)
+                mandatory_tag = ' <span style="font-size:10px;color:#059669;">●</span>' if plat in MANDATORY_PLATFORMS else ''
+                html_parts.append(
+                    f'<th><span style="color:{p_color};font-size:13.5px;">{p_label}</span>{mandatory_tag}'
+                    f'<div style="font-size:11px;font-weight:500;color:#65676b;margin-top:2px;">{plat_count} bài đã xếp giờ</div></th>'
+                )
+            html_parts.append('</tr></thead><tbody>')
+
+            for h, m_slot, slot_start_min, s_label, has_any_post in visible_slots:
+                row_cls = "slot-busy" if has_any_post else ""
+                end_m = slot_start_min + 29
+                end_label = f"{end_m // 60:02d}:{end_m % 60:02d}"
+                html_parts.append(
+                    f'<tr class="{row_cls}"><td class="time-cell">{s_label}<div style="font-size:10px;font-weight:400;color:#8d949e;">đến {end_label}</div></td>'
+                )
+                for plat in active_platforms:
+                    cell_posts = slot_map[s_label][plat]
+                    html_parts.append('<td>')
+                    if cell_posts:
+                        for cp in sorted(cell_posts, key=lambda x: x["post_time"]):
+                            is_same_conf = (cp["tab_source"], cp["row_idx"]) in same_plat_conflicts
+                            is_cross_warn = (cp["tab_source"], cp["row_idx"]) in cross_plat_warnings
+                            card_cls = "meta-card conflict" if is_same_conf else ("meta-card cross-warn" if is_cross_warn else "meta-card")
+                            badge_cls = "meta-time-badge conflict-badge" if is_same_conf else "meta-time-badge"
+                            _, p_color = PLATFORM_BADGE_STYLE.get(plat, (plat, "#1877f2"))
+                            style_border = "" if (is_same_conf or is_cross_warn) else f'style="border-left-color:{p_color};"'
+                            safe_title = html_lib.escape(cp["title"])
+                            safe_btv = html_lib.escape(get_short_name(cp["btv"]))
+                            safe_fmt = html_lib.escape(cp["format"] or "Tin bài")
+                            safe_st = html_lib.escape(cp["smart_status"])
+                            warn_txt = ' <span style="color:#dc3545;font-weight:700;">⚠️ Sát giờ <30p</span>' if is_same_conf else (
+                                ' <span style="color:#d97706;font-weight:700;">⚡ Sát giờ nền tảng khác</span>' if is_cross_warn else ''
+                            )
+                            html_parts.append(
+                                f'<div class="{card_cls}" {style_border}>'
+                                f'<div class="meta-card-top"><span class="{badge_cls}">🕒 {cp["post_time_str"]}</span><span>{safe_st}</span></div>'
+                                f'<div class="meta-card-title">{safe_title}</div>'
+                                f'<div class="meta-card-sub"><span>🎬 {safe_fmt}</span><span>👤 {safe_btv}{warn_txt}</span></div>'
+                                f'</div>'
+                            )
+                    else:
+                        # Kiểm tra xem khung 30p này có nằm sát <30p với bài ở khung liền kề trên cùng nền tảng không
+                        near_other = None
+                        for occ_min, occ_time_str, occ_title in occupied_minutes_by_plat[plat]:
+                            if abs(slot_start_min - occ_min) < 30:
+                                near_other = occ_time_str
+                                break
+                        if near_other:
+                            html_parts.append(f'<div class="slot-cooldown-pill">⏳ Giãn cách 30p (Có bài lúc {near_other})</div>')
+                        else:
+                            html_parts.append('<div class="slot-empty-pill">+ Trống (Có thể xếp bài)</div>')
+                    html_parts.append('</td>')
+                html_parts.append('</tr>')
+
+            html_parts.append('</tbody></table></div>')
+            st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+        # Hiển thị các bài trong ngày nhưng CHƯA ĐẶT GIỜ ĐĂNG và Công cụ xếp/đổi giờ nhanh
+        if unscheduled_posts:
+            with st.expander(f"📌 Có {len(unscheduled_posts)} lượt nền tảng trong ngày {planner_date.strftime('%d/%m/%Y')} CHƯA ĐẶT GIỜ ĐĂNG (Bấm để xem)", expanded=False):
+                df_un = pd.DataFrame([
+                    {
+                        "Tiêu đề bài": p["title"],
+                        "Nền tảng": p["platform"],
+                        "Định dạng": p["format"],
+                        "BTV": p["btv"],
+                        "Tiến độ": p["smart_status"],
+                        "Vỏ trực số gốc": p["tab_source"]
+                    }
+                    for p in unscheduled_posts
+                ])
+                st.dataframe(df_un, use_container_width=True, hide_index=True)
+
+        # Công cụ Đổi / Xếp giờ đăng nhanh ngay dưới Timeline
+        if posts_day:
+            with st.expander("⚡ ĐỔI NHANH GIỜ ĐĂNG / NGÀY ĐĂNG TRỰC TIẾP TỪ BẢNG KẾ HOẠCH", expanded=False):
+                with st.form(f"{key_prefix}_quick_sched_form"):
+                    options_map = {}
+                    for p in posts_day:
+                        t_disp = p["post_time_str"] if p["post_time_str"] else "Chưa xếp giờ"
+                        lbl = f"[{p['platform']} | {t_disp} - {p['post_date_str']}] {p['title']} (Vỏ {p['tab_source']})"
+                        options_map[lbl] = p
+                    sel_post_lbl = st.selectbox("Chọn bài viết / nền tảng cần xếp hoặc đổi lịch:", list(options_map.keys()))
+                    q_c1, q_c2, q_c3 = st.columns([1, 1, 1.2])
+                    new_q_time = q_c1.time_input("⏰ Giờ đăng mới:", value=dt_time(9, 0), step=timedelta(minutes=15), key=f"{key_prefix}_qt")
+                    new_q_date = q_c2.date_input("📅 Ngày đăng mới:", value=planner_date, format="DD/MM/YYYY", key=f"{key_prefix}_qd")
+                    apply_scope = q_c3.radio(
+                        "Phạm vi áp dụng:",
+                        ["Chỉ nền tảng đang chọn", "Tất cả nền tảng của bài này"],
+                        key=f"{key_prefix}_qscope"
+                    )
+                    if st.form_submit_button("💾 CẬP NHẬT LỊCH ĐĂNG NGAY", type="primary"):
+                        chosen_p = options_map[sel_post_lbl]
+                        target_rows = [chosen_p["row_idx"]] if apply_scope == "Chỉ nền tảng đang chọn" else chosen_p["group_indices"]
+                        t_str_ formatted = new_q_time.strftime("%H:%M:%S") if new_q_time else ""
+                        d_str_formatted = new_q_date.strftime("%d/%m/%Y")
+                        AI_ENGINE["executor"].submit(bg_quick_reschedule, chosen_p["tab_source"], target_rows, t_str_formatted, d_str_formatted)
+                        st.success(f"✅ Đã xếp lịch '{chosen_p['title']}' vào lúc {new_q_time.strftime('%H:%M')} ngày {d_str_formatted}!")
+                        time.sleep(0.6)
+                        clear_cache_and_rerun()
+
+    else:
+        # CHẾ ĐỘ XEM LỊCH TUẦN (7 NGÀY KIỂU META PLANNER)
+        monday = planner_date - timedelta(days=planner_date.weekday())
+        week_dates = [monday + timedelta(days=i) for i in range(7)]
+        day_names_vn = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+
+        st.markdown(f"**📅 Tuần từ {week_dates[0].strftime('%d/%m/%Y')} đến {week_dates[-1].strftime('%d/%m/%Y')}**")
+        week_posts = collect_planner_posts(
+            week_dates,
+            list_nv,
+            extra_source_tabs=[current_trucso_tab, get_vn_today().strftime("%d/%m/%Y")]
+        )
+        week_posts = [p for p in week_posts if p["platform"] in active_platforms]
+
+        html_w = ['<div class="meta-planner-wrap"><table class="meta-table"><thead><tr>']
+        for i_d, d_obj in enumerate(week_dates):
+            is_today_col = (d_obj == planner_date)
+            hdr_bg = 'style="background:#e7f3ff;color:#1877f2;"' if is_today_col else ''
+            cnt_d = sum(1 for p in week_posts if p["post_date"] == d_obj)
+            html_w.append(
+                f'<th {hdr_bg}>{day_names_vn[i_d]} {d_obj.strftime("%d/%m")}'
+                f'<div style="font-size:11px;font-weight:500;color:#65676b;">{cnt_d} lượt đăng</div></th>'
+            )
+        html_w.append('</tr></thead><tbody><tr>')
+
+        for d_obj in week_dates:
+            day_items = [p for p in week_posts if p["post_date"] == d_obj]
+            day_items.sort(key=lambda x: (x["post_time"] is None, x["post_time"] or dt_time(23, 59)))
+            html_w.append('<td style="min-width:200px;background:#f7f8fa;">')
+            if not day_items:
+                html_w.append('<div class="slot-empty-pill">Chưa có lịch bài</div>')
+            else:
+                for cp in day_items:
+                    p_label, p_color = PLATFORM_BADGE_STYLE.get(cp["platform"], (cp["platform"], "#1877f2"))
+                    t_disp = cp["post_time_str"] if cp["post_time_str"] else "Chưa chốt giờ"
+                    safe_title = html_lib.escape(cp["title"])
+                    safe_btv = html_lib.escape(get_short_name(cp["btv"]))
+                    html_w.append(
+                        f'<div class="meta-card" style="border-left-color:{p_color};">'
+                        f'<div class="meta-card-top"><span class="meta-time-badge">🕒 {t_disp}</span>'
+                        f'<span style="color:{p_color};">{p_label}</span></div>'
+                        f'<div class="meta-card-title">{safe_title}</div>'
+                        f'<div class="meta-card-sub"><span>{html_lib.escape(cp["smart_status"])}</span><span>👤 {safe_btv}</span></div>'
+                        f'</div>'
+                    )
+            html_w.append('</td>')
+        html_w.append('</tr></tbody></table></div>')
+        st.markdown("".join(html_w), unsafe_allow_html=True)
+
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
     row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
@@ -1232,7 +1952,6 @@ if 'authenticated' not in st.session_state:
     st.session_state['user_info'] = {}
     st.session_state['username'] = ''
 
-# Tự động khôi phục phiên đăng nhập từ URL nếu người dùng lỡ bấm F5 hoặc mất kết nối tạm thời
 if not st.session_state['authenticated']:
     try:
         q_user = str(st.query_params.get("u", "")).strip()
@@ -1302,7 +2021,6 @@ else:
     list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
     u_info = st.session_state['user_info']; curr_name = u_info.get('HoTen', ''); curr_username = str(st.session_state.get('username', '')); role = u_info.get('VaiTro', 'NhanVien')
     
-    # Chỉ tải bảng Dự Án / Công Việc / Nhật Ký nếu là Lãnh Đạo để tiết kiệm tối đa Quota Google API
     if role == 'LanhDao':
         df_duan, df_cv, df_cn, df_log = load_du_lieu_app()
     else:
@@ -1350,7 +2068,7 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
-    list_tabs = ["📝 VỎ TRỰC SỐ", "📺 TẠO LPS"]
+    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)", "📺 TẠO LPS"]
     if role == 'LanhDao': 
         list_tabs.extend(["✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "📊 DASHBOARD", "📜 NHẬT KÝ"])
         
@@ -1402,12 +2120,12 @@ else:
                         - Bạn chỉ việc bấm nút **🚀 TẠO VỎ TRỰC SỐ MỚI**. Form trực số chuẩn định dạng sẽ xuất hiện ngay lập tức.
                         """)
                     elif step == 2:
-                        st.subheader("🎓 BƯỚC 2: THÊM BÀI ĐĂNG MỚI")
-                        st.info("**Quên chuyện lùi dòng, lệch ô đi!** Hệ thống sẽ tự động thêm và Gộp ô (Merge Cells) cực chuẩn.")
+                        st.subheader("🎓 BƯỚC 2: THÊM BÀI ĐĂNG MỚI & ĐẶT GIỜ ĐĂNG")
+                        st.info("**Quên chuyện lùi dòng, lệch ô đi!** Hệ thống sẽ tự động thêm, Gộp ô (Merge Cells) và đẩy thẳng vào Bảng Kế Hoạch Meta Planner.")
                         st.markdown("""
                         - Kéo xuống phần **➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ**.
-                        - Nhập *Tên bài, Định dạng, Nền tảng (có thể chọn nhiều)* và dán **Link Drive / Nội dung Text**.
-                        - Bấm Thêm. Ngay lập tức, form sẽ tự động xóa trắng cho bạn làm bài tiếp theo, còn hệ thống sẽ âm thầm đưa bài viết của bạn lên bảng cực trực quan.
+                        - Nhập *Tên bài, Định dạng, Nền tảng, Giờ đăng dự kiến, Ngày đăng dự kiến* và dán **Link Drive / Nội dung Text**.
+                        - Bấm Thêm. Ngay lập tức bài viết được đưa vào cả Vỏ Trực Số lẫn Timeline 30 phút để kiểm soát trùng giờ!
                         """)
                     elif step == 3:
                         st.subheader("🎓 BƯỚC 3: CẬP NHẬT TRẠNG THÁI & AI RÀ SOÁT LỖI")
@@ -1455,8 +2173,9 @@ else:
                     default_roster[2] = auto_btv[0] if len(auto_btv) > 0 else "--" 
                     default_roster[3] = auto_tcsx if auto_tcsx else "--"          
                     
-                    default_roster[4] = "--" 
-                    default_roster[5] = "--" 
+                    # Ưu tiên để trống vị trí 4 & 5, chỉ điền khi kíp trực có từ 4-5 BTV trở lên
+                    default_roster[4] = auto_btv[4] if len(auto_btv) > 4 else "--" 
+                    default_roster[5] = auto_btv[3] if len(auto_btv) > 3 else "--" 
                     
                     default_roster[6] = auto_btv[1] if len(auto_btv) > 1 else "--" 
                     default_roster[7] = auto_btv[2] if len(auto_btv) > 2 else "--" 
@@ -1576,12 +2295,16 @@ else:
                         btvs = group['NHÂN SỰ_NORM'].unique()
                         btv_name = ", ".join([b for b in btvs if b and b != "Chưa Phân Công"]) if len(btvs) > 0 else "Chưa phân công"
                         plats = group['NỀN TẢNG'].replace('', pd.NA).dropna().tolist()
+                        times_list = [str(x).strip() for x in group['GIỜ ĐĂNG'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
+                        dates_list = [str(x).strip() for x in group['NGÀY ĐĂNG'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
                         
                         summary_data.append({
                             "Sản phẩm": prod,
                             "BTV": btv_name,
                             "Tiến độ": smart_status,
-                            "Nền tảng": ", ".join(plats)
+                            "Nền tảng": ", ".join(plats),
+                            "Giờ đăng": times_list[0][:5] if times_list else "",
+                            "Ngày đăng": dates_list[0] if dates_list else date_str_display
                         })
 
                         link_duyet_vals = [str(x) for x in group['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
@@ -1884,6 +2607,8 @@ else:
                                     st.caption("Cập nhật trạng thái, giờ lên bài hoặc link sản phẩm.")
                                     
                                     platform_updates = {}
+                                    fallback_group_time = _parse_post_time(first_row_data.get('GIỜ ĐĂNG', ''))
+                                    fallback_group_date = _parse_post_date(first_row_data.get('NGÀY ĐĂNG', ''), target_date)
                                     for i, r in group_df.iterrows():
                                         nentang = r['NỀN TẢNG']
                                         
@@ -1893,16 +2618,10 @@ else:
                                             st_val = st.selectbox(f"Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"st_{i}_{date_str_display.replace('/', '')}")
                                             
                                             c_t, c_d = st.columns(2)
-                                            try: 
-                                                time_str = str(r.get('GIỜ ĐĂNG', '')).strip()
-                                                if time_str.count(":") == 2: val_time = datetime.strptime(time_str, "%H:%M:%S").time()
-                                                elif time_str.count(":") == 1: val_time = datetime.strptime(time_str, "%H:%M").time()
-                                                else: val_time = None
-                                            except: val_time = None
-                                            time_val = c_t.time_input("Giờ xuất bản", value=val_time, key=f"ti_{i}_{date_str_display.replace('/', '')}")
+                                            val_time = _parse_post_time(r.get('GIỜ ĐĂNG', '')) or fallback_group_time
+                                            time_val = c_t.time_input("Giờ xuất bản", value=val_time, step=timedelta(minutes=15), key=f"ti_{i}_{date_str_display.replace('/', '')}")
                                             
-                                            try: curr_d_val = datetime.strptime(str(r.get('NGÀY ĐĂNG', '')), "%d/%m/%Y").date()
-                                            except (TypeError, ValueError): curr_d_val = get_vn_today()
+                                            curr_d_val = _parse_post_date(r.get('NGÀY ĐĂNG', ''), fallback_group_date)
                                             date_val = c_d.date_input("Ngày", value=curr_d_val, format="DD/MM/YYYY", key=f"da_{i}_{date_str_display.replace('/', '')}")
                                             
                                             lsp_val = st.text_input("Link Sản phẩm đã lên", value=r.get('LINK SẢN PHẨM', ''), key=f"lsp_{i}_{date_str_display.replace('/', '')}")
@@ -1919,7 +2638,6 @@ else:
                                         final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
                                         final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
                                         
-                                        # Thực thi ngầm cực mượt
                                         AI_ENGINE["executor"].submit(bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_ldp, merged_link_duyet_update, platform_updates)
                                         
                                         st.success("✅ Đã ghi nhận! Hệ thống đang tự động đồng bộ ngầm.")
@@ -1946,6 +2664,8 @@ else:
                                 "BTV": st.column_config.TextColumn("BTV", width="medium"),
                                 "Tiến độ": st.column_config.TextColumn("Tiến độ", width="medium"),
                                 "Nền tảng": st.column_config.TextColumn("Nền tảng", width="medium"),
+                                "Giờ đăng": st.column_config.TextColumn("Giờ đăng", width="small"),
+                                "Ngày đăng": st.column_config.TextColumn("Ngày đăng", width="small"),
                             }
                         )
 
@@ -1974,6 +2694,7 @@ else:
                             }
                         )
 
+                # ================= FORM THÊM BÀI MỚI (BỔ SUNG GIỜ ĐĂNG & NGÀY ĐĂNG) =================
                 with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
                     with st.form("add_news_form", clear_on_submit=True):
                         c1, c2 = st.columns([3, 1])
@@ -1988,6 +2709,22 @@ else:
                         
                         ts_nhansu = c5.multiselect("BTV Thực hiện", list_nv, default=[curr_name] if curr_name in list_nv else None)
                         ts_check = c6.text_input("Ghi chú Check", placeholder="VD: OK, Sửa video...")
+
+                        st.markdown("**⏰ LỊCH XUẤT BẢN DỰ KIẾN (TỰ ĐỘNG ĐỒNG BỘ VÀO BẢNG ĐIỀU PHỐI META PLANNER):**")
+                        c_time_add, c_date_add, c_note_sched = st.columns([1.2, 1.2, 2.6])
+                        ts_giodang = c_time_add.time_input(
+                            "Giờ đăng dự kiến (Tùy chọn)",
+                            value=None,
+                            step=timedelta(minutes=15),
+                            help="Chọn giờ đăng (hoặc để trống nếu chưa chốt giờ). Giãn cách khuyến nghị tối thiểu 30 phút."
+                        )
+                        ts_ngaydang = c_date_add.date_input(
+                            "Ngày đăng dự kiến",
+                            value=target_date,
+                            format="DD/MM/YYYY",
+                            help="Mặc định là ngày của Vỏ trực số hiện tại, có thể đổi sang ngày khác nếu làm bài để dành."
+                        )
+                        c_note_sched.info("💡 Khi chọn Giờ đăng & Ngày đăng, bài viết sẽ tự động hiển thị trên **Bảng cuộn Kế Hoạch (Meta Planner)** của các nền tảng tương ứng.")
                         
                         st.markdown("**THÔNG TIN BỔ SUNG & NỘI DUNG:**")
                         c_nguon, c_drive = st.columns(2)
@@ -1998,16 +2735,51 @@ else:
                         if st.form_submit_button("THÊM VÀO VỎ TRỰC SỐ", type="primary"):
                             plats = ts_nentang if ts_nentang else [""]
                             merged_link_duyet = merge_text_link(ts_texttin, ts_linkduyet)
+                            post_time_str = ts_giodang.strftime("%H:%M:%S") if ts_giodang else ""
+                            post_date_str = ts_ngaydang.strftime("%d/%m/%Y") if ts_ngaydang else date_str_display
+
+                            # Lưu tạm vào Optimistic Cache để hiện lên Bảng và Timeline ngay lập tức (0 giây)
+                            opt_rows_build = []
+                            for idx_p, p in enumerate(plats):
+                                if idx_p == 0:
+                                    opt_rows_build.append(["99", ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", post_time_str, post_date_str, "", merged_link_duyet])
+                                else:
+                                    opt_rows_build.append(["100", "", ts_dinhdang, p, ts_status, "", "", "", "", "", post_time_str, post_date_str, "", ""])
+                            AI_ENGINE["optimistic_posts"].append({
+                                "tab_name": tab_name_current,
+                                "title": ts_noidung,
+                                "rows": opt_rows_build
+                            })
                             
-                            # Chạy ngầm đa luồng để giao diện Load ngay lập tức
-                            AI_ENGINE["executor"].submit(bg_add_news, tab_name_current, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, ts_nguon, ts_nhansu, date_str_display, merged_link_duyet)
+                            # Chạy ngầm đa luồng để ghi lên Google Sheet
+                            AI_ENGINE["executor"].submit(
+                                bg_add_news,
+                                tab_name_current,
+                                ts_noidung,
+                                ts_dinhdang,
+                                plats,
+                                ts_status,
+                                ts_check,
+                                ts_nguon,
+                                ts_nhansu,
+                                post_time_str,
+                                post_date_str,
+                                merged_link_duyet
+                            )
                             
-                            st.success(f"✅ Đã thêm bài **'{ts_noidung}'**. Google Sheet đang tự động cập nhật và căn chỉnh ô. Bạn có thể tiếp tục thêm tin khác vào vỏ.")
-                            time.sleep(1.5)
+                            sched_msg = f" (Lịch đăng: {ts_giodang.strftime('%H:%M')} ngày {post_date_str})" if ts_giodang else f" (Ngày đăng: {post_date_str})"
+                            st.success(f"✅ Đã thêm bài **'{ts_noidung}'**{sched_msg}. Google Sheet đang tự động cập nhật và căn chỉnh ô. Bạn có thể tiếp tục thêm tin khác vào vỏ.")
+                            time.sleep(1.2)
                             clear_cache_and_rerun()
 
                 # Chạy khối Bảng thống kê
                 render_bottom_tables(filter_opt)
+                st.divider()
+
+                # Tích hợp luôn Bảng điều phối lịch đăng (Meta Planner) ngay trong Vỏ Trực Số để tiện theo dõi
+                with st.expander("🗓️ BẢNG CUỘN ĐIỀU PHỐI GIỜ ĐĂNG ĐA NỀN TẢNG (TIMELINE 30 PHÚT - META PLANNER)", expanded=True):
+                    render_meta_planner_section(target_date, tab_name_current, list_nv, key_prefix="inline_trucso_planner")
+
                 st.divider()
 
                 # ================= KHU VỰC QUẢN LÝ SEEDING =================
@@ -2104,6 +2876,16 @@ else:
                             st.success("✅ Đã ghi nhận! Hệ thống đang tạo nhiệm vụ Seeding ngầm. Form đã dọn sạch để thêm tiếp.")
                             time.sleep(1.5)
                             clear_cache_and_rerun()
+
+    # ================= TAB MỚI: KẾ HOẠCH ĐĂNG ĐA NỀN TẢNG (META PLANNER) =================
+    if "🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)" in tab_dict:
+        with tab_dict["🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)"]:
+            render_meta_planner_section(
+                target_date if 'target_date' in locals() else get_vn_today(),
+                tab_name_current if 'tab_name_current' in locals() else get_vn_today().strftime("%d/%m/%Y"),
+                list_nv,
+                key_prefix="dedicated_tab_planner"
+            )
 
     # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
     if "📺 TẠO LPS" in tab_dict:
