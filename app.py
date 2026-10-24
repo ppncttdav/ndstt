@@ -2780,7 +2780,7 @@ else:
                 st.divider()
 
                 # Tích hợp luôn Bảng điều phối lịch đăng (Meta Planner) ngay trong Vỏ Trực Số để tiện theo dõi
-                with st.expander("🗓️ BẢNG CUỘN ĐIỀU PHỐI GIỜ ĐĂNG ĐA NỀN TẢNG (TIMELINE 30 PHÚT - META PLANNER)", expanded=True):
+                with st.expander("🗓️ LỊCH BÀI ĐĂNG", expanded=True):
                     render_meta_planner_section(target_date, tab_name_current, list_nv, key_prefix="inline_trucso_planner")
 
                 st.divider()
