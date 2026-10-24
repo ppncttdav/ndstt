@@ -40,7 +40,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-SHEET_MAIN = "HeThongQuanLy" 
+SHEET_MAIN = str(st.secrets.get("sheet_main", os.getenv("SHEET_MAIN", "HeThongQuanLy"))).strip()
 SHEET_TRUCSO = "VoTrucSo"
 LINK_VO_TRUC_SO = "https://docs.google.com/spreadsheets/d/1WYfdY8OIVWPD-N5xZD36B3v7MV_XFjHXj_v9UZXK0ZI/edit?gid=1107365160#gid=1107365160"
 LINK_LICH_BTV_TCSX = "https://docs.google.com/spreadsheets/d/1IFbxenXl7PehWc3Q0L35DHkkUVyEBGXaV7JSRKHMSn8/edit?gid=387062810#gid=387062810"
@@ -53,8 +53,9 @@ def get_vn_today(): return get_vn_time().date()
 
 # KHÓA BẢO VỆ CHỐNG GHI ĐÈ KHI NHẬP LIỆU NHANH
 SHEET_LOCK = threading.Lock()
+LAST_GSHEET_ERROR = ""
 
-# --- LÕI AI GROQ (CHUẨN OPENAI COMPATIBLE) ---
+# --- LÕI AI GROQ & BỘ NHỚ DỰ PHÒNG CHỐNG SẬP APP ---
 logger = logging.getLogger("vietnam_today")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -63,15 +64,21 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 def get_ai_api_key():
-    key = str(st.secrets.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))).strip()
-    return key if key else ""
+    try:
+        key = str(st.secrets.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))).strip()
+        return key if key else ""
+    except Exception:
+        return str(os.getenv("GROQ_API_KEY", "")).strip()
 
 @st.cache_resource
 def init_ai_engine():
     return {
         "cache": {},
         "queue": set(),
-        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        "executor": concurrent.futures.ThreadPoolExecutor(max_workers=5),
+        "backup_users": pd.DataFrame(),
+        "backup_trucso": {},
+        "backup_app_data": None
     }
 
 AI_ENGINE = init_ai_engine()
@@ -121,6 +128,9 @@ QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
     for attempt in range(3):
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=30)
+            if response.status_code == 400 and "model_decommissioned" in response.text:
+                payload["model"] = "llama-3.3-70b-versatile"
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
             if response.status_code == 429:
                 if attempt < 2:
                     time.sleep(1.5 ** (attempt + 1))
@@ -159,7 +169,7 @@ def queue_bg_scan(text, smart_status=""):
     api_key = get_ai_api_key()
     if not api_key: return
     
-    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"))).strip()
+    model_name = str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip()
     today_str = get_vn_time().strftime("%d/%m/%Y")
     
     AI_ENGINE["queue"].add(text_hash)
@@ -225,7 +235,7 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
                         }
                     })
                 wks_today.spreadsheet.batch_update({"requests": merge_requests})
-            clear_app_caches()
+            clear_trucso_cache()
         except Exception as e: logger.error(f"Lỗi thêm bài ngầm: {e}")
 
 def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_ldp, merged_link_duyet_update, platform_updates):
@@ -277,7 +287,7 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
                     cells_to_update.append(gspread.Cell(sheet_row, col_ldp, ""))
                     
             wks_today.update_cells(cells_to_update)
-            clear_app_caches()
+            clear_trucso_cache()
         except Exception: pass
 
 def bg_add_seeding(tab_name, s_nhiemvu, s_link, s_phutrach, s_kpi, s_nhansu):
@@ -323,7 +333,7 @@ def bg_add_seeding(tab_name, s_nhiemvu, s_link, s_phutrach, s_kpi, s_nhansu):
             task_row_idx = end_append_row
             fmt_requests.append({"repeatCell": {"range": {"sheetId": wks_today.id, "startRowIndex": task_row_idx - 1, "endRowIndex": task_row_idx, "startColumnIndex": 0, "endColumnIndex": 7}, "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE", "horizontalAlignment": "CENTER", "textFormat": {"fontFamily": "Times New Roman"}, "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}}}, "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment,textFormat,borders)"}})
             if fmt_requests: wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-            clear_app_caches()
+            clear_trucso_cache()
         except Exception: pass
 
 def bg_update_seeding(tab_name, cells_data):
@@ -333,35 +343,55 @@ def bg_update_seeding(tab_name, cells_data):
             wks = sh_trucso.worksheet(tab_name)
             cells = [gspread.Cell(r, c, v) for r, c, v in cells_data]
             if cells: wks.update_cells(cells)
-            clear_app_caches()
+            clear_trucso_cache()
         except Exception: pass
 
 def background_save_task(tv_ten, tv_duan, dl_fmt, tv_nguoi_str, tv_ghichu, curr_name):
-    try:
-        sh_main = ket_noi_sheet(SHEET_MAIN)
-        sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, tv_nguoi_str, "Đã giao", "", tv_ghichu, curr_name])
-        wks = sh_main.worksheet("NhatKy")
-        wks.append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), curr_name, "Tạo việc", str(tv_ten)[:5000]])
-    except Exception: pass
+    with SHEET_LOCK:
+        try:
+            sh_main = ket_noi_sheet(SHEET_MAIN)
+            sh_main.worksheet("CongViec").append_row([tv_ten, tv_duan, dl_fmt, tv_nguoi_str, "Đã giao", "", tv_ghichu, curr_name])
+            wks = sh_main.worksheet("NhatKy")
+            wks.append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), curr_name, "Tạo việc", str(tv_ten)[:5000]])
+            load_du_lieu_app.clear()
+        except Exception: pass
 
 def background_update_task(rn, e_ten, e_dl, e_ng, e_st, e_lk, e_nt):
-    try:
-        sh_main = ket_noi_sheet(SHEET_MAIN)
-        w = sh_main.worksheet("CongViec")
-        cells = [gspread.Cell(rn, 1, e_ten), gspread.Cell(rn, 3, e_dl), gspread.Cell(rn, 4, e_ng), gspread.Cell(rn, 5, e_st), gspread.Cell(rn, 6, e_lk), gspread.Cell(rn, 7, e_nt)]
-        w.update_cells(cells)
-    except Exception: pass
+    with SHEET_LOCK:
+        try:
+            sh_main = ket_noi_sheet(SHEET_MAIN)
+            w = sh_main.worksheet("CongViec")
+            cells = [gspread.Cell(rn, 1, e_ten), gspread.Cell(rn, 3, e_dl), gspread.Cell(rn, 4, e_ng), gspread.Cell(rn, 5, e_st), gspread.Cell(rn, 6, e_lk), gspread.Cell(rn, 7, e_nt)]
+            w.update_cells(cells)
+            load_du_lieu_app.clear()
+        except Exception: pass
 
 def bg_update_checklist(edited_data):
-    try:
-        sh_main = ket_noi_sheet(SHEET_MAIN)
-        try: wks_canhan = sh_main.worksheet("ViecCaNhan")
-        except: 
-            wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
-            wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
-        cells = [gspread.Cell(r, c, v) for r, c, v in edited_data]
-        if cells: wks_canhan.update_cells(cells)
-    except Exception: pass
+    with SHEET_LOCK:
+        try:
+            sh_main = ket_noi_sheet(SHEET_MAIN)
+            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+            except: 
+                wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+                wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+            cells = [gspread.Cell(r, c, v) for r, c, v in edited_data]
+            if cells: wks_canhan.update_cells(cells)
+            load_du_lieu_app.clear()
+        except Exception: pass
+
+def update_wks_canhan(action, row_data):
+    with SHEET_LOCK:
+        try:
+            sh_main = ket_noi_sheet(SHEET_MAIN)
+            try: wks_canhan = sh_main.worksheet("ViecCaNhan")
+            except Exception:
+                wks_canhan = sh_main.add_worksheet("ViecCaNhan", 1000, 5)
+                wks_canhan.append_row(["User", "TenViec", "Ngay", "TrangThai", "GhiChu"])
+            if action == "append":
+                wks_canhan.append_row(row_data)
+            load_du_lieu_app.clear()
+        except Exception as e:
+            logger.error(f"Lỗi cập nhật việc cá nhân: {e}")
 
 # --- BẢO MẬT & MẬT KHẨU ---
 def _scrypt_hash(password: str) -> str:
@@ -398,22 +428,29 @@ def generate_secure_token(username):
         hashlib.sha256,
     ).hexdigest()
 
+# Chỉ xóa cache của Vỏ Trực Số khi thao tác bài viết để tránh vượt Quota 429 của Google
+def clear_trucso_cache():
+    try: _fetch_vo_truc_so_cached.clear()
+    except Exception: pass
+
 def clear_app_caches():
-    for fn in (load_tai_khoan, load_du_lieu_app, fetch_vo_truc_so, fetch_and_parse_schedules, get_public_gsheet_as_excel):
+    for fn in (_fetch_vo_truc_so_cached, _fetch_du_lieu_app_cached):
         try: fn.clear()
         except Exception: pass
 
 def clear_cache_and_rerun():
-    clear_app_caches()
+    clear_trucso_cache()
     try: st.rerun()
     except Exception: pass
 
 def ghi_nhat_ky(nguoi_dung, hanh_dong, chi_tiet):
-    try:
-        sh_main = ket_noi_sheet(SHEET_MAIN)
-        wks = sh_main.worksheet("NhatKy")
-        wks.append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, str(chi_tiet)[:5000]])
-    except Exception: logger.exception("Không ghi được nhật ký")
+    def _log_bg():
+        try:
+            sh_main = ket_noi_sheet(SHEET_MAIN)
+            wks = sh_main.worksheet("NhatKy")
+            wks.append_row([get_vn_time().strftime("%H:%M %d/%m/%Y"), nguoi_dung, hanh_dong, str(chi_tiet)[:5000]])
+        except Exception: pass
+    AI_ENGINE["executor"].submit(_log_bg)
 
 def get_short_name(full_name):
     if not full_name or full_name == "--" or str(full_name).strip() == "": return "..."
@@ -538,109 +575,184 @@ def move_group_in_sheet(wks, src_start, src_end, dest_index):
     if stt_updates:
         wks.update_cells(stt_updates)
 
-@st.cache_resource(ttl=3600, show_spinner=False)
-def get_gspread_client_cached():
+# ================= KẾT NỐI GOOGLE SHEETS AN TOÀN & CÓ BỘ NHỚ DỰ PHÒNG =================
+def _create_fresh_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    if "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    elif os.path.exists("key.json"):
+        creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
+    else:
+        raise FileNotFoundError("Không tìm thấy cấu hình 'gcp_service_account' trong st.secrets hoặc file 'key.json'.")
+    return gspread.authorize(creds)
+
+@st.cache_resource(ttl=1800, show_spinner=False)
+def _authorize_gspread_client():
+    return _create_fresh_gspread_client()
+
+def get_gspread_client_cached():
+    global LAST_GSHEET_ERROR
     try:
-        if "gcp_service_account" in st.secrets:
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-        else:
-            creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
-        return gspread.authorize(creds)
-    except Exception:
+        return _authorize_gspread_client()
+    except Exception as e:
+        LAST_GSHEET_ERROR = f"Lỗi xác thực Service Account: {e}"
+        try: _authorize_gspread_client.clear()
+        except Exception: pass
         return None
 
 def ket_noi_sheet(sheet_name_or_url):
-    client = get_gspread_client_cached()
-    if not client: return None
-    try:
-        return client.open_by_url(sheet_name_or_url) if str(sheet_name_or_url).startswith("http") else client.open(sheet_name_or_url)
-    except Exception:
-        return None
+    global LAST_GSHEET_ERROR
+    target = str(sheet_name_or_url).strip()
+    for attempt in range(3):
+        try:
+            client = get_gspread_client_cached() if attempt == 0 else _create_fresh_gspread_client()
+            if not client:
+                continue
+            return client.open_by_url(target) if target.startswith("http") else client.open(target)
+        except Exception as e:
+            LAST_GSHEET_ERROR = f"{type(e).__name__}: {e}"
+            try: _authorize_gspread_client.clear()
+            except Exception: pass
+            time.sleep(0.5 * (attempt + 1))
+    return None
 
-def safe_read_records_with_row(wks, retries=3, delay=0.4):
+def safe_read_records_with_row(wks, retries=3, delay=0.5):
+    global LAST_GSHEET_ERROR
     for attempt in range(retries):
         try:
             values = wks.get_all_values()
             if not values: return pd.DataFrame()
-            headers = values[0]
+            headers = [str(h).strip() for h in values[0]]
             rows = []
             for sheet_row, raw in enumerate(values[1:], start=2):
-                row = {headers[i] if i < len(headers) else f"Column_{i+1}": raw[i] if i < len(raw) else "" for i in range(len(headers))}
+                if not any(str(cell).strip() for cell in raw):
+                    continue
+                row = {headers[i] if i < len(headers) and headers[i] else f"Column_{i+1}": raw[i] if i < len(raw) else "" for i in range(len(headers))}
                 row["_sheet_row"] = sheet_row
                 rows.append(row)
             return pd.DataFrame(rows)
-        except Exception:
-            if attempt == retries - 1: pass
-            else: time.sleep(delay * (attempt + 1))
+        except Exception as e:
+            LAST_GSHEET_ERROR = f"{type(e).__name__}: {e}"
+            if attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
     return pd.DataFrame()
 
-@st.cache_data(ttl=15, show_spinner=False)
-def fetch_vo_truc_so(tab_name):
+@st.cache_data(ttl=20, show_spinner=False)
+def _fetch_vo_truc_so_cached(tab_name):
     sh = ket_noi_sheet(LINK_VO_TRUC_SO)
-    if not sh: return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
-    try: wks = sh.worksheet(tab_name)
-    except: return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
-        
-    for _ in range(2):
-        try:
-            data = wks.get_all_values()
-            r_roles = (data[1] + [""] * 8)[:8] if len(data) > 1 else [""] * 8
-            roster_names = (data[2] + [""] * 8)[:8] if len(data) > 2 else [""] * 8
-            
-            if len(data) > 5: 
-                header_idx = 3
-                for idx in range(min(10, len(data))):
-                    row_upper = [str(x).strip().upper() for x in data[idx]]
-                    if "STATUS" in row_upper or "NỘI DUNG" in row_upper:
-                        header_idx = idx
-                        break
-                
-                headers = [str(h).strip().upper() for h in data[header_idx]]
-                clean_data = []
-                
-                start_data_idx = header_idx + 2
-                if start_data_idx >= len(data): start_data_idx = 5
-                
-                for row in data[start_data_idx:]:
-                    clean_row = []
-                    for col_name in CONTENT_HEADER:
-                        try:
-                            c_idx = headers.index(col_name.upper())
-                            val = row[c_idx] if c_idx < len(row) else ""
-                        except ValueError:
-                            try:
-                                fallback_idx = CONTENT_HEADER.index(col_name)
-                                val = row[fallback_idx] if fallback_idx < len(row) else ""
-                            except: val = ""
-                        clean_row.append(val)
-                    clean_data.append(clean_row)
-                df = pd.DataFrame(clean_data, columns=CONTENT_HEADER)
-            else:
-                df = pd.DataFrame(columns=CONTENT_HEADER)
-            return True, df, roster_names, r_roles
-        except: time.sleep(0.2)
-    return True, pd.DataFrame(columns=CONTENT_HEADER), [], []
-
-@st.cache_data(ttl=300, show_spinner=False)
-def load_tai_khoan():
+    if not sh:
+        raise RuntimeError("Tam thoi nghen ket noi Vo Truc So")
     try:
-        sh = ket_noi_sheet(SHEET_MAIN)
-        return safe_read_records_with_row(sh.worksheet("TaiKhoan"))
-    except: return pd.DataFrame()
+        wks = sh.worksheet(tab_name)
+    except gspread.exceptions.WorksheetNotFound:
+        return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+        
+    data = wks.get_all_values()
+    r_roles = (data[1] + [""] * 8)[:8] if len(data) > 1 else [""] * 8
+    roster_names = (data[2] + [""] * 8)[:8] if len(data) > 2 else [""] * 8
+    
+    if len(data) > 5: 
+        header_idx = 3
+        for idx in range(min(10, len(data))):
+            row_upper = [str(x).strip().upper() for x in data[idx]]
+            if "STATUS" in row_upper or "NỘI DUNG" in row_upper:
+                header_idx = idx
+                break
+        
+        headers = [str(h).strip().upper() for h in data[header_idx]]
+        clean_data = []
+        
+        start_data_idx = header_idx + 2
+        if start_data_idx >= len(data): start_data_idx = 5
+        
+        for row in data[start_data_idx:]:
+            clean_row = []
+            for col_name in CONTENT_HEADER:
+                try:
+                    c_idx = headers.index(col_name.upper())
+                    val = row[c_idx] if c_idx < len(row) else ""
+                except ValueError:
+                    try:
+                        fallback_idx = CONTENT_HEADER.index(col_name)
+                        val = row[fallback_idx] if fallback_idx < len(row) else ""
+                    except: val = ""
+                clean_row.append(val)
+            clean_data.append(clean_row)
+        df = pd.DataFrame(clean_data, columns=CONTENT_HEADER)
+    else:
+        df = pd.DataFrame(columns=CONTENT_HEADER)
+    res = (True, df, roster_names, r_roles)
+    AI_ENGINE["backup_trucso"][tab_name] = res
+    return res
 
-@st.cache_data(ttl=45, show_spinner=False)
+def fetch_vo_truc_so(tab_name):
+    try:
+        return _fetch_vo_truc_so_cached(tab_name)
+    except Exception:
+        try: _fetch_vo_truc_so_cached.clear()
+        except Exception: pass
+        if tab_name in AI_ENGINE["backup_trucso"]:
+            return AI_ENGINE["backup_trucso"][tab_name]
+        return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+
+fetch_vo_truc_so.clear = _fetch_vo_truc_so_cached.clear
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _fetch_tai_khoan_cached():
+    sh = ket_noi_sheet(SHEET_MAIN)
+    if not sh:
+        raise RuntimeError(LAST_GSHEET_ERROR or f"Không kết nối được '{SHEET_MAIN}'.")
+    wks = sh.worksheet("TaiKhoan")
+    df = safe_read_records_with_row(wks)
+    if df.empty:
+        raise ValueError("Bảng 'TaiKhoan' đang trống hoặc bị nghẽn mạng.")
+    AI_ENGINE["backup_users"] = df.copy()
+    return df
+
+def load_tai_khoan():
+    global LAST_GSHEET_ERROR
+    try:
+        return _fetch_tai_khoan_cached()
+    except Exception as e:
+        LAST_GSHEET_ERROR = str(e)
+        try: _fetch_tai_khoan_cached.clear()
+        except Exception: pass
+        # Dùng ngay bản sao dự phòng trong RAM nếu Google Sheets bị quá tải tạm thời (429)
+        if isinstance(AI_ENGINE.get("backup_users"), pd.DataFrame) and not AI_ENGINE["backup_users"].empty:
+            return AI_ENGINE["backup_users"]
+        return pd.DataFrame()
+
+load_tai_khoan.clear = _fetch_tai_khoan_cached.clear
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _fetch_du_lieu_app_cached():
+    sh = ket_noi_sheet(SHEET_MAIN)
+    if not sh:
+        raise RuntimeError(LAST_GSHEET_ERROR or f"Không kết nối được '{SHEET_MAIN}'.")
+    df_d = safe_read_records_with_row(sh.worksheet("DuAn"))
+    df_c = safe_read_records_with_row(sh.worksheet("CongViec"))
+    try: df_cn = safe_read_records_with_row(sh.worksheet("ViecCaNhan"))
+    except: df_cn = pd.DataFrame()
+    try: df_nk = safe_read_records_with_row(sh.worksheet("NhatKy"))
+    except: df_nk = pd.DataFrame()
+    res = (df_d, df_c, df_cn, df_nk)
+    AI_ENGINE["backup_app_data"] = res
+    return res
+
 def load_du_lieu_app():
     try:
-        sh = ket_noi_sheet(SHEET_MAIN)
-        df_d = safe_read_records_with_row(sh.worksheet("DuAn"))
-        df_c = safe_read_records_with_row(sh.worksheet("CongViec"))
-        try: df_cn = safe_read_records_with_row(sh.worksheet("ViecCaNhan"))
-        except: df_cn = pd.DataFrame()
-        try: df_nk = safe_read_records_with_row(sh.worksheet("NhatKy"))
-        except: df_nk = pd.DataFrame()
-        return df_d, df_c, df_cn, df_nk
-    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return _fetch_du_lieu_app_cached()
+    except Exception:
+        try: _fetch_du_lieu_app_cached.clear()
+        except Exception: pass
+        if AI_ENGINE.get("backup_app_data") is not None:
+            return AI_ENGINE["backup_app_data"]
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+load_du_lieu_app.clear = _fetch_du_lieu_app_cached.clear
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_public_gsheet_as_excel(url):
@@ -1114,11 +1226,30 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
     except Exception: pass
 
-# ================= 2. AUTH & GIAO DIỆN =================
+# ================= 2. AUTH & GIỮ ĐĂNG NHẬP KỂ CẢ KHI F5 =================
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
     st.session_state['user_info'] = {}
     st.session_state['username'] = ''
+
+# Tự động khôi phục phiên đăng nhập từ URL nếu người dùng lỡ bấm F5 hoặc mất kết nối tạm thời
+if not st.session_state['authenticated']:
+    try:
+        q_user = str(st.query_params.get("u", "")).strip()
+        q_tok = str(st.query_params.get("t", "")).strip()
+        if q_user and q_tok and hmac.compare_digest(generate_secure_token(q_user), q_tok):
+            df_u_restore = load_tai_khoan()
+            if not df_u_restore.empty:
+                m_restore = df_u_restore[df_u_restore['TenDangNhap'].astype(str).str.strip().eq(q_user)]
+                if not m_restore.empty:
+                    u_row = m_restore.iloc[0].to_dict()
+                    u_row.pop('MatKhau', None)
+                    u_row.pop('_sheet_row', None)
+                    st.session_state['authenticated'] = True
+                    st.session_state['user_info'] = u_row
+                    st.session_state['username'] = q_user
+    except Exception:
+        pass
 
 if not st.session_state['authenticated']:
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
@@ -1127,6 +1258,10 @@ if not st.session_state['authenticated']:
         pwd = st.text_input("Mật khẩu", type="password")
         if st.form_submit_button("ĐĂNG NHẬP"):
             df_users = load_tai_khoan()
+            if df_users.empty:
+                try: _fetch_tai_khoan_cached.clear()
+                except Exception: pass
+                df_users = load_tai_khoan()
             if not df_users.empty:
                 matches = df_users[df_users['TenDangNhap'].astype(str).str.strip().eq(str(user).strip())]
                 authenticated_row = None
@@ -1144,23 +1279,35 @@ if not st.session_state['authenticated']:
                             load_tai_khoan.clear()
                         except Exception:
                             logger.exception('Không nâng cấp được mật khẩu legacy')
+                    clean_u = str(user).strip()
                     st.session_state['authenticated'] = True
                     safe_user = authenticated_row.to_dict()
                     safe_user.pop('MatKhau', None)
                     safe_user.pop('_sheet_row', None)
                     st.session_state['user_info'] = safe_user
-                    st.session_state['username'] = str(user).strip()
+                    st.session_state['username'] = clean_u
+                    try:
+                        st.query_params["u"] = clean_u
+                        st.query_params["t"] = generate_secure_token(clean_u)
+                    except Exception:
+                        pass
                     ghi_nhat_ky(authenticated_row['HoTen'], "Đăng nhập", "Success")
-                    clear_cache_and_rerun()
+                    st.rerun()
                 else:
                     st.error("Sai thông tin đăng nhập!")
-            else: st.error("Lỗi kết nối CSDL Tài khoản.")
+            else:
+                st.error(f"Lỗi kết nối CSDL Tài khoản ({LAST_GSHEET_ERROR}). Vui lòng đợi 5 giây rồi bấm Đăng nhập lại.")
 else:
     df_users = load_tai_khoan()
     list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
-    df_duan, df_cv, df_cn, df_log = load_du_lieu_app()
+    u_info = st.session_state['user_info']; curr_name = u_info.get('HoTen', ''); curr_username = str(st.session_state.get('username', '')); role = u_info.get('VaiTro', 'NhanVien')
+    
+    # Chỉ tải bảng Dự Án / Công Việc / Nhật Ký nếu là Lãnh Đạo để tiết kiệm tối đa Quota Google API
+    if role == 'LanhDao':
+        df_duan, df_cv, df_cn, df_log = load_du_lieu_app()
+    else:
+        df_duan, df_cv, df_cn, df_log = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     list_duan = df_duan['TenDuAn'].tolist() if not df_duan.empty else []
-    u_info = st.session_state['user_info']; curr_name = u_info['HoTen']; curr_username = str(st.session_state.get('username', '')); role = u_info.get('VaiTro', 'NhanVien')
     
     with st.sidebar:
         st.success(f"XIN CHÀO: **{curr_name.upper()}**\n\nCHÚC BẠN MỘT NGÀY LÀM VIỆC VUI VẺ! ❤️")
@@ -1197,6 +1344,8 @@ else:
                             
         if st.button("ĐĂNG XUẤT"): 
             st.session_state['authenticated'] = False; st.session_state['user_info'] = {}; st.session_state['username'] = ''
+            try: st.query_params.clear()
+            except Exception: pass
             st.rerun()
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
@@ -1232,8 +1381,11 @@ else:
             date_str_display = target_date.strftime("%d/%m/%Y")
             
             with c_nav2: 
-                c_title, c_btn = st.columns([3, 1])
+                c_title, c_reload, c_btn = st.columns([2.6, 0.7, 0.9])
                 c_title.header(f"📝 VỎ TRỰC SỐ NGÀY: {date_str_display}")
+                if c_reload.button("🔄 Làm mới", use_container_width=True):
+                    clear_trucso_cache()
+                    st.rerun()
                 c_btn.button("💡 Hướng dẫn sử dụng", on_click=open_tut, type="primary", use_container_width=True)
 
             if st.session_state['show_tutorial']:
@@ -1331,7 +1483,7 @@ else:
                                     w = sh_trucso.add_worksheet(title=tab_name_current, rows=30, cols=20, index=0)
                                     dinh_dang_dep(w, roster_vals)
                                     tu_dong_cap_nhat_thong_ke(date_str_display, roster_vals)
-                                    st.cache_data.clear()
+                                    clear_trucso_cache()
                                     st.success("ĐÃ TẠO XONG VỎ TRỰC SỐ!"); time.sleep(1); st.rerun()
                                 except Exception as e: st.error(str(e))
             elif tab_exists:
@@ -1441,7 +1593,7 @@ else:
                     return df_summary, df_seeding
 
                 # ================= FRAGMENT 1: CHỈ TẢI LẠI BIỂU ĐỒ TRÊN CÙNG =================
-                @st.fragment(run_every="15s")
+                @st.fragment(run_every="20s")
                 def render_top_dashboard(current_filter):
                     df_summary, _ = get_realtime_summary(tab_name_current)
                     if not df_summary.empty:
@@ -1566,7 +1718,7 @@ else:
                                     sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                     wks_today = sh_trucso.worksheet(tab_name_current)
                                     move_group_in_sheet(wks_today, src_start, src_end, 5)
-                                    clear_app_caches()
+                                    clear_trucso_cache()
                                     st.success("Đã đẩy lên đầu!"); time.sleep(1); st.rerun()
                                     
                             if c_m2.button("🔼 Lên 1 bậc", disabled=(p_idx == 0), use_container_width=True):
@@ -1578,7 +1730,7 @@ else:
                                     sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                     wks_today = sh_trucso.worksheet(tab_name_current)
                                     move_group_in_sheet(wks_today, src_start, src_end, dest_index)
-                                    clear_app_caches()
+                                    clear_trucso_cache()
                                     st.success("Đã đẩy lên 1 bậc!"); time.sleep(1); st.rerun()
                                     
                             if c_m3.button("🔽 Xuống 1 bậc", disabled=(p_idx == len(unique_prods_list) - 1), use_container_width=True):
@@ -1590,7 +1742,7 @@ else:
                                     sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
                                     wks_today = sh_trucso.worksheet(tab_name_current)
                                     move_group_in_sheet(wks_today, src_start, src_end, dest_index)
-                                    clear_app_caches()
+                                    clear_trucso_cache()
                                     st.success("Đã kéo xuống 1 bậc!"); time.sleep(1); st.rerun()
                                     
                             st.write("---")
@@ -1620,7 +1772,7 @@ else:
                                     
                                     if btn_scan or (auto_scan and cache_key not in st.session_state):
                                         with st.spinner("🤖 AI đang phân tích văn bản để đưa ra gợi ý, cảnh báo..."):
-                                            ans = _call_api(current_text, get_ai_api_key(), str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"))).strip(), get_vn_time().strftime("%d/%m/%Y"))
+                                            ans = _call_api(current_text, get_ai_api_key(), str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip(), get_vn_time().strftime("%d/%m/%Y"))
                                             st.session_state[cache_key] = ans
                                     
                                     if cache_key in st.session_state:
@@ -1649,7 +1801,7 @@ else:
                                             end_row = int(max_idx) + 5 + 1
                                             del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": end_row}}}
                                             wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                            clear_app_caches()
+                                            clear_trucso_cache()
                                             st.success("Đã xóa bài viết thành công!"); time.sleep(1); st.rerun()
 
                                 with c_del_2:
@@ -1685,7 +1837,7 @@ else:
                                                     row_0_based = int(i) + 5
                                                     del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
                                                     wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                                clear_app_caches()
+                                                clear_trucso_cache()
                                                 st.success("Đã xóa nền tảng thành công!"); time.sleep(1); st.rerun()
 
                             with st.form("edit_group_form"):
@@ -1770,14 +1922,14 @@ else:
                                         # Thực thi ngầm cực mượt
                                         AI_ENGINE["executor"].submit(bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_ldp, merged_link_duyet_update, platform_updates)
                                         
-                                        st.success("✅ Đã ghi nhận! Hệ thống đang cập nhật ngầm. (F5 sau 1 giây để xem thay đổi)")
+                                        st.success("✅ Đã ghi nhận! Hệ thống đang tự động đồng bộ ngầm.")
                                         time.sleep(0.5)
                                         clear_cache_and_rerun()
                 
                 st.divider()
 
                 # ================= FRAGMENT 2: BẢNG THỐNG KÊ CHI TIẾT =================
-                @st.fragment(run_every="15s")
+                @st.fragment(run_every="20s")
                 def render_bottom_tables(current_filter):
                     df_summary, df_seeding = get_realtime_summary(tab_name_current)
                     if not df_summary.empty:
@@ -1821,6 +1973,7 @@ else:
                                 "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
                             }
                         )
+
                 with st.expander("➕ THÊM BÀI MỚI VÀO VỎ TRỰC SỐ", expanded=False):
                     with st.form("add_news_form", clear_on_submit=True):
                         c1, c2 = st.columns([3, 1])
@@ -1850,16 +2003,13 @@ else:
                             AI_ENGINE["executor"].submit(bg_add_news, tab_name_current, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, ts_nguon, ts_nhansu, date_str_display, merged_link_duyet)
                             
                             st.success(f"✅ Đã thêm bài **'{ts_noidung}'**. Google Sheet đang tự động cập nhật và căn chỉnh ô. Bạn có thể tiếp tục thêm tin khác vào vỏ.")
-                            time.sleep(2)
+                            time.sleep(1.5)
                             clear_cache_and_rerun()
 
-
-                
                 # Chạy khối Bảng thống kê
                 render_bottom_tables(filter_opt)
                 st.divider()
 
-                
                 # ================= KHU VỰC QUẢN LÝ SEEDING =================
                 st.markdown("##### 🌱 KHU VỰC QUẢN LÝ SEEDING & TƯƠNG TÁC")
                 st.caption("Quản lý các nhiệm vụ trả lời bình luận, mồi bình luận, tương tác trên nền tảng.")
@@ -1920,7 +2070,7 @@ else:
                                 ])
                             if cells_to_update_seed:
                                 AI_ENGINE["executor"].submit(bg_update_seeding, tab_name_current, cells_to_update_seed)
-                                st.success("✅ Đã cập nhật ngầm bảng Seeding! (F5 sau 1 giây để xem thay đổi)")
+                                st.success("✅ Đã cập nhật ngầm bảng Seeding!")
                                 time.sleep(0.5)
                                 clear_cache_and_rerun()
 
@@ -1931,9 +2081,10 @@ else:
                             with st.spinner("Đang xóa..."):
                                 target_r = df_seed_edit[df_seed_edit['STT'] == del_sd_id].iloc[0]['ID_ROW']
                                 row_0_based = int(target_r) - 1
-                                del_req = {"deleteDimension": {"range": {"sheetId": ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
-                                ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current).spreadsheet.batch_update({"requests": [del_req]})
-                                clear_app_caches()
+                                wks_sd = ket_noi_sheet(LINK_VO_TRUC_SO).worksheet(tab_name_current)
+                                del_req = {"deleteDimension": {"range": {"sheetId": wks_sd.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
+                                wks_sd.spreadsheet.batch_update({"requests": [del_req]})
+                                clear_trucso_cache()
                                 st.success("Đã xóa!"); time.sleep(1); st.rerun()
                 else:
                     st.info("Chưa có nhiệm vụ Seeding nào trong ngày hôm nay.")
@@ -1951,7 +2102,7 @@ else:
                         if st.form_submit_button("THÊM NHIỆM VỤ"):
                             AI_ENGINE["executor"].submit(bg_add_seeding, tab_name_current, s_nhiemvu, s_link, s_phutrach, s_kpi, s_nhansu)
                             st.success("✅ Đã ghi nhận! Hệ thống đang tạo nhiệm vụ Seeding ngầm. Form đã dọn sạch để thêm tiếp.")
-                            time.sleep(2)
+                            time.sleep(1.5)
                             clear_cache_and_rerun()
 
     # ================= TAB 1: TẠO LPS TỰ ĐỘNG =================
@@ -1981,7 +2132,7 @@ else:
                         if len(dates) >= 1:
                             try:
                                 d1, m1 = int(dates[0][0]), int(dates[0][1])
-                                d2, m2 = int(dates[1][0]), int(dates[1][1]) if len(dates) >= 2 else (d1, m1)
+                                d2, m2 = (int(dates[1][0]), int(dates[1][1])) if len(dates) >= 2 else (d1, m1)
                                 y_target = target_date_lps.year
                                 start_date = datetime(y_target, m1, d1).date()
                                 y_end = y_target + 1 if m2 < m1 else y_target
@@ -2089,7 +2240,8 @@ else:
                         AI_ENGINE["executor"].submit(bg_update_checklist, edited_data)
                         st.success("✅ Đã cập nhật checklist ngầm!")
                         time.sleep(0.3)
-                        clear_cache_and_rerun()
+                        load_du_lieu_app.clear()
+                        st.rerun()
             else: st.info(f"Bạn chưa có việc cá nhân nào trong {view_mode.lower()}.")
             
             st.divider()
@@ -2102,7 +2254,7 @@ else:
                         if n_ten:
                             with st.spinner("Đang thêm..."):
                                 update_wks_canhan("append", [curr_name, n_ten, n_ngay.strftime("%d/%m/%Y"), "FALSE", n_ghichu])
-                                st.success("Xong!"); clear_cache_and_rerun()
+                                st.success("Xong!"); st.rerun()
             with c_add2:
                 st.markdown("#### 📥 LẤY TỪ VIỆC CHUNG")
                 if not df_cv.empty:
@@ -2116,7 +2268,7 @@ else:
                                 try: dl = row['Deadline'].split(" ")[1]
                                 except: dl = today.strftime("%d/%m/%Y")
                                 update_wks_canhan("append", [curr_name, t_name, dl, "FALSE", "Từ hệ thống chung"])
-                                st.success("Xong!"); clear_cache_and_rerun()
+                                st.success("Xong!"); st.rerun()
 
     if "📋 CÔNG VIỆC" in tab_dict:
         with tab_dict["📋 CÔNG VIỆC"]:
@@ -2145,7 +2297,7 @@ else:
                         if mails: 
                             st.markdown(f'<a href="https://mail.google.com/mail/u/{tk_gui}/?view=cm&fs=1&to={",".join(mails)}&su={urllib.parse.quote(tv_ten)}&body={urllib.parse.quote(tv_ghichu)}" target="_blank">📧 MỞ GMAIL ĐỂ GỬI BTV NGAY</a>', unsafe_allow_html=True)
                     
-                    clear_app_caches()
+                    load_du_lieu_app.clear()
 
             st.divider()
             da_filter = st.selectbox("LỌC DỰ ÁN:", ["-- TẤT CẢ --"]+list_duan)
@@ -2172,9 +2324,10 @@ else:
                                     rn = int(r_dat.get('_sheet_row', 0) or 0)
                                     if rn:
                                         AI_ENGINE["executor"].submit(background_update_task, rn, e_ten, e_dl, e_ng, e_st, e_lk, e_nt)
-                                        st.success("✅ Đã ghi nhận cập nhật! (F5 sau 1 giây để xem thay đổi)")
+                                        st.success("✅ Đã ghi nhận cập nhật!")
                                         time.sleep(0.5)
-                                        clear_cache_and_rerun()
+                                        load_du_lieu_app.clear()
+                                        st.rerun()
                 st.dataframe(df_display.drop(columns=['NguoiTao'], errors='ignore').rename(columns=VN_COLS_VIEC), use_container_width=True, hide_index=True)
 
     if "🗂️ DỰ ÁN" in tab_dict:
@@ -2185,7 +2338,9 @@ else:
                     if st.form_submit_button("TẠO DỰ ÁN"): 
                         with st.spinner("Đang tạo..."):
                             sh_main = ket_noi_sheet(SHEET_MAIN)
-                            sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)]); st.success("Xong!"); clear_cache_and_rerun()
+                            sh_main.worksheet("DuAn").append_row([d_n, d_m, "Đang chạy", ",".join(d_l)])
+                            load_du_lieu_app.clear()
+                            st.success("Xong!"); st.rerun()
             st.dataframe(df_duan.rename(columns=VN_COLS_DUAN), use_container_width=True)
 
     if "📅 LỊCH" in tab_dict:
