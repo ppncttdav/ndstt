@@ -1488,13 +1488,10 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
             key=f"{key_prefix}_view"
         )
     with c_ctrl3:
-        st.markdown(
-            "🔒 **Nền tảng cố định (Luôn hiển thị):** `Facebook` • `LinkedIn` • `Youtube` • `Instagram`"
-        )
         opt_selected = st.multiselect(
             "➕ Tùy chọn hiện thêm các nền tảng khác:",
             options=OPTIONAL_PLATFORMS,
-            default=["TikTok", "Threads", "Web", "App"],
+            default=["Threads", "Web", "App"],
             key=f"{key_prefix}_opt_plats"
         )
 
