@@ -1469,7 +1469,7 @@ def collect_planner_posts(target_dates, list_nv, extra_source_tabs=None):
     return all_posts
 
 def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_prefix="main_planner"):
-    st.markdown("#### 🗓️ CÔNG CỤ LẬP KẾ HOẠCH & ĐIỀU PHỐI GIỜ ĐĂNG (GIÃN CÁCH 30 PHÚT)")
+    st.markdown("#### 🗓️ CÔNG CỤ LẬP KẾ HOẠCH & ĐIỀU PHỐI GIỜ ĐĂNG")
     st.caption("Giúp TCSX và BTV kiểm soát lịch đăng trên mọi nền tảng, tự động phát hiện các bài đăng trùng hoặc sát giờ nhau (< 30 phút) để điều phối hợp lý.")
 
     c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([1.1, 1.5, 2.4])
@@ -1488,13 +1488,10 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
             key=f"{key_prefix}_view"
         )
     with c_ctrl3:
-        st.markdown(
-            "🔒 **Nền tảng cố định (Luôn hiển thị):** `Facebook` • `LinkedIn` • `Youtube` • `Instagram`"
-        )
         opt_selected = st.multiselect(
             "➕ Tùy chọn hiện thêm các nền tảng khác:",
             options=OPTIONAL_PLATFORMS,
-            default=["TikTok", "Threads", "Web", "App"],
+            default=["Threads", "Web", "App"],
             key=f"{key_prefix}_opt_plats"
         )
 
@@ -1561,7 +1558,7 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
         with k4:
             slot_filter = st.selectbox(
                 "🔍 Khung giờ hiển thị trên bảng cuộn:",
-                ["Khung giờ hoạt động (06:00 - 23:30)", "Toàn bộ 24 giờ (00:00 - 23:30)", "Chỉ hiện các khung giờ đã có bài"],
+                ["Toàn bộ 24 giờ (00:00 - 23:30)", "Khung giờ hoạt động (06:00 - 23:30)", "Chỉ hiện các khung giờ đã có bài"],
                 index=0,
                 key=f"{key_prefix}_slot_filter"
             )
@@ -2068,7 +2065,7 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
-    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ KẾ HOẠCH ĐĂNG (META PLANNER)", "📺 TẠO LPS"]
+    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ LỊCH ĐĂNG BÀI", "📺 TẠO LPS"]
     if role == 'LanhDao': 
         list_tabs.extend(["✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "📊 DASHBOARD", "📜 NHẬT KÝ"])
         
