@@ -1558,7 +1558,7 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
         with k4:
             slot_filter = st.selectbox(
                 "🔍 Khung giờ hiển thị trên bảng cuộn:",
-                ["Khung giờ hoạt động (06:00 - 23:30)", "Toàn bộ 24 giờ (00:00 - 23:30)", "Chỉ hiện các khung giờ đã có bài"],
+                ["Toàn bộ 24 giờ (00:00 - 23:30)", "Khung giờ hoạt động (06:00 - 23:30)", "Chỉ hiện các khung giờ đã có bài"],
                 index=0,
                 key=f"{key_prefix}_slot_filter"
             )
