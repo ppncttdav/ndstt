@@ -1469,7 +1469,7 @@ def collect_planner_posts(target_dates, list_nv, extra_source_tabs=None):
     return all_posts
 
 def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_prefix="main_planner"):
-    st.markdown("#### 🗓️ CÔNG CỤ LẬP KẾ HOẠCH & ĐIỀU PHỐI GIỜ ĐĂNG (GIÃN CÁCH 30 PHÚT)")
+    st.markdown("#### 🗓️ LỊCH BÀI ĐĂNG")
     st.caption("Giúp TCSX và BTV kiểm soát lịch đăng trên mọi nền tảng, tự động phát hiện các bài đăng trùng hoặc sát giờ nhau (< 30 phút) để điều phối hợp lý.")
 
     c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([1.1, 1.5, 2.4])
