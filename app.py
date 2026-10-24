@@ -2161,7 +2161,7 @@ else:
             tab_exists, df_content_static, roster_names_current, r_roles_current = fetch_vo_truc_so(tab_name_current)
 
             if not tab_exists:
-                st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}.")
+                st.warning(f"CHƯA CÓ VỎ TRỰC SỐ NGÀY {date_str_display}. HIỆN HỆ THỐNG ĐANG KHẮC PHỤC LỖI SAI LỊCH TRỰC LĐP, TCSX VUI LÒNG TỰ CHỌN THỦ CÔNG Ạ.")
                 if is_shift_admin:
                     
                     with st.spinner("⚡ Đang kết nối siêu tốc đa luồng để phân tích Lịch..."):
