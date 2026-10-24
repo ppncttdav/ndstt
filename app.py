@@ -1072,7 +1072,7 @@ def get_ldp_from_df(df, target_date_obj, list_nv):
     if target_col != -1 and header_row != -1:
         for r in range(header_row + 1, min(header_row + 45, len(df))):
             # Dừng nếu chạm vào dải tiêu đề tháng tiếp theo ở phía dưới
-            row_ sample_str = " ".join([str(df.iloc[r, c]).lower() for c in range(min(15, len(df.columns))) if not pd.isna(df.iloc[r, c])])
+            row_sample_str = " ".join([str(df.iloc[r, c]).lower() for c in range(min(15, len(df.columns))) if not pd.isna(df.iloc[r, c])])
             if "tháng " in row_sample_str and ("202" in row_sample_str or "/" in row_sample_str):
                 break
 
@@ -1706,7 +1706,7 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
                     if st.form_submit_button("💾 CẬP NHẬT LỊCH ĐĂNG NGAY", type="primary"):
                         chosen_p = options_map[sel_post_lbl]
                         target_rows = [chosen_p["row_idx"]] if apply_scope == "Chỉ nền tảng đang chọn" else chosen_p["group_indices"]
-                        t_str_ formatted = new_q_time.strftime("%H:%M:%S") if new_q_time else ""
+                        t_str_formatted = new_q_time.strftime("%H:%M:%S") if new_q_time else ""
                         d_str_formatted = new_q_date.strftime("%d/%m/%Y")
                         AI_ENGINE["executor"].submit(bg_quick_reschedule, chosen_p["tab_source"], target_rows, t_str_formatted, d_str_formatted)
                         st.success(f"✅ Đã xếp lịch '{chosen_p['title']}' vào lúc {new_q_time.strftime('%H:%M')} ngày {d_str_formatted}!")
