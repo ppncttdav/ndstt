@@ -1492,7 +1492,7 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
         opt_selected = st.multiselect(
             "➕ Tùy chọn hiện thêm các nền tảng khác:",
             options=OPTIONAL_PLATFORMS,
-            default=["Threads", "Web", "App"],
+            default=["TikTok", "Threads", "Web", "App"],
             key=f"{key_prefix}_opt_plats"
         )
 
@@ -2029,6 +2029,11 @@ else:
         st.success(f"XIN CHÀO: **{curr_name.upper()}**\n\nCHÚC BẠN MỘT NGÀY LÀM VIỆC VUI VẺ! ❤️")
         weather_info, advice_msg = get_weather_and_advice()
         st.markdown(f"---\n**🌤️ HÀ NỘI:** {weather_info}\n\n💡 **LỜI KHUYÊN:** {advice_msg}\n---")
+
+        st.markdown("---")
+        if st.button("🔄 LÀM MỚI DỮ LIỆU", type="primary", use_container_width=True):
+            clear_cache_and_rerun()
+        st.markdown("---")
         
         with st.expander("🔐 ĐỔI MẬT KHẨU"):
             with st.form("change_pass_form"):
