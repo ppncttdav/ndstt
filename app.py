@@ -1944,31 +1944,66 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
     except Exception: pass
 
-# ================= 2. AUTH & GIỮ ĐĂNG NHẬP KỂ CẢ KHI F5 =================
+# ================= 2. AUTH BẢO MẬT (COOKIE + PHIÊN 30 PHÚT, KHÔNG LỘ LINK URL) =================
+SESSION_TTL_SECONDS = 1800  # 30 phút (1800 giây)
+if "sessions" not in AI_ENGINE:
+    AI_ENGINE["sessions"] = {}
+
+def _get_client_fingerprint():
+    try:
+        ua = str(st.context.headers.get("User-Agent", ""))
+        return hashlib.sha256(ua.encode("utf-8")).hexdigest()[:24]
+    except Exception:
+        return "default_ua"
+
+def _sync_browser_cookie(sid_val: str, max_age: int):
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            var cookieStr = "vntd_sid={sid_val}; path=/; max-age={max_age}; SameSite=Lax";
+            try {{ document.cookie = cookieStr; }} catch(e) {{}}
+            try {{ window.parent.document.cookie = cookieStr; }} catch(e) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+# Xóa ngay lập tức nếu trên URL còn dính tham số u hoặc t cũ (Chống lộ link)
+try:
+    if "u" in st.query_params or "t" in st.query_params:
+        st.query_params.clear()
+except Exception:
+    pass
+
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
     st.session_state['user_info'] = {}
     st.session_state['username'] = ''
+    st.session_state['sid'] = ''
 
+# Khôi phục phiên từ Cookie trình duyệt khi bấm F5 (nếu còn hạn trong 30 phút)
 if not st.session_state['authenticated']:
     try:
-        q_user = str(st.query_params.get("u", "")).strip()
-        q_tok = str(st.query_params.get("t", "")).strip()
-        if q_user and q_tok and hmac.compare_digest(generate_secure_token(q_user), q_tok):
-            df_u_restore = load_tai_khoan()
-            if not df_u_restore.empty:
-                m_restore = df_u_restore[df_u_restore['TenDangNhap'].astype(str).str.strip().eq(q_user)]
-                if not m_restore.empty:
-                    u_row = m_restore.iloc[0].to_dict()
-                    u_row.pop('MatKhau', None)
-                    u_row.pop('_sheet_row', None)
-                    st.session_state['authenticated'] = True
-                    st.session_state['user_info'] = u_row
-                    st.session_state['username'] = q_user
+        cookie_sid = str(st.context.cookies.get("vntd_sid", "")).strip()
+        if cookie_sid and cookie_sid in AI_ENGINE["sessions"]:
+            sess = AI_ENGINE["sessions"][cookie_sid]
+            now_ts = time.time()
+            if sess.get("expires_at", 0) > now_ts and sess.get("ua_hash") == _get_client_fingerprint():
+                sess["expires_at"] = now_ts + SESSION_TTL_SECONDS
+                st.session_state['authenticated'] = True
+                st.session_state['user_info'] = sess['user_info']
+                st.session_state['username'] = sess['username']
+                st.session_state['sid'] = cookie_sid
+            else:
+                AI_ENGINE["sessions"].pop(cookie_sid, None)
     except Exception:
         pass
 
 if not st.session_state['authenticated']:
+    if st.session_state.pop('_clear_cookie', False):
+        _sync_browser_cookie("", 0)
     st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
     with st.form("login"):
         user = st.text_input("Tên đăng nhập")
@@ -1997,17 +2032,22 @@ if not st.session_state['authenticated']:
                         except Exception:
                             logger.exception('Không nâng cấp được mật khẩu legacy')
                     clean_u = str(user).strip()
-                    st.session_state['authenticated'] = True
                     safe_user = authenticated_row.to_dict()
                     safe_user.pop('MatKhau', None)
                     safe_user.pop('_sheet_row', None)
+
+                    # Tạo mã phiên ngẫu nhiên có hạn 30 phút (không đưa lên URL)
+                    new_sid = secrets.token_urlsafe(32)
+                    AI_ENGINE["sessions"][new_sid] = {
+                        "username": clean_u,
+                        "user_info": safe_user,
+                        "expires_at": time.time() + SESSION_TTL_SECONDS,
+                        "ua_hash": _get_client_fingerprint()
+                    }
+                    st.session_state['authenticated'] = True
                     st.session_state['user_info'] = safe_user
                     st.session_state['username'] = clean_u
-                    try:
-                        st.query_params["u"] = clean_u
-                        st.query_params["t"] = generate_secure_token(clean_u)
-                    except Exception:
-                        pass
+                    st.session_state['sid'] = new_sid
                     ghi_nhat_ky(authenticated_row['HoTen'], "Đăng nhập", "Success")
                     st.rerun()
                 else:
@@ -2015,6 +2055,11 @@ if not st.session_state['authenticated']:
             else:
                 st.error(f"Lỗi kết nối CSDL Tài khoản ({LAST_GSHEET_ERROR}). Vui lòng đợi 5 giây rồi bấm Đăng nhập lại.")
 else:
+    # Gia hạn phiên 30 phút mỗi khi người dùng đang thao tác
+    curr_sid = st.session_state.get('sid', '')
+    if curr_sid and curr_sid in AI_ENGINE["sessions"]:
+        AI_ENGINE["sessions"][curr_sid]["expires_at"] = time.time() + SESSION_TTL_SECONDS
+
     df_users = load_tai_khoan()
     list_nv = df_users['HoTen'].tolist() if not df_users.empty else []
     u_info = st.session_state['user_info']; curr_name = u_info.get('HoTen', ''); curr_username = str(st.session_state.get('username', '')); role = u_info.get('VaiTro', 'NhanVien')
@@ -2029,11 +2074,6 @@ else:
         st.success(f"XIN CHÀO: **{curr_name.upper()}**\n\nCHÚC BẠN MỘT NGÀY LÀM VIỆC VUI VẺ! ❤️")
         weather_info, advice_msg = get_weather_and_advice()
         st.markdown(f"---\n**🌤️ HÀ NỘI:** {weather_info}\n\n💡 **LỜI KHUYÊN:** {advice_msg}\n---")
-
-        st.markdown("---")
-        if st.button("🔄 LÀM MỚI DỮ LIỆU", type="primary", use_container_width=True):
-            clear_cache_and_rerun()
-        st.markdown("---")
         
         with st.expander("🔐 ĐỔI MẬT KHẨU"):
             with st.form("change_pass_form"):
@@ -2064,10 +2104,19 @@ else:
                             st.error(f"Không thể đổi mật khẩu: {exc}")
                             
         if st.button("ĐĂNG XUẤT"): 
-            st.session_state['authenticated'] = False; st.session_state['user_info'] = {}; st.session_state['username'] = ''
+            if curr_sid:
+                AI_ENGINE["sessions"].pop(curr_sid, None)
+            st.session_state['authenticated'] = False
+            st.session_state['user_info'] = {}
+            st.session_state['username'] = ''
+            st.session_state['sid'] = ''
+            st.session_state['_clear_cookie'] = True
             try: st.query_params.clear()
             except Exception: pass
             st.rerun()
+
+        if curr_sid:
+            _sync_browser_cookie(curr_sid, SESSION_TTL_SECONDS)
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
