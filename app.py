@@ -1468,9 +1468,15 @@ def collect_planner_posts(target_dates, list_nv, extra_source_tabs=None):
                     all_posts.append(item)
     return all_posts
 
+@st.fragment(run_every="30s")
 def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_prefix="main_planner"):
-    st.markdown("#### 🗓️ LỊCH BÀI ĐĂNG")
-    st.caption("Giúp TCSX và BTV kiểm soát lịch đăng trên mọi nền tảng, tự động phát hiện các bài đăng trùng hoặc sát giờ nhau (< 30 phút) để điều phối hợp lý.")
+    c_hdr_plan, c_btn_plan = st.columns([4.2, 0.8])
+    with c_hdr_plan:
+        st.markdown("#### 🗓️ LỊCH BÀI ĐĂNG")
+        st.caption("Giúp TCSX và BTV kiểm soát lịch đăng trên mọi nền tảng, tự động phát hiện các bài đăng trùng hoặc sát giờ nhau (< 30 phút) để điều phối hợp lý. (Tự động làm mới mỗi 30s)")
+    with c_btn_plan:
+        if st.button("🔄 Làm mới", key=f"{key_prefix}_btn_refresh", use_container_width=True):
+            clear_trucso_cache()
 
     c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([1.1, 1.5, 2.4])
     with c_ctrl1:
