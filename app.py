@@ -327,28 +327,19 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
                     if len(r) > 0 and str(r[0]).strip().isdigit():
                         start_stt = int(str(r[0]).strip()) + 1
 
-            # Kiểm tra xem Sheet đang là 15 cột (có THẨM ĐỊNH) hay 14 cột cũ
-            hdr_upper = [str(x).strip().upper() for x in (all_rows[3] if len(all_rows) > 3 else [])]
-            has_td = ("THẨM ĐỊNH" in hdr_upper)
-
+            combined_tg = format_thoi_gian_dang(post_time_str, post_date_str)
             rows_to_add = []
             for idx_p, p in enumerate(plats):
-                if has_td:
-                    if idx_p == 0:
-                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", post_time_str, post_date_str, "", merged_link_duyet]
-                    else:
-                        row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", post_time_str, post_date_str, "", ""]
+                if idx_p == 0:
+                    row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", combined_tg, "", merged_link_duyet]
                 else:
-                    if idx_p == 0:
-                        row = [start_stt, ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", post_time_str, post_date_str, "", merged_link_duyet]
-                    else:
-                        row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", post_time_str, post_date_str, "", ""]
+                    row = [start_stt, "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""]
                 rows_to_add.append(row)
                 start_stt += 1 
             
             wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
             
-            # Tự động nâng cấp 15 cột + Sắp xếp theo Giờ đăng + Đánh lại STT + Gộp ô
+            # Tự động sắp xếp theo Giờ đăng + Đánh lại STT + Gộp ô (bao gồm Thời gian đăng, Link SP, Link duyệt)
             sort_vo_truc_so_sheet(wks_today, sort_mode="time")
 
             AI_ENGINE["optimistic_posts"] = [
@@ -365,6 +356,7 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
             sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
             wks_today = sh_trucso.worksheet(tab_name)
             
+            # Chuẩn hóa bảng về 14 cột trước khi cập nhật nếu bảng đang ở định dạng cũ
             all_vals = wks_today.get_all_values()
             header_idx = 3
             for idx in range(min(10, len(all_vals))):
@@ -373,47 +365,42 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
                     header_idx = idx
                     break
             headers = [str(h).strip().upper() for h in all_vals[header_idx]]
-            has_td = ("THẨM ĐỊNH" in headers)
-            
-            def get_col(name, fallback):
-                try: return headers.index(name.upper()) + 1
-                except ValueError: return fallback
-                
-            col_nd = get_col("NỘI DUNG", 2)
-            col_st = get_col("STATUS", 5)
-            col_ng = get_col("NGUỒN", 7)
-            col_ns = get_col("NHÂN SỰ", 8)
-            col_tcsx = get_col("TCSX", 9)
-            col_ldp = get_col("LĐP", 10)
-            col_td = get_col("THẨM ĐỊNH", 11) if has_td else None
-            col_time = get_col("GIỜ ĐĂNG", 12 if has_td else 11)
-            col_date = get_col("NGÀY ĐĂNG", 13 if has_td else 12)
-            col_lsp = get_col("LINK SẢN PHẨM", 14 if has_td else 13)
-            col_link = get_col("LINK DUYỆT", 15 if has_td else 14)
 
             first_sheet_row = first_row_idx + 6
-            
-            cells_to_update = [
-                gspread.Cell(first_sheet_row, col_nd, e_nd), gspread.Cell(first_sheet_row, col_ng, e_ng),
-                gspread.Cell(first_sheet_row, col_ns, e_ns), gspread.Cell(first_sheet_row, col_tcsx, final_tcsx),
-                gspread.Cell(first_sheet_row, col_ldp, final_ldp), gspread.Cell(first_sheet_row, col_link, merged_link_duyet_update)
-            ]
-            if col_td:
-                cells_to_update.append(gspread.Cell(first_sheet_row, col_td, final_td))
-            
-            for idx, update_data in platform_updates.items():
-                sheet_row = idx + 6
-                cells_to_update.append(gspread.Cell(sheet_row, col_st, update_data['STATUS']))
-                cells_to_update.append(gspread.Cell(sheet_row, col_time, update_data['TIME'].strftime("%H:%M:%S") if update_data['TIME'] else ""))
-                cells_to_update.append(gspread.Cell(sheet_row, col_date, update_data['DATE'].strftime("%d/%m/%Y")))
-                cells_to_update.append(gspread.Cell(sheet_row, col_lsp, update_data['LINK_SP']))
-                if idx != first_row_idx:
-                    cells_to_update.append(gspread.Cell(sheet_row, col_tcsx, ""))
-                    cells_to_update.append(gspread.Cell(sheet_row, col_ldp, ""))
-                    if col_td:
-                        cells_to_update.append(gspread.Cell(sheet_row, col_td, ""))
-                    
-            wks_today.update_cells(cells_to_update)
+            first_plat_data = platform_updates.get(first_row_idx) or next(iter(platform_updates.values()), None)
+            combined_tg = ""
+            if first_plat_data:
+                t_str = first_plat_data['TIME'].strftime("%H:%M") if first_plat_data.get('TIME') else ""
+                d_str = first_plat_data['DATE'].strftime("%d/%m/%Y") if first_plat_data.get('DATE') else ""
+                combined_tg = format_thoi_gian_dang(t_str, d_str)
+
+            # Gom Link Sản phẩm không trùng lặp
+            lsp_vals = [str(u.get('LINK_SP', '')).strip() for u in platform_updates.values() if str(u.get('LINK_SP', '')).strip()]
+            consolidated_lsp = "\n".join(list(dict.fromkeys(lsp_vals)))
+
+            if "THỜI GIAN ĐĂNG BÀI" in headers:
+                cells_to_update = [
+                    gspread.Cell(first_sheet_row, 2, e_nd),
+                    gspread.Cell(first_sheet_row, 7, e_ng),
+                    gspread.Cell(first_sheet_row, 8, e_ns),
+                    gspread.Cell(first_sheet_row, 9, final_tcsx),
+                    gspread.Cell(first_sheet_row, 10, final_ldp),
+                    gspread.Cell(first_sheet_row, 11, final_td),
+                    gspread.Cell(first_sheet_row, 12, combined_tg),
+                    gspread.Cell(first_sheet_row, 13, consolidated_lsp),
+                    gspread.Cell(first_sheet_row, 14, merged_link_duyet_update),
+                ]
+                for idx, update_data in platform_updates.items():
+                    sheet_row = idx + 6
+                    cells_to_update.append(gspread.Cell(sheet_row, 5, update_data['STATUS']))
+                    if idx != first_row_idx:
+                        for c_clear in (9, 10, 11, 12, 13, 14):
+                            cells_to_update.append(gspread.Cell(sheet_row, c_clear, ""))
+                wks_today.update_cells(cells_to_update)
+            else:
+                # Nếu bảng cũ chưa nâng cấp, nâng cấp rồi cập nhật
+                sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+
             sort_vo_truc_so_sheet(wks_today, sort_mode="time")
             clear_trucso_cache()
         except Exception as e:
@@ -432,17 +419,28 @@ def bg_quick_reschedule(tab_name, row_indices, new_time_str, new_date_str):
                     header_idx = idx
                     break
             headers = [str(h).strip().upper() for h in all_vals[header_idx]]
-            has_td = ("THẨM ĐỊNH" in headers)
-            col_time = (headers.index("GIỜ ĐĂNG") + 1) if "GIỜ ĐĂNG" in headers else (12 if has_td else 11)
-            col_date = (headers.index("NGÀY ĐĂNG") + 1) if "NGÀY ĐĂNG" in headers else (13 if has_td else 12)
+            combined_tg = format_thoi_gian_dang(new_time_str, new_date_str)
 
-            cells = []
-            for r_idx in row_indices:
-                sheet_row = int(r_idx) + 6
-                cells.append(gspread.Cell(sheet_row, col_time, new_time_str))
-                cells.append(gspread.Cell(sheet_row, col_date, new_date_str))
-            if cells:
-                wks_today.update_cells(cells)
+            if "THỜI GIAN ĐĂNG BÀI" in headers:
+                col_tg = headers.index("THỜI GIAN ĐĂNG BÀI") + 1
+                cells = []
+                for i_pos, r_idx in enumerate(row_indices):
+                    sheet_row = int(r_idx) + 6
+                    cells.append(gspread.Cell(sheet_row, col_tg, combined_tg if i_pos == 0 else ""))
+                if cells:
+                    wks_today.update_cells(cells)
+            else:
+                has_td = ("THẨM ĐỊNH" in headers)
+                col_time = (headers.index("GIỜ ĐĂNG") + 1) if "GIỜ ĐĂNG" in headers else (12 if has_td else 11)
+                col_date = (headers.index("NGÀY ĐĂNG") + 1) if "NGÀY ĐĂNG" in headers else (13 if has_td else 12)
+                cells = []
+                for r_idx in row_indices:
+                    sheet_row = int(r_idx) + 6
+                    cells.append(gspread.Cell(sheet_row, col_time, new_time_str))
+                    cells.append(gspread.Cell(sheet_row, col_date, new_date_str))
+                if cells:
+                    wks_today.update_cells(cells)
+
             sort_vo_truc_so_sheet(wks_today, sort_mode="time")
             clear_trucso_cache()
         except Exception as e:
@@ -726,7 +724,7 @@ OPTS_STATUS_TRUCSO = [
 ]
 
 OPTS_TRANG_THAI_VIEC = ["Đã giao", "Đang thực hiện", "Chờ duyệt", "Hoàn thành", "Hủy"]
-CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "THẨM ĐỊNH", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
+CONTENT_HEADER = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "THẨM ĐỊNH", "THỜI GIAN ĐĂNG BÀI", "LINK SẢN PHẨM", "LINK DUYỆT"]
 
 VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": "Hạn chót", "NguoiPhuTrach": "Người thực hiện", "TrangThai": "Trạng thái", "LinkBai": "Link SP", "GhiChu": "Ghi chú"}
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
@@ -759,6 +757,29 @@ def _abc_sort_key(text: str):
         if not unicodedata.combining(ch)
     )
     return (s_ascii, s_clean)
+
+def format_thoi_gian_dang(time_val, date_val=None, fallback_date=None):
+    """Gộp Giờ đăng và Ngày đăng thành chuỗi chuẩn: '10:30 - 21/06/2026'"""
+    raw_t = "" if pd.isna(time_val) else str(time_val).strip()
+    raw_d = "" if (date_val is None or pd.isna(date_val)) else str(date_val).strip()
+    if not raw_t and not raw_d:
+        return ""
+
+    fb_d = fallback_date or get_vn_today()
+    t_obj = time_val if isinstance(time_val, dt_time) else _parse_post_time(raw_t)
+
+    if isinstance(date_val, date) and not isinstance(date_val, datetime):
+        d_obj = date_val
+    elif raw_d:
+        d_obj = _parse_post_date(raw_d, fb_d)
+    else:
+        d_obj = _parse_post_date(raw_t, fb_d)
+
+    d_str = d_obj.strftime("%d/%m/%Y") if d_obj else ""
+    if t_obj is not None:
+        t_str = t_obj.strftime("%H:%M")
+        return f"{t_str} - {d_str}" if d_str else t_str
+    return d_str
 
 def _is_chuyen_muc_post(title: str, source: str, dinh_dang: str = "") -> bool:
     src_clean = _clean_vn_str(source)
@@ -808,58 +829,62 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
 
     headers_upper = [str(x).strip().upper() for x in all_rows[header_idx]]
     has_tham_dinh = ("THẨM ĐỊNH" in headers_upper)
+    has_combined_tg = ("THỜI GIAN ĐĂNG BÀI" in headers_upper or "THỜI GIAN ĐĂNG" in headers_upper)
 
-    # Nếu bảng cũ chỉ có 14 cột (chưa có cột THẨM ĐỊNH), tự động nâng cấp Header lên 15 cột
-    if not has_tham_dinh:
+    # Nếu Header trên Sheet chưa phải chuẩn 14 cột mới (có THẨM ĐỊNH + THỜI GIAN ĐĂNG BÀI), tự động chuẩn hóa Header
+    if not (has_tham_dinh and has_combined_tg):
         try:
-            if wks.col_count < 15:
-                wks.add_cols(15 - wks.col_count)
             hdr_cells = []
             for c_i, h_text in enumerate(CONTENT_HEADER):
                 hdr_cells.append(gspread.Cell(header_idx + 1, c_i + 1, h_text))
                 hdr_cells.append(gspread.Cell(header_idx + 2, c_i + 1, ""))
+            if len(headers_upper) >= 15:
+                hdr_cells.append(gspread.Cell(header_idx + 1, 15, ""))
+                hdr_cells.append(gspread.Cell(header_idx + 2, 15, ""))
             wks.update_cells(hdr_cells)
+
             hdr_reqs = [
                 {
                     "unmergeCells": {
-                        "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 15}
+                        "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": header_idx + 2, "startColumnIndex": 0, "endColumnIndex": 15}
                     }
                 },
                 {
                     "mergeCells": {
-                        "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 15},
+                        "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
                         "mergeType": "MERGE_ALL"
-                    }
-                },
-                {
-                    "mergeCells": {
-                        "range": {"sheetId": wks.id, "startRowIndex": header_idx, "endRowIndex": header_idx + 2, "startColumnIndex": 14, "endColumnIndex": 15},
-                        "mergeType": "MERGE_ALL"
-                    }
-                },
-                {
-                    "repeatCell": {
-                        "range": {"sheetId": wks.id, "startRowIndex": header_idx, "endRowIndex": header_idx + 2, "startColumnIndex": 0, "endColumnIndex": 15},
-                        "cell": {
-                            "userEnteredFormat": {
-                                "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
-                                "textFormat": {"bold": True, "fontFamily": "Times New Roman"},
-                                "horizontalAlignment": "CENTER",
-                                "verticalAlignment": "MIDDLE",
-                                "wrapStrategy": "WRAP",
-                                "borders": {
-                                    "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"},
-                                    "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
-                                }
-                            }
-                        },
-                        "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
                     }
                 }
             ]
+            for c_i in range(14):
+                hdr_reqs.append({
+                    "mergeCells": {
+                        "range": {"sheetId": wks.id, "startRowIndex": header_idx, "endRowIndex": header_idx + 2, "startColumnIndex": c_i, "endColumnIndex": c_i + 1},
+                        "mergeType": "MERGE_ALL"
+                    }
+                })
+            hdr_reqs.append({
+                "repeatCell": {
+                    "range": {"sheetId": wks.id, "startRowIndex": header_idx, "endRowIndex": header_idx + 2, "startColumnIndex": 0, "endColumnIndex": 14},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
+                            "textFormat": {"bold": True, "fontFamily": "Times New Roman"},
+                            "horizontalAlignment": "CENTER",
+                            "verticalAlignment": "MIDDLE",
+                            "wrapStrategy": "WRAP",
+                            "borders": {
+                                "top": {"style": "SOLID"}, "bottom": {"style": "SOLID"},
+                                "left": {"style": "SOLID"}, "right": {"style": "SOLID"}
+                            }
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
+                }
+            })
             wks.spreadsheet.batch_update({"requests": hdr_reqs})
         except Exception as e:
-            logger.error(f"Lỗi nâng cấp cột THẨM ĐỊNH: {e}")
+            logger.error(f"Lỗi chuẩn hóa Header 14 cột: {e}")
 
     start_data_idx = header_idx + 2
     if start_data_idx >= len(all_rows):
@@ -883,30 +908,41 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
     groups = []
     current_group = None
     for raw_r in main_slice:
-        if not has_tham_dinh:
+        if has_tham_dinh and has_combined_tg:
+            # Chuẩn 14 cột mới: [0..10, 11: THỜI GIAN ĐĂNG BÀI, 12: LINK SP, 13: LINK DUYỆT]
             r_14 = [str(raw_r[c]).strip() if c < len(raw_r) else "" for c in range(14)]
-            r_15 = r_14[:10] + [""] + r_14[10:14]
-        else:
+            if r_14[11]:
+                r_14[11] = format_thoi_gian_dang(r_14[11], None, fallback_tab_date)
+        elif has_tham_dinh and not has_combined_tg:
+            # Bảng 15 cột: [0..10: THẨM ĐỊNH, 11: GIỜ ĐĂNG, 12: NGÀY ĐĂNG, 13: LINK SP, 14: LINK DUYỆT]
             r_15 = [str(raw_r[c]).strip() if c < len(raw_r) else "" for c in range(15)]
+            tg_str = format_thoi_gian_dang(r_15[11], r_15[12], fallback_tab_date)
+            r_14 = r_15[:11] + [tg_str, r_15[13], r_15[14]]
+        else:
+            # Bảng 14 cột cũ (chưa có THẨM ĐỊNH): [0..9: LĐP, 10: GIỜ ĐĂNG, 11: NGÀY ĐĂNG, 12: LINK SP, 13: LINK DUYỆT]
+            r_old = [str(raw_r[c]).strip() if c < len(raw_r) else "" for c in range(14)]
+            tg_str = format_thoi_gian_dang(r_old[10], r_old[11], fallback_tab_date)
+            r_14 = r_old[:10] + ["", tg_str, r_old[12], r_old[13]]
 
-        is_non_empty = any(r_15[c] != "" for c in range(1, 15))
+        is_non_empty = any(r_14[c] != "" for c in range(1, 14))
         if not is_non_empty:
             continue
-        if r_15[1] != "" or current_group is None:
-            current_group = [r_15]
+        if r_14[1] != "" or current_group is None:
+            current_group = [r_14]
             groups.append(current_group)
         else:
-            current_group.append(r_15)
+            current_group.append(r_14)
 
     if not groups:
         return
 
-    # Các cột gộp dọc theo bài (NỘI DUNG, CHECK, NGUỒN, NHÂN SỰ, TCSX, LĐP, THẨM ĐỊNH, LINK DUYỆT)
-    cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 14]
+    # Gộp tất cả các cột thông tin chung của đầu tin (bao gồm THỜI GIAN ĐĂNG BÀI, LINK SẢN PHẨM, LINK DUYỆT)
+    # Chỉ giữ giá trị ở dòng đầu tiên của mỗi bài, xóa trùng lặp ở các dòng nền tảng bên dưới
+    cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     for grp in groups:
         for c_idx in cols_to_merge:
             vals = [row[c_idx] for row in grp if row[c_idx]]
-            if c_idx in (8, 9, 10):
+            if c_idx in (8, 9, 10, 12):
                 uniq_vals = list(dict.fromkeys(vals))
                 consolidated = "\n".join(uniq_vals)
             else:
@@ -917,19 +953,16 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
 
         fb_dinh_dang = next((row[2] for row in grp if row[2]), "")
         fb_status = next((row[4] for row in grp if row[4]), "")
-        fb_time = next((row[11] for row in grp if row[11]), "")
-        fb_date = next((row[12] for row in grp if row[12]), "")
         for row in grp:
             if not row[2] and fb_dinh_dang: row[2] = fb_dinh_dang
             if not row[4] and fb_status: row[4] = fb_status
-            if not row[11] and fb_time: row[11] = fb_time
-            if not row[12] and fb_date: row[12] = fb_date
 
     def _group_sort_key(grp):
         title = grp[0][1]
         dinh_dang = grp[0][2]
         source = grp[0][6]
         nhansu = grp[0][7]
+        tg_str = grp[0][11]
 
         plats = [_canonical_platform(row[3]) for row in grp if row[3]]
         is_webapp_only = bool(plats) and all(p in ("Web", "App") for p in plats)
@@ -942,20 +975,14 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
         else:
             tier = 2
 
-        valid_dt = []
-        for row in grp:
-            t_obj = _parse_post_time(row[11])
-            d_obj = _parse_post_date(row[12], fallback_tab_date)
-            if t_obj is not None:
-                valid_dt.append((d_obj, t_obj))
-
-        if valid_dt:
-            valid_dt.sort()
+        t_obj = _parse_post_time(tg_str)
+        d_obj = _parse_post_date(tg_str, fallback_tab_date)
+        if t_obj is not None:
             has_no_time = 0
-            sort_date, sort_time = valid_dt[0]
+            sort_date, sort_time = d_obj, t_obj
         else:
             has_no_time = 1
-            sort_date = fallback_tab_date
+            sort_date = d_obj
             sort_time = dt_time(23, 59, 59)
 
         title_k = _abc_sort_key(title)
@@ -992,7 +1019,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
 
     n_active_rows = len(sorted_rows)
     while len(sorted_rows) < total_main_slots:
-        sorted_rows.append([""] * 15)
+        sorted_rows.append([""] * 14)
 
     # 1. Hủy gộp ô cũ trước khi ghi dữ liệu mới
     unmerge_req = {
@@ -1008,17 +1035,18 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
     }
     wks.spreadsheet.batch_update({"requests": [unmerge_req]})
 
-    # 2. Ghi toàn bộ dữ liệu 15 cột bằng update_cells (tương thích mọi phiên bản gspread)
+    # 2. Ghi toàn bộ dữ liệu 14 cột (và dọn sạch cột thứ 15 nếu bảng cũ từng có 15 cột)
     cells_to_write = []
+    cols_write_cnt = 15 if (has_tham_dinh and not has_combined_tg) else 14
     for r_offset, row_vals in enumerate(sorted_rows):
         sheet_r = start_data_idx + 1 + r_offset
-        for c_offset in range(15):
-            val = row_vals[c_offset] if c_offset < len(row_vals) else ""
+        for c_offset in range(cols_write_cnt):
+            val = row_vals[c_offset] if c_offset < 14 and c_offset < len(row_vals) else ""
             cells_to_write.append(gspread.Cell(sheet_r, c_offset + 1, val))
     if cells_to_write:
         wks.update_cells(cells_to_write, value_input_option="USER_ENTERED")
 
-    # 3. Kẻ khung, định dạng chữ và Gộp ô (Merge Cells) trong 1 lệnh batch_update duy nhất
+    # 3. Kẻ khung, căn giữa cột STT + THỜI GIAN ĐĂNG BÀI, và Gộp ô (Merge Cells) cho tất cả các cột chung của đầu tin
     post_requests = []
     if n_active_rows > 0:
         post_requests.append({
@@ -1028,7 +1056,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
                     "startRowIndex": start_data_idx,
                     "endRowIndex": start_data_idx + n_active_rows,
                     "startColumnIndex": 0,
-                    "endColumnIndex": 15
+                    "endColumnIndex": 14
                 },
                 "cell": {
                     "userEnteredFormat": {
@@ -1046,19 +1074,21 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
                 "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
             }
         })
-        post_requests.append({
-            "repeatCell": {
-                "range": {
-                    "sheetId": wks.id,
-                    "startRowIndex": start_data_idx,
-                    "endRowIndex": start_data_idx + n_active_rows,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": 1
-                },
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                "fields": "userEnteredFormat(horizontalAlignment)"
-            }
-        })
+        # Căn giữa cho cột STT (0) và cột THỜI GIAN ĐĂNG BÀI (11)
+        for center_col in (0, 11):
+            post_requests.append({
+                "repeatCell": {
+                    "range": {
+                        "sheetId": wks.id,
+                        "startRowIndex": start_data_idx,
+                        "endRowIndex": start_data_idx + n_active_rows,
+                        "startColumnIndex": center_col,
+                        "endColumnIndex": center_col + 1
+                    },
+                    "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                    "fields": "userEnteredFormat(horizontalAlignment)"
+                }
+            })
         for r_start, r_end in merge_spans:
             for col_idx in cols_to_merge:
                 post_requests.append({
@@ -1201,24 +1231,17 @@ def _fetch_vo_truc_so_cached(tab_name):
         if start_data_idx >= len(data): start_data_idx = 5
         
         has_td_in_sheet = ("THẨM ĐỊNH" in headers)
-        old_14_header = ["STT", "NỘI DUNG", "ĐỊNH DẠNG", "NỀN TẢNG", "STATUS", "CHECK", "NGUỒN", "NHÂN SỰ", "TCSX", "LĐP", "GIỜ ĐĂNG", "NGÀY ĐĂNG", "LINK SẢN PHẨM", "LINK DUYỆT"]
+        has_combined_tg = ("THỜI GIAN ĐĂNG BÀI" in headers or "THỜI GIAN ĐĂNG" in headers)
         for row in data[start_data_idx:]:
-            clean_row = []
-            for col_name in CONTENT_HEADER:
-                try:
-                    c_idx = headers.index(col_name.upper())
-                    val = row[c_idx] if c_idx < len(row) else ""
-                except ValueError:
-                    if col_name == "THẨM ĐỊNH" and not has_td_in_sheet:
-                        val = ""
-                    else:
-                        try:
-                            ref_list = CONTENT_HEADER if has_td_in_sheet else old_14_header
-                            fallback_idx = ref_list.index(col_name)
-                            val = row[fallback_idx] if fallback_idx < len(row) else ""
-                        except Exception:
-                            val = ""
-                clean_row.append(val)
+            r_pad = [str(row[c]).strip() if c < len(row) else "" for c in range(16)]
+            if has_td_in_sheet and has_combined_tg:
+                clean_row = r_pad[:14]
+            elif has_td_in_sheet and not has_combined_tg:
+                tg_val = format_thoi_gian_dang(r_pad[11], r_pad[12])
+                clean_row = r_pad[:11] + [tg_val, r_pad[13], r_pad[14]]
+            else:
+                tg_val = format_thoi_gian_dang(r_pad[10], r_pad[11])
+                clean_row = r_pad[:10] + ["", tg_val, r_pad[12], r_pad[13]]
             clean_data.append(clean_row)
         df = pd.DataFrame(clean_data, columns=CONTENT_HEADER)
     else:
@@ -1659,12 +1682,21 @@ def _parse_post_time(val_str):
     if pd.isna(val_str): return None
     s = str(val_str).strip().lower()
     if not s or s in ("nan", "<na>", "none"): return None
-    s = s.replace("h", ":").replace("g", ":")
-    m = re.search(r"(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?", s)
-    if not m: return None
+    # Loại bỏ phần ngày (dd/mm/yyyy) trước để không nhận nhầm ngày thành giờ
+    s_no_date = re.sub(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", " ", s)
+    s_no_date = re.sub(r"\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b", " ", s_no_date)
+    s_no_date = s_no_date.replace("h", ":").replace("g", ":")
+    m = re.search(r"\b(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\b", s_no_date)
+    if not m:
+        m4 = re.search(r"\b(\d{2})(\d{2})\b", s_no_date)
+        if m4:
+            hh, mm = int(m4.group(1)), int(m4.group(2))
+            if 0 <= hh <= 23 and 0 <= mm <= 59:
+                return dt_time(hh, mm, 0)
+        return None
     try:
         hh = int(m.group(1))
-        mm = int(m.group(2)) if m.group(2) is not None else 0
+        mm = int(m.group(2))
         ss = int(m.group(3)) if m.group(3) is not None else 0
         if 0 <= hh <= 23 and 0 <= mm <= 59:
             return dt_time(hh, mm, ss)
@@ -1734,6 +1766,58 @@ def extract_posts_from_tab(tab_name, list_nv):
     df_main = df_content.iloc[:split_idx].copy()
     if df_main.empty:
         return []
+
+    def is_valid_r(row):
+        stt = str(row.get('STT', '')).strip()
+        nd = str(row.get('NỘI DUNG', '')).strip()
+        nt = str(row.get('NỀN TẢNG', '')).strip()
+        return any(x not in ('', 'nan', '<NA>', 'None') for x in (stt, nd, nt))
+
+    df_main = df_main[df_main.apply(is_valid_r, axis=1)]
+    if df_main.empty:
+        return []
+
+    df_main['NỘI DUNG_GROUP'] = df_main['NỘI DUNG'].replace('', pd.NA).ffill()
+    df_main = df_main.dropna(subset=['NỘI DUNG_GROUP'])
+    df_main = df_main[df_main['NỘI DUNG_GROUP'].astype(str).str.strip() != ""]
+
+    df_main['NHÂN SỰ_FILL'] = df_main['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("Chưa phân công")
+    df_main['ĐỊNH DẠNG_FILL'] = df_main['ĐỊNH DẠNG'].replace('', pd.NA).ffill().fillna("")
+
+    records = []
+    for prod, grp in df_main.groupby('NỘI DUNG_GROUP', sort=False):
+        smart_st = get_smart_status(grp)
+        first_tg_raw = ""
+        for _, r0 in grp.iterrows():
+            if not first_tg_raw and str(r0.get('THỜI GIAN ĐĂNG BÀI', '')).strip():
+                first_tg_raw = str(r0.get('THỜI GIAN ĐĂNG BÀI', '')).strip()
+
+        row_indices = list(grp.index)
+        for idx_r, r in grp.iterrows():
+            plat = _canonical_platform(r.get('NỀN TẢNG', ''))
+            if not plat:
+                continue
+            raw_tg = str(r.get('THỜI GIAN ĐĂNG BÀI', '')).strip() or first_tg_raw
+            t_obj = _parse_post_time(raw_tg)
+            d_obj = _parse_post_date(raw_tg, fallback_d)
+            st_row = str(r.get('STATUS', '')).strip() or smart_st
+            btv_norm = normalize_btv_names_strict(r.get('NHÂN SỰ_FILL', ''), list_nv)
+            records.append({
+                "tab_source": tab_name,
+                "row_idx": idx_r,
+                "group_indices": row_indices,
+                "title": str(prod).strip(),
+                "format": str(r.get('ĐỊNH DẠNG_FILL', '')).strip(),
+                "platform": plat,
+                "status": st_row,
+                "smart_status": smart_st,
+                "btv": btv_norm,
+                "post_date": d_obj,
+                "post_date_str": d_obj.strftime("%d/%m/%Y"),
+                "post_time": t_obj,
+                "post_time_str": t_obj.strftime("%H:%M") if t_obj else "",
+            })
+    return records
 
     def is_valid_r(row):
         stt = str(row.get('STT', '')).strip()
@@ -2119,13 +2203,13 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
 
 def dinh_dang_dep(wks, roster_vals):
     date_str_display = wks.title
-    row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*14
-    row2 = ROLES_HEADER + [""]*7
-    row3 = roster_vals + [""]*7
+    row1 = [f"VỎ TRỰC SỐ VIETNAM TODAY {date_str_display}"] + [""]*13
+    row2 = ROLES_HEADER + [""]*6
+    row3 = roster_vals + [""]*6
     row4 = CONTENT_HEADER
-    row5 = [""]*15  
+    row5 = [""]*14  
     
-    wks.update('A1:O5', [row1, row2, row3, row4, row5])
+    wks.update('A1:N5', [row1, row2, row3, row4, row5])
     requests = []
     
     requests.append({
@@ -2138,12 +2222,12 @@ def dinh_dang_dep(wks, roster_vals):
     
     requests.append({
         "mergeCells": {
-            "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 15},
+            "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
             "mergeType": "MERGE_ALL"
         }
     })
     
-    for c in range(15):
+    for c in range(14):
         requests.append({
             "mergeCells": {
                 "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 5, "startColumnIndex": c, "endColumnIndex": c+1},
@@ -2158,7 +2242,7 @@ def dinh_dang_dep(wks, roster_vals):
     }
     requests.append({
         "repeatCell": {
-            "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 15},
+            "range": {"sheetId": wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 14},
             "cell": {"userEnteredFormat": fmt_title}, 
             "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)"
         }
@@ -2191,13 +2275,13 @@ def dinh_dang_dep(wks, roster_vals):
     }
     requests.append({
         "repeatCell": {
-            "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 5, "startColumnIndex": 0, "endColumnIndex": 15},
+            "range": {"sheetId": wks.id, "startRowIndex": 3, "endRowIndex": 5, "startColumnIndex": 0, "endColumnIndex": 14},
             "cell": {"userEnteredFormat": fmt_header}, 
             "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,borders)"
         }
     })
     
-    col_widths = [65, 250, 115, 115, 120, 120, 110, 120, 140, 120, 115, 95, 95, 140, 250]
+    col_widths = [65, 250, 115, 115, 120, 120, 110, 120, 140, 120, 115, 155, 145, 250]
     for c_idx, w in enumerate(col_widths):
         requests.append({
             "updateDimensionProperties": {
@@ -2704,18 +2788,16 @@ else:
                         btvs = group['NHÂN SỰ_NORM'].unique()
                         btv_name = ", ".join([b for b in btvs if b and b != "Chưa Phân Công"]) if len(btvs) > 0 else "Chưa phân công"
                         plats = group['NỀN TẢNG'].replace('', pd.NA).dropna().tolist()
-                        times_list = [str(x).strip() for x in group['GIỜ ĐĂNG'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
-                        dates_list = [str(x).strip() for x in group['NGÀY ĐĂNG'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
+                        tg_list = [str(x).strip() for x in group['THỜI GIAN ĐĂNG BÀI'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
                         
                         summary_data.append({
                             "Sản phẩm": prod,
                             "BTV": btv_name,
                             "Tiến độ": smart_status,
                             "Nền tảng": ", ".join(plats),
-                            "Giờ đăng": times_list[0][:5] if times_list else "",
-                            "Ngày đăng": dates_list[0] if dates_list else date_str_display
+                            "Thời gian đăng bài": tg_list[0] if tg_list else date_str_display
                         })
-
+                        
                         link_duyet_vals = [str(x) for x in group['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
                         raw_link_duyet = "\n\n".join(link_duyet_vals)
                         curr_txt, _ = split_text_link(raw_link_duyet)
@@ -3078,8 +3160,9 @@ else:
                                     st.caption("Cập nhật trạng thái, giờ lên bài hoặc link sản phẩm.")
                                     
                                     platform_updates = {}
-                                    fallback_group_time = _parse_post_time(first_row_data.get('GIỜ ĐĂNG', ''))
-                                    fallback_group_date = _parse_post_date(first_row_data.get('NGÀY ĐĂNG', ''), target_date)
+                                    fallback_group_time = _parse_post_time(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''))
+                                    fallback_group_date = _parse_post_date(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''), target_date)
+                                    fallback_group_lsp = str(first_row_data.get('LINK SẢN PHẨM', '')).strip()
                                     for i, r in group_df.iterrows():
                                         nentang = r['NỀN TẢNG']
                                         
@@ -3089,13 +3172,13 @@ else:
                                             st_val = st.selectbox(f"Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"st_{i}_{date_str_display.replace('/', '')}")
                                             
                                             c_t, c_d = st.columns(2)
-                                            val_time = _parse_post_time(r.get('GIỜ ĐĂNG', '')) or fallback_group_time
+                                            val_time = _parse_post_time(r.get('THỜI GIAN ĐĂNG BÀI', '')) or fallback_group_time
                                             time_val = c_t.time_input("Giờ xuất bản", value=val_time, step=timedelta(minutes=15), key=f"ti_{i}_{date_str_display.replace('/', '')}")
                                             
-                                            curr_d_val = _parse_post_date(r.get('NGÀY ĐĂNG', ''), fallback_group_date)
+                                            curr_d_val = _parse_post_date(r.get('THỜI GIAN ĐĂNG BÀI', ''), fallback_group_date)
                                             date_val = c_d.date_input("Ngày", value=curr_d_val, format="DD/MM/YYYY", key=f"da_{i}_{date_str_display.replace('/', '')}")
                                             
-                                            lsp_val = st.text_input("Link Sản phẩm đã lên", value=r.get('LINK SẢN PHẨM', ''), key=f"lsp_{i}_{date_str_display.replace('/', '')}")
+                                            lsp_val = st.text_input("Link Sản phẩm đã lên", value=r.get('LINK SẢN PHẨM', '') or fallback_group_lsp, key=f"lsp_{i}_{date_str_display.replace('/', '')}")
                                             
                                             platform_updates[i] = {
                                                 'STATUS': st_val, 'TIME': time_val, 'DATE': date_val, 'LINK_SP': lsp_val
