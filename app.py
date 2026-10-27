@@ -338,41 +338,10 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
             
             wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
             
-            fmt_requests = []
-            merge_requests = []
-            
-            fmt_requests.append({
-                "repeatCell": {
-                    "range": {"sheetId": wks_today.id, "startRowIndex": start_row_idx, "endRowIndex": start_row_idx + len(rows_to_add), "startColumnIndex": 0, "endColumnIndex": 14},
-                    "cell": {"userEnteredFormat": {
-                        "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE", "textFormat": {"fontFamily": "Times New Roman"},
-                        "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"}, "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
-                    }},
-                    "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
-                }
-            })
-            
-            fmt_requests.append({
-                "repeatCell": {
-                    "range": {"sheetId": wks_today.id, "startRowIndex": start_row_idx, "endRowIndex": start_row_idx + len(rows_to_add), "startColumnIndex": 0, "endColumnIndex": 1},
-                    "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
-                    "fields": "userEnteredFormat(horizontalAlignment)"
-                }
-            })
-            if fmt_requests: wks_today.spreadsheet.batch_update({"requests": fmt_requests})
-            
-            if len(rows_to_add) > 1:
-                # Không merge cột 10 (GIỜ ĐĂNG), 11 (NGÀY ĐĂNG), 12 (LINK SP) để mỗi nền tảng giữ được lịch đăng riêng
-                cols_to_merge = [1, 5, 6, 7, 8, 9, 13]
-                for col_idx in cols_to_merge:
-                    merge_requests.append({
-                        "mergeCells": {
-                            "range": {"sheetId": wks_today.id, "startRowIndex": start_row_idx, "endRowIndex": start_row_idx + len(rows_to_add), "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1},
-                            "mergeType": "MERGE_COLUMNS"
-                        }
-                    })
-                wks_today.spreadsheet.batch_update({"requests": merge_requests})
-            # Dọn bài tạm trong optimistic_posts sau khi đã ghi xong lên Sheet
+            # Tự động sắp xếp chuẩn theo Giờ đăng + Phân nhóm Web/App & Chuyên mục + Đánh lại STT + Gộp ô
+            sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+
+            # Dọn bài tạm trong optimistic_posts sau khi đã ghi & sắp xếp xong trên Sheet
             AI_ENGINE["optimistic_posts"] = [
                 op for op in AI_ENGINE.get("optimistic_posts", [])
                 if not (op.get("tab_name") == tab_name and op.get("title") == ts_noidung)
@@ -430,6 +399,8 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
                     cells_to_update.append(gspread.Cell(sheet_row, col_ldp, ""))
                     
             wks_today.update_cells(cells_to_update)
+            # Tự động sắp xếp lại vị trí theo Giờ đăng sau khi cập nhật
+            sort_vo_truc_so_sheet(wks_today, sort_mode="time")
             clear_trucso_cache()
         except Exception: pass
 
@@ -445,6 +416,8 @@ def bg_quick_reschedule(tab_name, row_indices, new_time_str, new_date_str):
                 cells.append(gspread.Cell(sheet_row, 12, new_date_str))
             if cells:
                 wks_today.update_cells(cells)
+            # Tự động sắp xếp lại thứ tự trên Sheet theo giờ đăng mới
+            sort_vo_truc_so_sheet(wks_today, sort_mode="time")
             clear_trucso_cache()
         except Exception as e:
             logger.error(f"Lỗi đổi lịch nhanh: {e}")
@@ -733,6 +706,63 @@ VN_COLS_VIEC = {"TenViec": "Tên công việc", "DuAn": "Dự án", "Deadline": 
 VN_COLS_DUAN = {"TenDuAn": "Tên Dự án", "MoTa": "Mô tả", "TrangThai": "Trạng thái", "TruongNhom": "Điều phối"}
 VN_COLS_LOG = {"ThoiGian": "Thời gian", "NguoiDung": "Người dùng", "HanhDong": "Hành động", "ChiTiet": "Chi tiết"}
 
+# ================= LÕI PHÂN LOẠI & SẮP XẾP TỰ ĐỘNG TRÊN GOOGLE SHEET =================
+NON_CM_KEYWORDS = {
+    "off", "tin ht", "ht", "pssx", "tin", "ban tin", "bản tin",
+    "bai dich", "bài dịch", "breaking news", "tin nhanh", "live", "truc tiep", "trực tiếp"
+}
+
+_VN_ABC_MAP = str.maketrans({
+    "đ": "d", "Đ": "D",
+    "ă": "a", "ắ": "a", "ằ": "a", "ẳ": "a", "ẵ": "a", "ặ": "a",
+    "â": "a", "ấ": "a", "ầ": "a", "ẩ": "a", "ẫ": "a", "ậ": "a",
+    "ê": "e", "ế": "e", "ề": "e", "ể": "e", "ễ": "e", "ệ": "e",
+    "ô": "o", "ố": "o", "ồ": "o", "ổ": "o", "ỗ": "o", "ộ": "o",
+    "ơ": "o", "ớ": "o", "ờ": "o", "ở": "o", "ỡ": "o", "ợ": "o",
+    "ư": "u", "ứ": "u", "ừ": "u", "ử": "u", "ữ": "u", "ự": "u",
+})
+
+def _abc_sort_key(text: str):
+    if not text:
+        return ("", "")
+    s = str(text).strip()
+    s_clean = re.sub(r"^[^\w]+", "", s, flags=re.UNICODE).strip().lower()
+    s_base = s_clean.translate(_VN_ABC_MAP)
+    s_ascii = "".join(
+        ch for ch in unicodedata.normalize("NFKD", s_base)
+        if not unicodedata.combining(ch)
+    )
+    return (s_ascii, s_clean)
+
+def _is_chuyen_muc_post(title: str, source: str, dinh_dang: str = "") -> bool:
+    src_clean = _clean_vn_str(source)
+    title_raw = str(title or "").strip()
+    title_clean = _clean_vn_str(title_raw)
+
+    # 1. Nếu Nguồn hoặc Tiêu đề là OFF, Tin HT, PSSX... -> KHÔNG phải chuyên mục (Xếp trên chuyên mục)
+    if any(re.search(r"\b" + re.escape(k) + r"\b", src_clean) for k in NON_CM_KEYWORDS):
+        return False
+    if re.match(r"^\s*(\[?\s*(off|tin\s*ht|ht|pssx)\s*\]?([:\-\s]|$))", title_clean):
+        return False
+
+    # 2. Nếu cột Nguồn ghi rõ là "Chuyên mục" -> Là Chuyên mục
+    if "chuyên mục" in src_clean or "chuyen muc" in src_clean:
+        return True
+
+    # 3. Bắt tự động mọi Chuyên mục theo đúng cú pháp 2 dòng:
+    # Dòng 1 viết IN HOA (VD: HERITAGE JOURNEY) + Xuống dòng + Dòng 2 là tên bài (VD: The Way Back)
+    lines = [ln.strip() for ln in title_raw.splitlines() if ln.strip()]
+    if len(lines) >= 2:
+        first_line = lines[0]
+        fl_clean = _clean_vn_str(first_line).rstrip(":-").strip()
+        if fl_clean in NON_CM_KEYWORDS:
+            return False
+        letters_only = "".join(ch for ch in first_line if ch.isalpha())
+        if len(letters_only) >= 2 and first_line == first_line.upper():
+            return True
+
+    return False
+    
 def move_group_in_sheet(wks, src_start, src_end, dest_index):
     move_req = {
         "moveDimension": {
@@ -2414,6 +2444,59 @@ else:
                 # Chạy khối Biểu đồ
                 render_top_dashboard(filter_opt)
                 st.divider()
+
+                # ================= KHU VỰC XỬ LÝ & DUYỆT BÀI (NẰM GIỮA - TĨNH) =================
+# ================= CÔNG CỤ SẮP XẾP LẠI BẢNG GOOGLE SHEET CHO TCSX =================
+                with st.container(border=True):
+                    st.markdown("##### 🔃 SẮP XẾP & CHUẨN HÓA LẠI BẢNG GOOGLE SHEET")
+                    st.caption(
+                        "Tự động gom nhóm đa nền tảng, đẩy nội dung **chỉ đăng Web/App (OFF, Tin HT, PSSX...)** xuống dưới, "
+                        "đẩy **Chuyên mục chỉ đăng Web/App** xuống dưới cùng, đồng thời đánh lại STT và gộp ô chuẩn xác (kể cả khi trước đó nhập thủ công trên Sheet)."
+                    )
+                    csort1, csort2, csort3, csort4 = st.columns(4)
+                    if csort1.button("⏰ Sắp xếp theo Giờ đăng (Chuẩn)", type="primary", use_container_width=True):
+                        with st.spinner("Đang sắp xếp chuẩn theo Giờ đăng & Chuyên mục trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo Giờ đăng & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort2.button("📂 Sắp xếp theo Nguồn", use_container_width=True):
+                        with st.spinner("Đang sắp xếp theo Nguồn & Giờ đăng trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="source")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo Nguồn & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort3.button("👤 Sắp xếp theo BTV", use_container_width=True):
+                        with st.spinner("Đang sắp xếp theo BTV & Giờ đăng trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="btv")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo BTV & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort4.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True):
+                        with st.spinner("Đang sắp xếp theo Tên bài A-Z trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="title")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo Tên bài (A-Z) & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
 
                 # ================= KHU VỰC XỬ LÝ & DUYỆT BÀI (NẰM GIỮA - TĨNH) =================
                 st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
