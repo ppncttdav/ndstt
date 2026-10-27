@@ -2310,7 +2310,7 @@ def dinh_dang_dep(wks, roster_vals):
         }
     })
     
-    col_widths = [65, 250, 115, 115, 120, 120, 110, 120, 140, 120, 115, 155, 145, 250]
+    col_widths = [60, 250, 115, 90, 90, 75, 75, 120, 140, 140, 140, 100, 40, 400]
     for c_idx, w in enumerate(col_widths):
         requests.append({
             "updateDimensionProperties": {
