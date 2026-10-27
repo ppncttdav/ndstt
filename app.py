@@ -1251,6 +1251,7 @@ def _fetch_vo_truc_so_cached(tab_name):
     return res
 
 def fetch_vo_truc_so(tab_name):
+    num_cols = len(CONTENT_HEADER)
     try:
         exists, df, roster_names, r_roles = _fetch_vo_truc_so_cached(tab_name)
     except Exception:
@@ -1260,6 +1261,34 @@ def fetch_vo_truc_so(tab_name):
             exists, df, roster_names, r_roles = AI_ENGINE["backup_trucso"][tab_name]
         else:
             return False, pd.DataFrame(columns=CONTENT_HEADER), [], []
+
+    # Đảm bảo df luôn khớp đúng các cột của CONTENT_HEADER hiện tại
+    if not df.empty and list(df.columns) != CONTENT_HEADER:
+        for col in CONTENT_HEADER:
+            if col not in df.columns:
+                df[col] = ""
+        df = df[CONTENT_HEADER]
+
+    # Ghép thêm các bài vừa bấm Thêm (Optimistic UI) đang chờ Google Sheet xử lý ngầm
+    opt_rows = [op for op in AI_ENGINE.get("optimistic_posts", []) if op.get("tab_name") == tab_name]
+    if exists and opt_rows:
+        existing_titles = set(df["NỘI DUNG"].astype(str).str.strip().tolist()) if not df.empty else set()
+        extra_records = []
+        for op in opt_rows:
+            if op["title"].strip() not in existing_titles:
+                for raw_r in op.get("rows", []):
+                    r_list = list(raw_r)
+                    # Tự động chuẩn hóa về đúng số cột của CONTENT_HEADER (14 cột)
+                    if len(r_list) == 15 and num_cols == 14:
+                        tg_merged = format_thoi_gian_dang(r_list[11], r_list[12])
+                        r_norm = r_list[:11] + [tg_merged, r_list[13], r_list[14]]
+                    else:
+                        r_norm = (r_list + [""] * num_cols)[:num_cols]
+                    extra_records.append(r_norm)
+        if extra_records:
+            df_extra = pd.DataFrame(extra_records, columns=CONTENT_HEADER)
+            df = pd.concat([df, df_extra], ignore_index=True)
+    return exists, df, roster_names, r_roles
 
     # Ghép thêm các bài vừa bấm Thêm (Optimistic UI) đang chờ Google Sheet xử lý ngầm
     opt_rows = [op for op in AI_ENGINE.get("optimistic_posts", []) if op.get("tab_name") == tab_name]
@@ -3294,12 +3323,13 @@ else:
                             post_date_str = ts_ngaydang.strftime("%d/%m/%Y") if ts_ngaydang else date_str_display
 
                             # Lưu tạm vào Optimistic Cache để hiện lên Bảng và Timeline ngay lập tức (0 giây)
+                            combined_tg_opt = format_thoi_gian_dang(post_time_str, post_date_str)
                             opt_rows_build = []
                             for idx_p, p in enumerate(plats):
                                 if idx_p == 0:
-                                    opt_rows_build.append(["99", ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", post_time_str, post_date_str, "", merged_link_duyet])
+                                    opt_rows_build.append(["99", ts_noidung, ts_dinhdang, p, ts_status, ts_check, ts_nguon, ", ".join(ts_nhansu), "", "", "", combined_tg_opt, "", merged_link_duyet])
                                 else:
-                                    opt_rows_build.append(["100", "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", post_time_str, post_date_str, "", ""])
+                                    opt_rows_build.append(["100", "", ts_dinhdang, p, ts_status, "", "", "", "", "", "", "", "", ""])
                             AI_ENGINE["optimistic_posts"].append({
                                 "tab_name": tab_name_current,
                                 "title": ts_noidung,
