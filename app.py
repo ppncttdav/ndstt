@@ -2948,7 +2948,11 @@ else:
                         "Khi cần điều phối, TCSX có thể bấm các nút dưới đây để sắp xếp theo **Giờ đăng** hoặc trả lại **Thứ tự thêm vào vỏ ban đầu**."
                     )
                     csort0, csort1, csort2, csort3, csort4 = st.columns(5)
-                    if csort0.button("📥 Xếp theo Thứ tự thêm vào vỏ", type="primary", use_container_width=True):
+                    
+                    # Thêm biến date_key để tạo key duy nhất
+                    date_key = date_str_display.replace('/', '')
+
+                    if csort0.button("📥 Xếp theo Thứ tự thêm vào vỏ", type="primary", use_container_width=True, key=f"btn_sort_added_{date_key}"):
                         with st.spinner("Đang khôi phục lại thứ tự thêm tin vào vỏ trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -2959,7 +2963,7 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                    if csort1.button("⏰ Sắp xếp theo Giờ đăng", use_container_width=True):
+                    if csort1.button("⏰ Sắp xếp theo Giờ đăng", use_container_width=True, key=f"btn_sort_time_{date_key}"):
                         with st.spinner("Đang sắp xếp chuẩn theo Giờ đăng & Chuyên mục trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -2970,7 +2974,7 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                    if csort2.button("📂 Sắp xếp theo Nguồn", use_container_width=True):
+                    if csort2.button("📂 Sắp xếp theo Nguồn", use_container_width=True, key=f"btn_sort_source_{date_key}"):
                         with st.spinner("Đang sắp xếp theo Nguồn & Giờ đăng trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -2981,7 +2985,7 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                    if csort3.button("👤 Sắp xếp theo BTV", use_container_width=True):
+                    if csort3.button("👤 Sắp xếp theo BTV", use_container_width=True, key=f"btn_sort_btv_{date_key}"):
                         with st.spinner("Đang sắp xếp theo BTV & Giờ đăng trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -2992,40 +2996,7 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                    if csort4.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True):
-                        with st.spinner("Đang sắp xếp theo Tên bài A-Z trên Google Sheet..."):
-                            with SHEET_LOCK:
-                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                wks_today = sh_trucso.worksheet(tab_name_current)
-                                sort_vo_truc_so_sheet(wks_today, sort_mode="title")
-                            clear_trucso_cache()
-                            st.success("✅ Đã sắp xếp lại theo Tên bài (A-Z) & đánh lại STT thành công!")
-                            time.sleep(0.8)
-                            st.rerun()
-
-                    if csort2.button("📂 Sắp xếp theo Nguồn", use_container_width=True):
-                        with st.spinner("Đang sắp xếp theo Nguồn & Giờ đăng trên Google Sheet..."):
-                            with SHEET_LOCK:
-                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                wks_today = sh_trucso.worksheet(tab_name_current)
-                                sort_vo_truc_so_sheet(wks_today, sort_mode="source")
-                            clear_trucso_cache()
-                            st.success("✅ Đã sắp xếp lại theo Nguồn & đánh lại STT thành công!")
-                            time.sleep(0.8)
-                            st.rerun()
-
-                    if csort3.button("👤 Sắp xếp theo BTV", use_container_width=True):
-                        with st.spinner("Đang sắp xếp theo BTV & Giờ đăng trên Google Sheet..."):
-                            with SHEET_LOCK:
-                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                wks_today = sh_trucso.worksheet(tab_name_current)
-                                sort_vo_truc_so_sheet(wks_today, sort_mode="btv")
-                            clear_trucso_cache()
-                            st.success("✅ Đã sắp xếp lại theo BTV & đánh lại STT thành công!")
-                            time.sleep(0.8)
-                            st.rerun()
-
-                    if csort4.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True):
+                    if csort4.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True, key=f"btn_sort_title_{date_key}"):
                         with st.spinner("Đang sắp xếp theo Tên bài A-Z trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
