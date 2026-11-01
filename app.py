@@ -212,7 +212,8 @@ def init_ai_engine():
         "backup_users": pd.DataFrame(),
         "backup_trucso": {},
         "backup_app_data": None,
-        "optimistic_posts": []
+        "optimistic_posts": [],
+        "added_order": {}
     }
 
 AI_ENGINE = init_ai_engine()
@@ -327,6 +328,13 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
                     if len(r) > 0 and str(r[0]).strip().isdigit():
                         start_stt = int(str(r[0]).strip()) + 1
 
+            # Lưu vết thứ tự bài vừa thêm vào danh sách thứ tự gốc của ngày hôm đó
+            added_map = AI_ENGINE.setdefault("added_order", {})
+            order_list = added_map.setdefault(tab_name, [])
+            clean_title = str(ts_noidung).strip()
+            if clean_title and clean_title not in order_list:
+                order_list.append(clean_title)
+
             combined_tg = format_thoi_gian_dang(post_time_str, post_date_str)
             rows_to_add = []
             for idx_p, p in enumerate(plats):
@@ -339,8 +347,8 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
             
             wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
             
-            # Tự động sắp xếp theo Giờ đăng + Đánh lại STT + Gộp ô (bao gồm Thời gian đăng, Link SP, Link duyệt)
-            sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+            # Mặc định giữ nguyên vị trí vừa thêm ở cuối bảng (sort_mode="keep"), chỉ gộp ô & đánh lại STT
+            sort_vo_truc_so_sheet(wks_today, sort_mode="keep")
 
             AI_ENGINE["optimistic_posts"] = [
                 op for op in AI_ENGINE.get("optimistic_posts", [])
@@ -356,7 +364,6 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
             sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
             wks_today = sh_trucso.worksheet(tab_name)
             
-            # Chuẩn hóa bảng về 14 cột trước khi cập nhật nếu bảng đang ở định dạng cũ
             all_vals = wks_today.get_all_values()
             header_idx = 3
             for idx in range(min(10, len(all_vals))):
@@ -367,6 +374,16 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
             headers = [str(h).strip().upper() for h in all_vals[header_idx]]
 
             first_sheet_row = first_row_idx + 6
+
+            # Nếu BTV/TCSX sửa tên tiêu đề bài, cập nhật lại tên mới trong danh sách thứ tự thêm bài
+            if first_sheet_row - 1 < len(all_vals) and len(all_vals[first_sheet_row - 1]) > 1:
+                old_title = str(all_vals[first_sheet_row - 1][1]).strip()
+                new_title = str(e_nd).strip()
+                if old_title and new_title and old_title != new_title:
+                    order_list = AI_ENGINE.setdefault("added_order", {}).setdefault(tab_name, [])
+                    if old_title in order_list:
+                        order_list[order_list.index(old_title)] = new_title
+
             first_plat_data = platform_updates.get(first_row_idx) or next(iter(platform_updates.values()), None)
             combined_tg = ""
             if first_plat_data:
@@ -374,7 +391,6 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
                 d_str = first_plat_data['DATE'].strftime("%d/%m/%Y") if first_plat_data.get('DATE') else ""
                 combined_tg = format_thoi_gian_dang(t_str, d_str)
 
-            # Gom Link Sản phẩm không trùng lặp
             lsp_vals = [str(u.get('LINK_SP', '')).strip() for u in platform_updates.values() if str(u.get('LINK_SP', '')).strip()]
             consolidated_lsp = "\n".join(list(dict.fromkeys(lsp_vals)))
 
@@ -398,10 +414,10 @@ def bg_update_post(tab_name, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_
                             cells_to_update.append(gspread.Cell(sheet_row, c_clear, ""))
                 wks_today.update_cells(cells_to_update)
             else:
-                # Nếu bảng cũ chưa nâng cấp, nâng cấp rồi cập nhật
-                sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+                sort_vo_truc_so_sheet(wks_today, sort_mode="keep")
 
-            sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+            # Giữ nguyên vị trí bài hiện tại trên bảng khi lưu phê duyệt
+            sort_vo_truc_so_sheet(wks_today, sort_mode="keep")
             clear_trucso_cache()
         except Exception as e:
             logger.error(f"Lỗi cập nhật bài: {e}")
@@ -441,7 +457,8 @@ def bg_quick_reschedule(tab_name, row_indices, new_time_str, new_date_str):
                 if cells:
                     wks_today.update_cells(cells)
 
-            sort_vo_truc_so_sheet(wks_today, sort_mode="time")
+            # Giữ nguyên thứ tự trên bảng, chỉ chuẩn hóa gộp ô
+            sort_vo_truc_so_sheet(wks_today, sort_mode="keep")
             clear_trucso_cache()
         except Exception as e:
             logger.error(f"Lỗi đổi lịch nhanh: {e}")
@@ -957,6 +974,41 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
             if not row[2] and fb_dinh_dang: row[2] = fb_dinh_dang
             if not row[4] and fb_status: row[4] = fb_status
 
+    # Đọc và đồng bộ danh sách Thứ tự thêm bài vào vỏ (lưu trong RAM + ô ẩn N2 trên Sheet để không bao giờ mất)
+    tab_key = wks.title.strip()
+    added_map = AI_ENGINE.setdefault("added_order", {})
+    order_list = list(added_map.get(tab_key, []))
+    if not order_list and len(all_rows) > 1 and len(all_rows[1]) > 13:
+        raw_saved = str(all_rows[1][13]).strip()
+        if raw_saved.startswith("[") and raw_saved.endswith("]"):
+            try:
+                order_list = json.loads(raw_saved)
+            except Exception:
+                order_list = []
+
+    changed_order_list = False
+    for grp in groups:
+        t_clean = str(grp[0][1]).strip()
+        if t_clean and t_clean not in order_list:
+            order_list.append(t_clean)
+            changed_order_list = True
+    added_map[tab_key] = order_list
+
+    if changed_order_list:
+        try:
+            wks.update_cell(2, 14, json.dumps(order_list, ensure_ascii=False))
+            wks.spreadsheet.batch_update({
+                "requests": [{
+                    "repeatCell": {
+                        "range": {"sheetId": wks.id, "startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 13, "endColumnIndex": 14},
+                        "cell": {"userEnteredFormat": {"textFormat": {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, "fontSize": 1}}},
+                        "fields": "userEnteredFormat.textFormat"
+                    }
+                }]
+            })
+        except Exception:
+            pass
+
     def _group_sort_key(grp):
         title = grp[0][1]
         dinh_dang = grp[0][2]
@@ -1000,7 +1052,17 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
         else:
             return (tier, has_no_time, sort_date, sort_time, title_k)
 
-    sorted_groups = sorted(groups, key=_group_sort_key)
+    if sort_mode == "keep":
+        # Giữ nguyên thứ tự hiện tại trên Sheet (bài mới thêm nằm ở dưới cùng)
+        sorted_groups = groups
+    elif sort_mode == "added":
+        # Khôi phục đúng thứ tự thêm tin vào vỏ ban đầu
+        sorted_groups = sorted(
+            groups,
+            key=lambda g: order_list.index(str(g[0][1]).strip()) if str(g[0][1]).strip() in order_list else 99999
+        )
+    else:
+        sorted_groups = sorted(groups, key=_group_sort_key)
 
     sorted_rows = []
     merge_spans = []
@@ -2882,11 +2944,22 @@ else:
                 with st.container(border=True):
                     st.markdown("##### 🔃 SẮP XẾP & CHUẨN HÓA LẠI BẢNG GOOGLE SHEET")
                     st.caption(
-                        "Tự động gom nhóm đa nền tảng, đẩy nội dung **chỉ đăng Web/App (OFF, Tin HT, PSSX...)** xuống dưới, "
-                        "đẩy **Chuyên mục chỉ đăng Web/App** xuống dưới cùng, đồng thời đánh lại STT và gộp ô chuẩn xác (kể cả khi trước đó nhập thủ công trên Sheet)."
+                        "Mặc định khi thêm tin mới, bài sẽ tự động nối xuống dưới bảng theo đúng thứ tự thêm vào vỏ. "
+                        "Khi cần điều phối, TCSX có thể bấm các nút dưới đây để sắp xếp theo **Giờ đăng** hoặc trả lại **Thứ tự thêm vào vỏ ban đầu**."
                     )
-                    csort1, csort2, csort3, csort4 = st.columns(4)
-                    if csort1.button("⏰ Sắp xếp theo Giờ đăng (Chuẩn)", type="primary", use_container_width=True):
+                    csort0, csort1, csort2, csort3, csort4 = st.columns(5)
+                    if csort0.button("📥 Xếp theo Thứ tự thêm vào vỏ", type="primary", use_container_width=True):
+                        with st.spinner("Đang khôi phục lại thứ tự thêm tin vào vỏ trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="added")
+                            clear_trucso_cache()
+                            st.success("✅ Đã xếp lại theo đúng thứ tự thêm tin vào vỏ & đánh lại STT!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort1.button("⏰ Sắp xếp theo Giờ đăng", use_container_width=True):
                         with st.spinner("Đang sắp xếp chuẩn theo Giờ đăng & Chuyên mục trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -2894,6 +2967,39 @@ else:
                                 sort_vo_truc_so_sheet(wks_today, sort_mode="time")
                             clear_trucso_cache()
                             st.success("✅ Đã sắp xếp lại theo Giờ đăng & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort2.button("📂 Sắp xếp theo Nguồn", use_container_width=True):
+                        with st.spinner("Đang sắp xếp theo Nguồn & Giờ đăng trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="source")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo Nguồn & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort3.button("👤 Sắp xếp theo BTV", use_container_width=True):
+                        with st.spinner("Đang sắp xếp theo BTV & Giờ đăng trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="btv")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo BTV & đánh lại STT thành công!")
+                            time.sleep(0.8)
+                            st.rerun()
+
+                    if csort4.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True):
+                        with st.spinner("Đang sắp xếp theo Tên bài A-Z trên Google Sheet..."):
+                            with SHEET_LOCK:
+                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                                wks_today = sh_trucso.worksheet(tab_name_current)
+                                sort_vo_truc_so_sheet(wks_today, sort_mode="title")
+                            clear_trucso_cache()
+                            st.success("✅ Đã sắp xếp lại theo Tên bài (A-Z) & đánh lại STT thành công!")
                             time.sleep(0.8)
                             st.rerun()
 
