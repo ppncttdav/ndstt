@@ -3534,20 +3534,20 @@ else:
                                 if st.button("⚡ Duyệt / Sửa", key=f"open_mdl_{idx_row}_{tab_name_current}", type="primary" if is_urg else "secondary", use_container_width=True):
                                     open_post_popup(prod_title, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp)
                     st.markdown('</div>', unsafe_allow_html=True)
-                            with c_links:
-                                l_duyet = str(row_item.get("Link duyệt", "")).strip()
-                                l_sp = str(row_item.get("Link SP", "")).strip()
-                                if l_duyet:
-                                    full_d = l_duyet if l_duyet.startswith("http") else f"https://{l_duyet}"
-                                    st.link_button("▶️ Link Duyệt", full_d, use_container_width=True)
-                                if l_sp:
-                                    full_s = l_sp if l_sp.startswith("http") else f"https://{l_sp}"
-                                    st.link_button("🌐 Link Đã Đăng", full_s, use_container_width=True)
-                                if not l_duyet and not l_sp:
-                                    st.caption("*(Chưa gắn link)*")
-                            with c_action:
-                                if st.button("⚡ Duyệt / Sửa", key=f"open_mdl_{idx_row}_{tab_name_current}", type="primary" if is_urg else "secondary", use_container_width=True):
-                                    open_post_popup(prod_title, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp)
+                        with c_links:
+                            l_duyet = str(row_item.get("Link duyệt", "")).strip()
+                            l_sp = str(row_item.get("Link SP", "")).strip()
+                            if l_duyet:
+                                full_d = l_duyet if l_duyet.startswith("http") else f"https://{l_duyet}"
+                                st.link_button("▶️ Link Duyệt", full_d, use_container_width=True)
+                            if l_sp:
+                                full_s = l_sp if l_sp.startswith("http") else f"https://{l_sp}"
+                                st.link_button("🌐 Link Đã Đăng", full_s, use_container_width=True)
+                            if not l_duyet and not l_sp:
+                                st.caption("*(Chưa gắn link)*")
+                        with c_action:
+                            if st.button("⚡ Duyệt / Sửa", key=f"open_mdl_{idx_row}_{tab_name_current}", type="primary" if is_urg else "secondary", use_container_width=True):
+                                open_post_popup(prod_title, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp)
 
                     seeding_clean = []
                     if not df_seeding.empty:
