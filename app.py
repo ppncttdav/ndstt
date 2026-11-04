@@ -3273,39 +3273,67 @@ else:
                         )
                         df_filtered = df_filtered[mask_kw]
 
+# ================= GIAO DIỆN BẢNG THẲNG HÀNG & POP-UP (THAY THẾ EXPANDER DẰNG DẶC) =================
+                st.markdown("##### 📋 BẢNG THEO DÕI TIN BÀI TRỰC SỐ (CUỘN THÔNG MINH)")
+                st.caption("💡 Các tin bài được sắp xếp thẳng hàng theo từng cột thông tin. Bấm vào nút **🗔 Pop-up** ở cuối mỗi dòng để mở cửa sổ chỉnh sửa chi tiết.")
+
+                # Lọc dữ liệu theo bộ lọc phía trên
+                df_summary_now, df_seeding_now, df_context_now = get_realtime_summary(tab_name_current)
+
+                if df_summary_now.empty:
+                    st.info("📭 Hiện chưa có bài viết nào trong Vỏ trực số ngày hôm nay.")
+                else:
+                    df_filtered = df_summary_now.copy()
+                    if filter_opt != "Tất cả":
+                        df_filtered = df_filtered[df_filtered["Tiến độ"] == filter_opt]
+                    if search_kw.strip():
+                        kw_low = search_kw.strip().lower()
+                        mask_kw = (
+                            df_filtered["Sản phẩm"].astype(str).str.lower().str.contains(kw_low, na=False)
+                            | df_filtered["BTV"].astype(str).str.lower().str.contains(kw_low, na=False)
+                            | df_filtered["Nguồn"].astype(str).str.lower().str.contains(kw_low, na=False)
+                        )
+                        df_filtered = df_filtered[mask_kw]
+
                     if df_filtered.empty:
                         st.info("📭 Không có bài viết nào khớp với bộ lọc hiện tại.")
-                    elif "Thẻ Thông Minh" in display_mode:
-                        st.caption("💡 **Mẹo thao tác nhanh:** Bấm trực tiếp vào dòng tiêu đề bài bất kỳ để **xổ ra ngay lập tức (0 giây)** và duyệt/sửa giờ đăng, hoặc bấm nút **🗔 Pop-up** ở bên trong.")
-                        all_valid_prods = list(df_context_now['NỘI DUNG_GROUP'].unique())
+                    else:
+                        # Thêm cột bấm Pop-up vào bảng hiển thị nhanh
+                        df_grid_display = df_filtered.copy()
+                        df_grid_display.insert(0, "Hành động", "🗔 Mở Pop-up")
 
-                        for _, row_sum in df_filtered.iterrows():
-                            prod_name = row_sum["Sản phẩm"]
-                            first_r_idx = int(row_sum["first_row_idx"])
-                            stt_disp = row_sum["STT"] or "•"
-                            btv_short = get_short_name(row_sum["BTV"])
-                            tg_disp = row_sum["Thời gian đăng bài"]
-                            plats_disp = row_sum["Nền tảng"]
-                            st_disp = row_sum["Tiến độ"]
+                        # Sử dụng st.data_editor hoặc st.dataframe dạng cuộn giao diện sạch sẽ
+                        edited_table_view = st.data_editor(
+                            df_grid_display,
+                            use_container_width=True,
+                            hide_index=True,
+                            disabled=True, # Khóa không cho sửa trực tiếp trên bảng chính để bắt buộc bấm Pop-up xem/sửa chi tiết chống nhầm lẫn
+                            column_config={
+                                "first_row_idx": None,
+                                "BTV": None,
+                                "BTV_RAW": st.column_config.TextColumn("BTV Thực hiện", width="medium"),
+                                "Sản phẩm": st.column_config.TextColumn("Tên bài / Nội dung", width="large"),
+                                "Nguồn": st.column_config.TextColumn("Nguồn", width="small"),
+                                "Tiến độ": st.column_config.TextColumn("Tiến độ / Trạng thái", width="medium"),
+                                "Nền tảng": st.column_config.TextColumn("Nền tảng xuất bản", width="medium"),
+                                "Thời gian đăng bài": st.column_config.TextColumn("Giờ - Ngày đăng", width="medium"),
+                                "TCSX": st.column_config.TextColumn("Nhận xét TCSX", width="medium"),
+                                "LĐP": st.column_config.TextColumn("Chỉ đạo LĐP", width="medium"),
+                                "THẨM ĐỊNH": st.column_config.TextColumn("Thẩm định", width="medium"),
+                            },
+                            key=f"table_view_{date_key}"
+                        )
 
-                            cmt_badges = []
-                            if row_sum["TCSX"]: cmt_badges.append("💬TCSX")
-                            if row_sum["LĐP"]: cmt_badges.append("👑LĐP")
-                            if row_sum["THẨM ĐỊNH"]: cmt_badges.append("🛡️TĐ")
-                            cmt_str = (" | " + " ".join(cmt_badges)) if cmt_badges else ""
+                        st.write("---")
+                        st.markdown("##### 🗔 CHỌN BÀI ĐỂ MỞ POP-UP CHI TIẾT & DUYỆT")
+                        
+                        # Dropdown chọn bài nhanh để gọi Pop-up
+                        list_prods_for_popup = df_filtered["Sản phẩm"].tolist()
+                        selected_prod_popup = st.selectbox("Chọn bài viết cần xem/sửa chi tiết:", ["-- Chọn bài viết --"] + list_prods_for_popup, key=f"sel_popup_{date_key}")
 
-                            card_header = f"#{stt_disp} | {st_disp} | {prod_name}  —  👤 {btv_short}  •  🕒 {tg_disp}  •  🌐 {plats_disp}{cmt_str}"
-
-                            with st.expander(card_header, expanded=False):
-                                grp_card = df_context_now[df_context_now['NỘI DUNG_GROUP'] == prod_name]
-                                first_card_data = grp_card.iloc[0]
-                                card_k = f"c_{first_r_idx}_{date_key}"
-
-                                link_vals = [str(x) for x in grp_card['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
-                                c_txt, c_link = split_text_link("\n\n".join(link_vals))
-                                old_tcsx = row_sum["TCSX"]
-                                old_ldp = row_sum["LĐP"]
-                                old_td = row_sum["THẨM ĐỊNH"]
+                        if selected_prod_popup and selected_prod_popup != "-- Chọn bài viết --":
+                            if st.button("🚀 BẬT CỬA SỔ POP-UP CHI TIẾT", type="primary", key=f"btn_pop_{date_key}"):
+                                open_post_modal(selected_prod_popup)
 
                                 # Thanh công cụ 1-Click trên đầu thẻ
                                 b_col1, b_col2, b_col3, b_col4, b_col5, b_col6 = st.columns([1.2, 1.2, 1.1, 1.1, 0.8, 0.8])
