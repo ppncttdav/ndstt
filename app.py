@@ -346,7 +346,25 @@ def bg_add_news(tab_name, ts_noidung, ts_dinhdang, plats, ts_status, ts_check, t
                 start_stt += 1 
             
             wks_today.insert_rows(rows_to_add, row=start_row_idx + 1)
-            
+            try:
+                wks_today.spreadsheet.batch_update({
+                    "requests": [{
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": wks_today.id,
+                                "startRowIndex": start_row_idx,
+                                "endRowIndex": start_row_idx + len(rows_to_add),
+                                "startColumnIndex": 0,
+                                "endColumnIndex": 15
+                            },
+                            "cell": {"userEnteredFormat": {}},
+                            "fields": "userEnteredFormat(backgroundColor,backgroundColorStyle)"
+                        }
+                    }]
+                })
+            except Exception:
+                pass
+
             # Mặc định giữ nguyên vị trí vừa thêm ở cuối bảng (sort_mode="keep"), chỉ gộp ô & đánh lại STT
             sort_vo_truc_so_sheet(wks_today, sort_mode="keep")
 
@@ -827,10 +845,53 @@ def _is_chuyen_muc_post(title: str, source: str, dinh_dang: str = "") -> bool:
 
     return False
 
+def _is_custom_bg_color(bg_dict):
+    """Kiểm tra xem ô có được bôi màu thủ công (khác màu trắng mặc định) hay không."""
+    if not bg_dict or not isinstance(bg_dict, dict):
+        return False
+    bg = bg_dict.get("backgroundColor")
+    if bg is None or not isinstance(bg, dict):
+        return False
+    r = float(bg.get("red", 0.0))
+    g = float(bg.get("green", 0.0))
+    b = float(bg.get("blue", 0.0))
+    if r >= 0.99 and g >= 0.99 and b >= 0.99:
+        return False
+    return True
+
 def sort_vo_truc_so_sheet(wks, sort_mode="time"):
     all_rows = wks.get_all_values()
     if len(all_rows) <= 5:
         return
+
+    # Đọc toàn bộ màu nền (backgroundColor) do LĐP/TCSX bôi tay trên Sheet
+    all_colors = []
+    try:
+        meta = wks.spreadsheet.fetch_sheet_metadata(params={
+            "includeGridData": "true",
+            "ranges": [f"'{wks.title}'!A1:O{max(300, len(all_rows) + 10)}"],
+            "fields": "sheets.data.rowData.values.userEnteredFormat(backgroundColor,backgroundColorStyle)"
+        })
+        sheets_list = meta.get("sheets", [])
+        if sheets_list:
+            data_list = sheets_list[0].get("data", [])
+            if data_list:
+                for rd in data_list[0].get("rowData", []):
+                    row_bgs = []
+                    for cell in rd.get("values", []):
+                        uef = cell.get("userEnteredFormat", {})
+                        bg_ candidate = {}
+                        if "backgroundColor" in uef:
+                            bg_candidate["backgroundColor"] = uef["backgroundColor"]
+                        if "backgroundColorStyle" in uef:
+                            bg_candidate["backgroundColorStyle"] = uef["backgroundColorStyle"]
+                        row_bgs.append(bg_candidate if _is_custom_bg_color(bg_candidate) else None)
+                    all_colors.append(row_bgs)
+    except Exception as e:
+        logger.error(f"Lỗi đọc màu nền khi sắp xếp: {e}")
+
+    while len(all_colors) < len(all_rows):
+        all_colors.append([None] * 15)
 
     try:
         fallback_tab_date = datetime.strptime(wks.title.strip(), "%d/%m/%Y").date()
@@ -918,63 +979,76 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
             break
 
     main_slice = all_rows[start_data_idx:split_row_idx]
+    main_colors = all_colors[start_data_idx:split_row_idx]
     total_main_slots = len(main_slice)
     if total_main_slots == 0:
         return
 
     groups = []
     current_group = None
-    for raw_r in main_slice:
+    for idx_slice, raw_r in enumerate(main_slice):
+        raw_c = main_colors[idx_slice] if idx_slice < len(main_colors) else [None] * 15
+
         if has_tham_dinh and has_combined_tg:
-            # Chuẩn 14 cột mới: [0..10, 11: THỜI GIAN ĐĂNG BÀI, 12: LINK SP, 13: LINK DUYỆT]
             r_14 = [str(raw_r[c]).strip() if c < len(raw_r) else "" for c in range(14)]
+            c_14 = [raw_c[c] if c < len(raw_c) else None for c in range(14)]
             if r_14[11]:
                 r_14[11] = format_thoi_gian_dang(r_14[11], None, fallback_tab_date)
         elif has_tham_dinh and not has_combined_tg:
-            # Bảng 15 cột: [0..10: THẨM ĐỊNH, 11: GIỜ ĐĂNG, 12: NGÀY ĐĂNG, 13: LINK SP, 14: LINK DUYỆT]
             r_15 = [str(raw_r[c]).strip() if c < len(raw_r) else "" for c in range(15)]
+            c_15 = [raw_c[c] if c < len(raw_c) else None for c in range(15)]
             tg_str = format_thoi_gian_dang(r_15[11], r_15[12], fallback_tab_date)
             r_14 = r_15[:11] + [tg_str, r_15[13], r_15[14]]
+            c_14 = c_15[:11] + [c_15[11] or c_15[12], c_15[13], c_15[14]]
         else:
-            # Bảng 14 cột cũ (chưa có THẨM ĐỊNH): [0..9: LĐP, 10: GIỜ ĐĂNG, 11: NGÀY ĐĂNG, 12: LINK SP, 13: LINK DUYỆT]
             r_old = [str(raw_r[c]).strip() if c < len(raw_r) else "" for c in range(14)]
+            c_old = [raw_c[c] if c < len(raw_c) else None for c in range(14)]
             tg_str = format_thoi_gian_dang(r_old[10], r_old[11], fallback_tab_date)
             r_14 = r_old[:10] + ["", tg_str, r_old[12], r_old[13]]
+            c_14 = c_old[:10] + [None, c_old[10] or c_old[11], c_old[12], c_old[13]]
 
         is_non_empty = any(r_14[c] != "" for c in range(1, 14))
         if not is_non_empty:
             continue
         if r_14[1] != "" or current_group is None:
-            current_group = [r_14]
+            current_group = {"rows": [r_14], "colors": [c_14]}
             groups.append(current_group)
         else:
-            current_group.append(r_14)
+            current_group["rows"].append(r_14)
+            current_group["colors"].append(c_14)
 
     if not groups:
         return
 
-    # Gộp tất cả các cột thông tin chung của đầu tin (bao gồm THỜI GIAN ĐĂNG BÀI, LINK SẢN PHẨM, LINK DUYỆT)
-    # Chỉ giữ giá trị ở dòng đầu tiên của mỗi bài, xóa trùng lặp ở các dòng nền tảng bên dưới
+    # Gộp tất cả các cột thông tin chung của đầu tin và đồng bộ màu nền của các ô gộp
     cols_to_merge = [1, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     for grp in groups:
+        g_rows = grp["rows"]
+        g_colors = grp["colors"]
         for c_idx in cols_to_merge:
-            vals = [row[c_idx] for row in grp if row[c_idx]]
+            vals = [row[c_idx] for row in g_rows if row[c_idx]]
             if c_idx in (8, 9, 10, 12):
                 uniq_vals = list(dict.fromkeys(vals))
                 consolidated = "\n".join(uniq_vals)
             else:
                 consolidated = vals[0] if vals else ""
-            grp[0][c_idx] = consolidated
-            for k in range(1, len(grp)):
-                grp[k][c_idx] = ""
+            g_rows[0][c_idx] = consolidated
+            for k in range(1, len(g_rows)):
+                g_rows[k][c_idx] = ""
 
-        fb_dinh_dang = next((row[2] for row in grp if row[2]), "")
-        fb_status = next((row[4] for row in grp if row[4]), "")
-        for row in grp:
+            # Nếu bất kỳ dòng nào trong nhóm bài viết được bôi màu ở cột gộp này thì giữ nguyên màu đó cho cả khối gộp
+            custom_bgs = [c_row[c_idx] for c_row in g_colors if _is_custom_bg_color(c_row[c_idx])]
+            chosen_bg = custom_bgs[0] if custom_bgs else None
+            for k in range(len(g_colors)):
+                g_colors[k][c_idx] = chosen_bg
+
+        fb_dinh_dang = next((row[2] for row in g_rows if row[2]), "")
+        fb_status = next((row[4] for row in g_rows if row[4]), "")
+        for row in g_rows:
             if not row[2] and fb_dinh_dang: row[2] = fb_dinh_dang
             if not row[4] and fb_status: row[4] = fb_status
 
-    # Đọc và đồng bộ danh sách Thứ tự thêm bài vào vỏ (lưu trong RAM + ô ẩn N2 trên Sheet để không bao giờ mất)
+    # Đọc và đồng bộ danh sách Thứ tự thêm bài vào vỏ
     tab_key = wks.title.strip()
     added_map = AI_ENGINE.setdefault("added_order", {})
     order_list = list(added_map.get(tab_key, []))
@@ -988,7 +1062,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
 
     changed_order_list = False
     for grp in groups:
-        t_clean = str(grp[0][1]).strip()
+        t_clean = str(grp["rows"][0][1]).strip()
         if t_clean and t_clean not in order_list:
             order_list.append(t_clean)
             changed_order_list = True
@@ -1010,13 +1084,14 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
             pass
 
     def _group_sort_key(grp):
-        title = grp[0][1]
-        dinh_dang = grp[0][2]
-        source = grp[0][6]
-        nhansu = grp[0][7]
-        tg_str = grp[0][11]
+        first_r = grp["rows"][0]
+        title = first_r[1]
+        dinh_dang = first_r[2]
+        source = first_r[6]
+        nhansu = first_r[7]
+        tg_str = first_r[11]
 
-        plats = [_canonical_platform(row[3]) for row in grp if row[3]]
+        plats = [_canonical_platform(row[3]) for row in grp["rows"] if row[3]]
         is_webapp_only = bool(plats) and all(p in ("Web", "App") for p in plats)
         is_cm = _is_chuyen_muc_post(title, source, dinh_dang)
 
@@ -1053,28 +1128,32 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
             return (tier, has_no_time, sort_date, sort_time, title_k)
 
     if sort_mode == "keep":
-        # Giữ nguyên thứ tự hiện tại trên Sheet (bài mới thêm nằm ở dưới cùng)
         sorted_groups = groups
     elif sort_mode == "added":
-        # Khôi phục đúng thứ tự thêm tin vào vỏ ban đầu
         sorted_groups = sorted(
             groups,
-            key=lambda g: order_list.index(str(g[0][1]).strip()) if str(g[0][1]).strip() in order_list else 99999
+            key=lambda g: order_list.index(str(g["rows"][0][1]).strip()) if str(g["rows"][0][1]).strip() in order_list else 99999
         )
     else:
         sorted_groups = sorted(groups, key=_group_sort_key)
 
     sorted_rows = []
+    sorted_colors = []
     merge_spans = []
     curr_row_0 = start_data_idx
     curr_stt = 1
 
     for grp in sorted_groups:
-        grp_len = len(grp)
-        for r in grp:
+        g_rows = grp["rows"]
+        g_colors = grp["colors"]
+        grp_len = len(g_rows)
+        for idx_in_grp in range(grp_len):
+            r = g_rows[idx_in_grp]
+            c = g_colors[idx_in_grp]
             r[0] = str(curr_stt)
             curr_stt += 1
             sorted_rows.append(r)
+            sorted_colors.append(c)
         if grp_len > 1:
             merge_spans.append((curr_row_0, curr_row_0 + grp_len))
         curr_row_0 += grp_len
@@ -1082,6 +1161,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
     n_active_rows = len(sorted_rows)
     while len(sorted_rows) < total_main_slots:
         sorted_rows.append([""] * 14)
+        sorted_colors.append([None] * 14)
 
     # 1. Hủy gộp ô cũ trước khi ghi dữ liệu mới
     unmerge_req = {
@@ -1097,7 +1177,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
     }
     wks.spreadsheet.batch_update({"requests": [unmerge_req]})
 
-    # 2. Ghi toàn bộ dữ liệu 14 cột (và dọn sạch cột thứ 15 nếu bảng cũ từng có 15 cột)
+    # 2. Ghi toàn bộ dữ liệu 14 cột
     cells_to_write = []
     cols_write_cnt = 15 if (has_tham_dinh and not has_combined_tg) else 14
     for r_offset, row_vals in enumerate(sorted_rows):
@@ -1108,7 +1188,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
     if cells_to_write:
         wks.update_cells(cells_to_write, value_input_option="USER_ENTERED")
 
-    # 3. Kẻ khung, căn giữa cột STT + THỜI GIAN ĐĂNG BÀI, và Gộp ô (Merge Cells) cho tất cả các cột chung của đầu tin
+    # 3. Kẻ khung, di chuyển màu nền (backgroundColor) đi theo đúng bài viết và Gộp ô
     post_requests = []
     if n_active_rows > 0:
         post_requests.append({
@@ -1136,7 +1216,6 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
                 "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat,borders)"
             }
         })
-        # Căn giữa cho cột STT (0) và cột THỜI GIAN ĐĂNG BÀI (11)
         for center_col in (0, 11):
             post_requests.append({
                 "repeatCell": {
@@ -1151,6 +1230,36 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
                     "fields": "userEnteredFormat(horizontalAlignment)"
                 }
             })
+
+    # Cập nhật lại đúng màu nền (Vàng/Đỏ/Xanh lá...) theo vị trí mới của từng dòng sau khi sắp xếp
+    bg_rows_payload = []
+    for r_offset in range(len(sorted_rows)):
+        c_row = sorted_colors[r_offset] if r_offset < len(sorted_colors) else [None] * 14
+        row_cell_values = []
+        for c_offset in range(14):
+            bg_info = c_row[c_offset] if c_offset < len(c_row) else None
+            if bg_info and _is_custom_bg_color(bg_info):
+                row_cell_values.append({"userEnteredFormat": bg_info})
+            else:
+                row_cell_values.append({"userEnteredFormat": {}})
+        bg_rows_payload.append({"values": row_cell_values})
+
+    if bg_rows_payload:
+        post_requests.append({
+            "updateCells": {
+                "range": {
+                    "sheetId": wks.id,
+                    "startRowIndex": start_data_idx,
+                    "endRowIndex": start_data_idx + len(bg_rows_payload),
+                    "startColumnIndex": 0,
+                    "endColumnIndex": 14
+                },
+                "rows": bg_rows_payload,
+                "fields": "userEnteredFormat(backgroundColor,backgroundColorStyle)"
+            }
+        })
+
+    if n_active_rows > 0:
         for r_start, r_end in merge_spans:
             for col_idx in cols_to_merge:
                 post_requests.append({
