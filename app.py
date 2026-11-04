@@ -287,7 +287,7 @@ QUY TẮC CỐT LÕI VỀ DANH XƯNG & THỜI SỰ (BẮT BUỘC TUÂN THỦ):
    - Không được dùng kiến thức lịch sử cũ để phủ nhận các chuyến thăm, hội đàm hay thỏa thuận nâng cấp quan hệ ngoại giao mới trong bản tin.
    - Nếu bản tin nói về một thỏa thuận ngoại giao/hội đàm cụ thể hoặc một sự kiện mới, hãy mặc định BTV đang cập nhật từ nguồn thông tấn chính thức, tuyệt đối không bắt lỗi 'không có bằng chứng'.
 3. Phạm vi rà soát trọng tâm:
-   - Tập trung bắt lỗi: Chính tả tiếng Anh/tiếng Việt, ngữ pháp, câu cú lủng củng, format ngày tháng chuẩn quốc tế (có thể chỉ có ngày tháng, hoặc ngày tháng năm), danh xưng tên riêng tiếng Việt chuẩn quốc tế (không dấu).
+   - Tập trung bắt lỗi: Chính tả tiếng Anh/tiếng Việt, ngữ pháp, câu cú lủng củng, format ngày tháng chuẩn quốc tế (có thể chỉ có ngày tháng, hoặc ngày tháng năm), danh xưng tên riêng tiếng Việt không dấu nhưng viết cách, viết hoa (Ví dụ: Ha Noi, Viet Nam,...).
    - Cảnh báo rủi ro nếu có yếu tố xuyên tạc chủ quyền biển đảo, chính trị, tôn giáo, phân biệt đối xử.
    - Thêm cảnh báo nếu nội dung phi logic hoặc cách viết chưa tốt, từ ngữ lặp hoặc sai sót... kèm gợi ý cách sửa."""
 
@@ -802,7 +802,7 @@ ROLES_HEADER = [
 ]
 
 OPTS_DINH_DANG = ["Bài dịch", "Video biên tập", "Sản phẩm sản xuất"]
-OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "Threads", "LinkedIn", "Instagram", "Web", "App"]
+OPTS_NEN_TANG = ["Facebook", "Youtube", "TikTok", "LinkedIn", "Instagram", "Threads", "Web", "App"]
 MANDATORY_PLATFORMS = ["Facebook", "LinkedIn", "Youtube", "Instagram"]
 OPTIONAL_PLATFORMS = [p for p in OPTS_NEN_TANG if p not in MANDATORY_PLATFORMS]
 
@@ -3504,10 +3504,9 @@ else:
                 with st.container(border=True):
                     st.markdown("##### 🔃 SẮP XẾP & CHUẨN HÓA LẠI BẢNG GOOGLE SHEET")
                     st.caption(
-                        "Mặc định khi thêm tin mới, bài sẽ tự động nối xuống dưới bảng theo đúng thứ tự thêm vào vỏ. "
                         "Khi cần điều phối, TCSX có thể bấm các nút dưới đây để sắp xếp theo **Giờ đăng** hoặc trả lại **Thứ tự thêm vào vỏ ban đầu**."
                     )
-                    csort0, csort1, csort2, csort3, csort4 = st.columns(5)
+                    csort0, csort1, csort2, csort3 = st.columns(4)
                     
                     # Thêm biến date_key để tạo key duy nhất
                     date_key = date_str_display.replace('/', '')
@@ -3534,18 +3533,7 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                    if csort2.button("📂 Sắp xếp theo Nguồn", use_container_width=True, key=f"btn_sort_source_{date_key}"):
-                        with st.spinner("Đang sắp xếp theo Nguồn & Giờ đăng trên Google Sheet..."):
-                            with SHEET_LOCK:
-                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                wks_today = sh_trucso.worksheet(tab_name_current)
-                                sort_vo_truc_so_sheet(wks_today, sort_mode="source")
-                            clear_trucso_cache()
-                            st.success("✅ Đã sắp xếp lại theo Nguồn & đánh lại STT thành công!")
-                            time.sleep(0.8)
-                            st.rerun()
-
-                    if csort3.button("👤 Sắp xếp theo BTV", use_container_width=True, key=f"btn_sort_btv_{date_key}"):
+                    if csort2.button("👤 Sắp xếp theo BTV", use_container_width=True, key=f"btn_sort_btv_{date_key}"):
                         with st.spinner("Đang sắp xếp theo BTV & Giờ đăng trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -3556,7 +3544,7 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                    if csort4.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True, key=f"btn_sort_title_{date_key}"):
+                    if csort3.button("🔤 Sắp xếp theo Tên bài (A-Z)", use_container_width=True, key=f"btn_sort_title_{date_key}"):
                         with st.spinner("Đang sắp xếp theo Tên bài A-Z trên Google Sheet..."):
                             with SHEET_LOCK:
                                 sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
@@ -3700,7 +3688,7 @@ else:
                         ts_status = c4.selectbox("Trạng thái", OPTS_STATUS_TRUCSO, index=idx_cho_xu_ly)
                         
                         ts_nhansu = c5.multiselect("BTV Thực hiện", list_nv, default=[curr_name] if curr_name in list_nv else None)
-                        ts_check = c6.text_input("Ghi chú Check", placeholder="VD: OK, Sửa video...")
+                        ts_check = c6.text_input("Ghi chú Check", placeholder="VD: ASAP, tham khảo BTV A,...")
 
                         st.markdown("**⏰ LỊCH XUẤT BẢN DỰ KIẾN (TỰ ĐỘNG ĐỒNG BỘ VÀO BẢNG ĐIỀU PHỐI META PLANNER):**")
                         c_time_add, c_date_add, c_note_sched = st.columns([1.2, 1.2, 2.6])
