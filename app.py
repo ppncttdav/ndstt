@@ -880,7 +880,7 @@ def sort_vo_truc_so_sheet(wks, sort_mode="time"):
                     row_bgs = []
                     for cell in rd.get("values", []):
                         uef = cell.get("userEnteredFormat", {})
-                        bg_ candidate = {}
+                        bg_candidate = {} # <--- Đã xóa khoảng trắng
                         if "backgroundColor" in uef:
                             bg_candidate["backgroundColor"] = uef["backgroundColor"]
                         if "backgroundColorStyle" in uef:
