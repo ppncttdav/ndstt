@@ -31,6 +31,58 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 
 # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
 st.markdown("""
+    /* CSS cho Bảng Thống Kê Tin Bài Tương Tác (Phong cách Meta Planner) */
+    .post-card-row {
+        background: #ffffff;
+        border: 1px solid #dfe3e8;
+        border-left: 5px solid #1877f2;
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 4px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+        transition: all 0.15s ease-in-out;
+    }
+    .post-card-row:hover {
+        box-shadow: 0 4px 12px rgba(24,119,242,0.12);
+        border-color: #b0c4de;
+    }
+    .post-card-row.urgent {
+        border: 1.5px solid #dc3545 !important;
+        border-left: 6px solid #dc3545 !important;
+        background: #fff5f5 !important;
+    }
+    .post-card-row.approved {
+        border-left: 5px solid #28a745 !important;
+        background: #f9fffb !important;
+    }
+    .urgent-badge {
+        display: inline-block;
+        background: #dc3545;
+        color: #ffffff;
+        font-size: 11.5px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 5px;
+        margin-top: 4px;
+    }
+    .plat-chip {
+        display: inline-block;
+        padding: 2px 7px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #ffffff;
+        margin-right: 4px;
+        margin-bottom: 3px;
+    }
+    .ai-mini-badge {
+        display: inline-block;
+        padding: 2px 7px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 600;
+        margin-top: 3px;
+    }
     <style>
     /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
     [data-stale="true"], div[data-stale="true"] {
@@ -2584,7 +2636,308 @@ def dinh_dang_dep(wks, roster_vals):
         set_data_validation_for_cell_range(wks, 'D6:D35', validation_nen_tang)
         set_data_validation_for_cell_range(wks, 'E6:E35', validation_status)
     except Exception: pass
+# ================= HÀM KIỂM TRA KHẨN CẤP (< 1 TIẾNG) & POPUP XỬ LÝ BÀI =================
+def check_post_urgency(raw_tg_str, smart_status, status_list, fallback_date):
+    """Kiểm tra bài còn dưới 1 tiếng nữa đến giờ đăng (hoặc quá giờ) nhưng chưa duyệt/chưa đăng."""
+    done_keywords = ["đã duyệt", "đã đăng", "posted", "scheduled", "hủy"]
+    if any(k in str(smart_status).lower() for k in done_keywords):
+        return False, ""
+    if status_list and all(any(k in str(s).lower() for k in done_keywords) for s in status_list if str(s).strip()):
+        return False, ""
 
+    t_obj = _parse_post_time(raw_tg_str)
+    if t_obj is None:
+        return False, ""
+    d_obj = _parse_post_date(raw_tg_str, fallback_date)
+    try:
+        post_dt = VN_TZ.localize(datetime.combine(d_obj, t_obj))
+        now_vn = get_vn_time()
+        diff_mins = int((post_dt - now_vn).total_seconds() // 60)
+        if 0 <= diff_mins <= 60:
+            return True, f"🔥 Sắp đến giờ đăng (còn {diff_mins} phút)!"
+        elif -240 <= diff_mins < 0 and d_obj == now_vn.date():
+            return True, f"🚨 Đã trễ giờ đăng {abs(diff_mins)} phút!"
+    except Exception:
+        pass
+    return False, ""
+
+def inject_ai_debounce_10s():
+    """Tự động kích hoạt cập nhật nội dung để AI quét ngầm sau 10 giây BTV ngừng gõ/paste."""
+    components.html(
+        """
+        <script>
+        (function() {
+            const parentDoc = window.parent.document;
+            if (window.parent._vntdAiDebounceBound) return;
+            window.parent._vntdAiDebounceBound = true;
+            let typingTimer = null;
+            parentDoc.addEventListener('input', function(e) {
+                const el = e.target;
+                if (el && el.tagName === 'TEXTAREA') {
+                    clearTimeout(typingTimer);
+                    typingTimer = setTimeout(function() {
+                        // Tự động commit giá trị sau 10s ngừng gõ mà không làm mất vị trí con trỏ
+                        const start = el.selectionStart;
+                        const end = el.selectionEnd;
+                        el.blur();
+                        setTimeout(function() {
+                            try {
+                                el.focus();
+                                el.setSelectionRange(start, end);
+                            } catch(err) {}
+                        }, 50);
+                    }, 10000);
+                }
+            }, true);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+@st.dialog("🛠️ XỬ LÝ & PHÊ DUYỆT BÀI VIẾT", width="large")
+def open_post_popup(sel_product, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp):
+    inject_ai_debounce_10s()
+    date_str_display = target_date.strftime("%d/%m/%Y")
+    date_key = date_str_display.replace("/", "")
+
+    _, df_content_now, _, _ = fetch_vo_truc_so(tab_name_current)
+    if df_content_now.empty:
+        st.warning("Không tải được dữ liệu bài viết.")
+        return
+
+    split_idx = len(df_content_now)
+    for i, row in df_content_now.iterrows():
+        b_val = str(row.get('NỘI DUNG', '')).strip().upper()
+        c_val = str(row.get('ĐỊNH DẠNG', '')).strip().upper()
+        d_val = str(row.get('NỀN TẢNG', '')).strip().upper()
+        if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in b_val or ('LINK' in c_val and 'PHỤ TRÁCH' in d_val):
+            split_idx = i
+            break
+
+    df_main = df_content_now.iloc[:split_idx].copy()
+    df_main = df_main[df_main.apply(lambda r: any(str(r.get(c, '')).strip() not in ('', 'nan', '<NA>', 'None') for c in ('STT', 'NỘI DUNG', 'NỀN TẢNG')), axis=1)]
+    df_main['NỘI DUNG_GROUP'] = df_main['NỘI DUNG'].replace('', pd.NA).ffill()
+    df_main = df_main.dropna(subset=['NỘI DUNG_GROUP'])
+    df_main['NHÂN SỰ'] = df_main['NHÂN SỰ'].replace('', pd.NA).ffill().fillna("Chưa phân công")
+    df_main['NGUỒN'] = df_main['NGUỒN'].replace('', pd.NA).ffill().fillna("")
+
+    valid_products = [p for p in df_main['NỘI DUNG_GROUP'].unique() if str(p).strip() != ""]
+    if sel_product not in valid_products:
+        st.info("Bài viết đã được cập nhật hoặc xóa. Vui lòng đóng hộp thoại.")
+        return
+
+    p_idx = valid_products.index(sel_product)
+    group_df = df_main[df_main['NỘI DUNG_GROUP'] == sel_product]
+    first_row_idx = group_df.index[0]
+    first_row_data = group_df.iloc[0]
+    src_start = min(group_df.index) + 5
+    src_end = max(group_df.index) + 6
+
+    link_duyet_vals = [str(x) for x in group_df['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
+    raw_link_duyet = "\n\n".join(link_duyet_vals)
+    current_text, current_link = split_text_link(raw_link_duyet)
+    current_status_val = get_smart_status(group_df)
+
+    # Thanh công cụ di chuyển thứ tự & trạng thái nhanh
+    c_top1, c_top2, c_top3, c_top4 = st.columns([1.1, 1.1, 1.1, 2.2])
+    if c_top1.button("⏫ Lên Đầu", disabled=(p_idx == 0), use_container_width=True, key=f"dlg_top_{first_row_idx}"):
+        sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+        move_group_in_sheet(sh_trucso.worksheet(tab_name_current), src_start, src_end, 5)
+        clear_cache_and_rerun()
+    if c_top2.button("🔼 Lên 1 bậc", disabled=(p_idx == 0), use_container_width=True, key=f"dlg_up_{first_row_idx}"):
+        prev_prod = valid_products[p_idx - 1]
+        dest_index = min(df_main[df_main['NỘI DUNG_GROUP'] == prev_prod].index) + 5
+        sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+        move_group_in_sheet(sh_trucso.worksheet(tab_name_current), src_start, src_end, dest_index)
+        clear_cache_and_rerun()
+    if c_top3.button("🔽 Xuống 1 bậc", disabled=(p_idx == len(valid_products) - 1), use_container_width=True, key=f"dlg_dn_{first_row_idx}"):
+        next_prod = valid_products[p_idx + 1]
+        dest_index = max(df_main[df_main['NỘI DUNG_GROUP'] == next_prod].index) + 6
+        sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+        move_group_in_sheet(sh_trucso.worksheet(tab_name_current), src_start, src_end, dest_index)
+        clear_cache_and_rerun()
+    c_top4.markdown(f"<div style='text-align:right; padding-top:6px;'><b>Tiến độ:</b> {current_status_val}</div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    col_left, col_right = st.columns([1.25, 1])
+
+    with col_left:
+        st.markdown("**:blue[1. NỘI DUNG & LINK DUYỆT SẢN PHẨM]**")
+        e_nd = st.text_area("Tên bài / Tiêu đề", value=first_row_data['NỘI DUNG_GROUP'], height=68, key=f"dlg_nd_{first_row_idx}")
+        c_ns, c_nguon = st.columns(2)
+        e_ns = c_ns.text_input("BTV Thực hiện", value=first_row_data['NHÂN SỰ'], key=f"dlg_ns_{first_row_idx}")
+        e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''), key=f"dlg_ng_{first_row_idx}")
+
+        # Ô nhập Link Drive kèm nút mở tab mới ngay bên cạnh
+        c_ld_in, c_ld_btn = st.columns([3.2, 1.2])
+        e_ld = c_ld_in.text_input("Link Sản phẩm duyệt (Google Drive / YouTube)", value=current_link, key=f"dlg_ld_{first_row_idx}")
+        with c_ld_btn:
+            st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+            clean_ld = str(e_ld).strip()
+            if clean_ld:
+                full_ld = clean_ld if clean_ld.startswith("http") else f"https://{clean_ld}"
+                st.link_button("↗️ Mở Link", full_ld, type="primary", use_container_width=True)
+            else:
+                st.button("↗️ Mở Link", disabled=True, use_container_width=True, key=f"dlg_nold_{first_row_idx}")
+
+        e_texttin = st.text_area(
+            "Nội dung Text bài đăng (Tự động AI check sau 10s ngừng gõ)",
+            value=current_text,
+            height=145,
+            key=f"dlg_txt_{first_row_idx}"
+        )
+
+        # Tự động đưa nội dung vừa sửa vào hàng đợi AI ngầm ngay lập tức
+        if e_texttin and len(e_texttin.strip()) >= 10:
+            queue_bg_scan(e_texttin.strip(), current_status_val)
+
+        # Khối kết quả AI (Lấy trực tiếp từ AI_ENGINE["cache"] để TCSX/LĐP thấy liền trong 0s)
+        st.markdown("🤖 **KẾT QUẢ AI RÀ SOÁT NỘI DUNG**")
+        with st.container(border=True):
+            active_txt = e_texttin.strip() if e_texttin else ""
+            if len(active_txt) < 10:
+                st.caption("✍️ Chưa có đủ nội dung văn bản (Text bài đăng) để AI rà soát.")
+            else:
+                text_hash = hashlib.md5(active_txt.encode('utf-8')).hexdigest()
+                cached_ans = AI_ENGINE["cache"].get(text_hash) or st.session_state.get(f"ai_res_{text_hash}")
+
+                c_ai_status, c_ai_btn = st.columns([3, 1.2])
+                force_rescan = c_ai_btn.button("⚡ Quét lại", use_container_width=True, key=f"dlg_rescan_{first_row_idx}")
+
+                if force_rescan:
+                    with st.spinner("🤖 AI đang rà soát..."):
+                        cached_ans = _call_api(
+                            active_txt,
+                            get_ai_api_key(),
+                            str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip(),
+                            get_vn_time().strftime("%d/%m/%Y")
+                        )
+                        AI_ENGINE["cache"][text_hash] = cached_ans
+                        st.session_state[f"ai_res_{text_hash}"] = cached_ans
+
+                if cached_ans:
+                    if "⚠️" in cached_ans or "⚪" in cached_ans:
+                        c_ai_status.warning(cached_ans)
+                    elif any(k in cached_ans.lower() for k in ["nội dung an toàn", "đủ điều kiện", "ít rủi ro"]):
+                        c_ai_status.success("✅ " + cached_ans)
+                    else:
+                        c_ai_status.error("🚨 Phát hiện điểm cần lưu ý / chỉnh sửa:")
+                        st.markdown(cached_ans)
+                else:
+                    c_ai_status.info("⏳ AI đang tự động kiểm tra ngầm (hoặc bấm 'Quét lại' để xem ngay).")
+
+        st.markdown("**:green[2. NHẬN XÉT, CHỈ ĐẠO & THẨM ĐỊNH]**")
+        all_old_tcsx = "\n".join(group_df['TCSX'].replace('', pd.NA).dropna().astype(str).tolist())
+        all_old_ldp = "\n".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist())
+        all_old_td = "\n".join(group_df['THẨM ĐỊNH'].replace('', pd.NA).dropna().astype(str).tolist()) if 'THẨM ĐỊNH' in group_df.columns else ""
+
+        c_tcsx, c_ldp, c_td = st.columns(3)
+        with c_tcsx:
+            st.caption("TỔ CHỨC SẢN XUẤT:")
+            if all_old_tcsx: st.info(all_old_tcsx)
+            else: st.caption("*Chưa có nhận xét*")
+            e_tcsx_new = st.text_input("TCSX góp ý:", key=f"dlg_in_tcsx_{first_row_idx}_{date_key}") if is_shift_tcsx else ""
+            e_tcsx_ok = st.checkbox("✅ TCSX CHỐT", key=f"dlg_chk_tcsx_{first_row_idx}_{date_key}") if is_shift_tcsx else False
+        with c_ldp:
+            st.caption("LÃNH ĐẠO PHÒNG:")
+            if all_old_ldp: st.success(all_old_ldp)
+            else: st.caption("*Chưa có nhận xét*")
+            e_ldp_new = st.text_input("LĐP chỉ đạo:", key=f"dlg_in_ldp_{first_row_idx}_{date_key}") if is_shift_ldp else ""
+            e_ldp_ok = st.checkbox("🚀 LĐP CHỐT", key=f"dlg_chk_ldp_{first_row_idx}_{date_key}") if is_shift_ldp else False
+        with c_td:
+            st.caption("THẨM ĐỊNH:")
+            if all_old_td: st.warning(all_old_td)
+            else: st.caption("*Chưa có thẩm định*")
+            e_td_new = st.text_input("Ý kiến Thẩm định:", key=f"dlg_in_td_{first_row_idx}_{date_key}")
+            e_td_ok = st.checkbox("🛡️ THẨM ĐỊNH OK", key=f"dlg_chk_td_{first_row_idx}_{date_key}")
+
+    with col_right:
+        st.markdown("**:orange[3. TRẠNG THÁI, GIỜ ĐĂNG & LINK TỪNG NỀN TẢNG]**")
+        platform_updates = {}
+        fallback_group_time = _parse_post_time(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''))
+        fallback_group_date = _parse_post_date(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''), target_date)
+        fallback_group_lsp = str(first_row_data.get('LINK SẢN PHẨM', '')).strip()
+
+        for i, r in group_df.iterrows():
+            nentang = r['NỀN TẢNG']
+            with st.container(border=True):
+                st.markdown(f"**🔹 {nentang}** *(Hiện tại: `{r['STATUS']}`)*")
+                try: idx_st = OPTS_STATUS_TRUCSO.index(r['STATUS'])
+                except ValueError: idx_st = 0
+                st_val = st.selectbox("Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"dlg_st_{i}_{date_key}")
+
+                c_t, c_d = st.columns(2)
+                val_time = _parse_post_time(r.get('THỜI GIAN ĐĂNG BÀI', '')) or fallback_group_time
+                time_val = c_t.time_input("Giờ đăng", value=val_time, step=timedelta(minutes=15), key=f"dlg_ti_{i}_{date_key}")
+                curr_d_val = _parse_post_date(r.get('THỜI GIAN ĐĂNG BÀI', ''), fallback_group_date)
+                date_val = c_d.date_input("Ngày đăng", value=curr_d_val, format="DD/MM/YYYY", key=f"dlg_da_{i}_{date_key}")
+
+                c_sp_in, c_sp_btn = st.columns([3.1, 1.2])
+                lsp_val = c_sp_in.text_input("Link Sản phẩm đã đăng", value=r.get('LINK SẢN PHẨM', '') or fallback_group_lsp, key=f"dlg_lsp_{i}_{date_key}")
+                with c_sp_btn:
+                    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+                    clean_sp = str(lsp_val).strip().split("\n")[0].strip()
+                    if clean_sp:
+                        full_sp = clean_sp if clean_sp.startswith("http") else f"https://{clean_sp}"
+                        st.link_button("↗️ Mở SP", full_sp, use_container_width=True)
+                    else:
+                        st.button("↗️ Mở SP", disabled=True, use_container_width=True, key=f"dlg_nosp_{i}_{date_key}")
+
+                platform_updates[i] = {
+                    'STATUS': st_val, 'TIME': time_val, 'DATE': date_val, 'LINK_SP': lsp_val
+                }
+
+        with st.expander("🗑️ Xóa bài viết / Xóa nền tảng", expanded=False):
+            if st.button("🗑️ XÓA TOÀN BỘ BÀI VIẾT NÀY", type="primary", use_container_width=True, key=f"dlg_del_all_{first_row_idx}"):
+                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                wks_today = sh_trucso.worksheet(tab_name_current)
+                start_row = int(min(group_df.index)) + 5
+                end_row = int(max(group_df.index)) + 6
+                wks_today.spreadsheet.batch_update({"requests": [{"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": end_row}}}]})
+                clear_cache_and_rerun()
+
+            for i, r in group_df.iterrows():
+                nentang = r['NỀN TẢNG']
+                if st.button(f"❌ Xóa nền tảng: {nentang}", key=f"dlg_del_plat_{i}", use_container_width=True):
+                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
+                    wks_today = sh_trucso.worksheet(tab_name_current)
+                    if len(group_df) > 1 and i == min(group_df.index):
+                        sheet_r_next = int(i + 1) + 6
+                        cells_to_rescue = [
+                            gspread.Cell(sheet_r_next, 2, str(first_row_data.get('NỘI DUNG_GROUP', ''))),
+                            gspread.Cell(sheet_r_next, 6, str(first_row_data.get('CHECK', ''))),
+                            gspread.Cell(sheet_r_next, 7, str(first_row_data.get('NGUỒN', ''))),
+                            gspread.Cell(sheet_r_next, 8, str(first_row_data.get('NHÂN SỰ', ''))),
+                            gspread.Cell(sheet_r_next, 9, str(first_row_data.get('TCSX', ''))),
+                            gspread.Cell(sheet_r_next, 10, str(first_row_data.get('LĐP', ''))),
+                            gspread.Cell(sheet_r_next, 11, str(first_row_data.get('THẨM ĐỊNH', ''))),
+                            gspread.Cell(sheet_r_next, 12, str(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''))),
+                            gspread.Cell(sheet_r_next, 13, str(first_row_data.get('LINK SẢN PHẨM', ''))),
+                            gspread.Cell(sheet_r_next, 14, str(first_row_data.get('LINK DUYỆT', ''))),
+                        ]
+                        wks_today.update_cells(cells_to_rescue)
+                    row_0_based = int(i) + 5
+                    wks_today.spreadsheet.batch_update({"requests": [{"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}]})
+                    clear_cache_and_rerun()
+
+    st.markdown("---")
+    if st.button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", type="primary", use_container_width=True, key=f"dlg_save_{first_row_idx}"):
+        merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
+        if e_texttin and len(e_texttin.strip()) >= 10:
+            queue_bg_scan(e_texttin.strip(), "")
+        final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
+        final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
+        final_td = build_appended_comment(all_old_td, e_td_new, e_td_ok)
+
+        AI_ENGINE["executor"].submit(
+            bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns,
+            final_tcsx, final_ldp, final_td, merged_link_duyet_update, platform_updates
+        )
+        st.success("✅ Đã lưu! Hệ thống đang đồng bộ ngầm lên Google Sheet.")
+        time.sleep(0.4)
+        clear_cache_and_rerun()
+        
 # ================= 2. AUTH BẢO MẬT (COOKIE + PHIÊN 30 PHÚT, KHÔNG LỘ LINK URL) =================
 SESSION_TTL_SECONDS = 1800  # 30 phút (1800 giây)
 if "sessions" not in AI_ENGINE:
@@ -2929,8 +3282,22 @@ else:
                     except: pass
 
                 st.write("")
-                filter_opt = st.pills("Bộ lọc", ["Tất cả", "🚨 Cảnh báo rủi ro", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed")
-
+                filter_opt = st.pills(
+                    "Bộ lọc",
+                    [
+                        "Tất cả",
+                        "🔥 Sắp đến giờ (<1h) chưa xong",
+                        "⏳ Chờ TCSX/LĐP chưa duyệt",
+                        "🚨 Cảnh báo rủi ro",
+                        "🔴 Cần sửa",
+                        "🔄 BTV đã sửa",
+                        "👀 Chờ TCSX duyệt",
+                        "⏳ Chờ LĐP duyệt",
+                        "✅ Đã duyệt"
+                    ],
+                    default="Tất cả",
+                    label_visibility="collapsed"
+                )
                 # ================= KHỐI HÀM XỬ LÝ DỮ LIỆU CHUNG (DÙNG CHO FRAGMENT) =================
                 def get_realtime_summary(tab_name):
                     _, df_content, _, _ = fetch_vo_truc_so(tab_name)
@@ -2989,13 +3356,47 @@ else:
                         btv_name = ", ".join([b for b in btvs if b and b != "Chưa Phân Công"]) if len(btvs) > 0 else "Chưa phân công"
                         plats = group['NỀN TẢNG'].replace('', pd.NA).dropna().tolist()
                         tg_list = [str(x).strip() for x in group['THỜI GIAN ĐĂNG BÀI'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
+                        raw_tg_val = tg_list[0] if tg_list else date_str_display
                         
+                        link_duyet_vals = [str(x) for x in group['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
+                        raw_link_duyet = "\n\n".join(link_duyet_vals)
+                        curr_txt, curr_link = split_text_link(raw_link_duyet)
+                        queue_bg_scan(curr_txt, smart_status)
+
+                        lsp_vals = [str(x).strip() for x in group['LINK SẢN PHẨM'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
+                        first_lsp = lsp_vals[0].split("\n")[0].strip() if lsp_vals else ""
+
+                        status_list = group['STATUS'].replace('', pd.NA).dropna().astype(str).tolist()
+                        is_urgent, urgent_msg = check_post_urgency(tg_list[0] if tg_list else "", smart_status, status_list, target_date)
+
+                        ai_badge = ""
+                        if curr_txt and len(curr_txt.strip()) >= 10:
+                            t_hash = hashlib.md5(curr_txt.strip().encode('utf-8')).hexdigest()
+                            ai_ans = AI_ENGINE["cache"].get(t_hash) or st.session_state.get(f"ai_res_{t_hash}")
+                            if ai_ans:
+                                if any(k in ai_ans.lower() for k in ["nội dung an toàn", "đủ điều kiện", "ít rủi ro"]):
+                                    ai_badge = "✅ AI: Ít rủi ro"
+                                elif "⚠️" in ai_ans:
+                                    ai_badge = "⚠️ AI: Chờ quét lại"
+                                else:
+                                    ai_badge = "🚨 AI: Có góp ý sửa"
+                            else:
+                                ai_badge = "⏳ AI đang quét..."
+
                         summary_data.append({
+                            "STT": str(group.iloc[0].get('STT', '')).strip(),
                             "Sản phẩm": prod,
+                            "Định dạng": str(group.iloc[0].get('ĐỊNH DẠNG', '')).strip(),
+                            "Nguồn": str(group.iloc[0].get('NGUỒN', '')).strip(),
                             "BTV": btv_name,
                             "Tiến độ": smart_status,
                             "Nền tảng": ", ".join(plats),
-                            "Thời gian đăng bài": tg_list[0] if tg_list else date_str_display
+                            "Thời gian đăng bài": raw_tg_val,
+                            "Link duyệt": curr_link,
+                            "Link SP": first_lsp,
+                            "Is_Urgent": is_urgent,
+                            "Urgent_Msg": urgent_msg,
+                            "AI_Badge": ai_badge
                         })
                         
                         link_duyet_vals = [str(x) for x in group['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
@@ -3116,328 +3517,101 @@ else:
                             time.sleep(0.8)
                             st.rerun()
 
-                # ================= KHU VỰC XỬ LÝ & DUYỆT BÀI (NẰM GIỮA - TĨNH) =================
-                st.markdown("##### 🛠️ KHU VỰC XỬ LÝ & DUYỆT BÀI")
-                st.caption("📌 CHỌN BÀI VIẾT ĐỂ LÀM VIỆC (Các bài 'Cảnh báo rủi ro', 'Cần sửa' được đẩy lên đầu)")
-                
-                df_main_st = pd.DataFrame()
-                df_seeding_st = pd.DataFrame()
-                
-                dropdown_options = []
-                prod_mapping = {}
-                
-                if not df_content_static.empty:
-                    split_idx_st = len(df_content_static)
-                    for i, row in df_content_static.iterrows():
-                        b_val = str(row.get('NỘI DUNG', '')).strip().upper()
-                        if "PHÂN CÔNG TRẢ LỜI BÌNH LUẬN" in b_val:
-                            split_idx_st = i
-                            break
-                        c_val = str(row.get('ĐỊNH DẠNG', '')).strip().upper()
-                        d_val = str(row.get('NỀN TẢNG', '')).strip().upper()
-                        if 'LINK' in c_val and 'PHỤ TRÁCH' in d_val:
-                            split_idx_st = i
-                            break
-                            
-                    df_main_st = df_content_static.iloc[:split_idx_st].copy()
-                    if split_idx_st < len(df_content_static):
-                        df_seeding_st = df_content_static.iloc[split_idx_st:].copy()
-                        
-                    df_context_st = df_main_st.copy()
-                    
-                    def is_valid_row_st(row):
-                        stt = str(row.get('STT', ''))
-                        nd = str(row.get('NỘI DUNG', ''))
-                        nt = str(row.get('NỀN TẢNG', ''))
-                        stt = "" if stt.lower() in ['nan', '<na>', 'none'] else stt.strip()
-                        nd = "" if nd.lower() in ['nan', '<na>', 'none'] else nd.strip()
-                        nt = "" if nt.lower() in ['nan', '<na>', 'none'] else nt.strip()
-                        return stt != "" or nd != "" or nt != ""
-                        
-                    df_context_st = df_context_st[df_context_st.apply(is_valid_row_st, axis=1)]
-                    df_context_st['NỘI DUNG_GROUP'] = df_context_st['NỘI DUNG'].replace('', pd.NA).ffill()
-                    df_context_st = df_context_st.dropna(subset=['NỘI DUNG_GROUP'])
-                    df_context_st = df_context_st[df_context_st['NỘI DUNG_GROUP'].astype(str).str.strip() != "Chưa có tên"]
-                    
-                    unique_products = df_context_st['NỘI DUNG_GROUP'].unique()
-                    valid_products = [p for p in unique_products if str(p).strip() != ""]
-                    
-                    for prod in valid_products:
-                        group = df_context_st[df_context_st['NỘI DUNG_GROUP'] == prod]
-                        smart_status = get_smart_status(group)
-                        if filter_opt == "Tất cả" or smart_status == filter_opt:
-                            label = f"[{smart_status}] {prod}"
-                            dropdown_options.append(label)
-                            prod_mapping[label] = prod
-                    
-                    dropdown_options = sorted(dropdown_options, key=get_priority_score)
-                    
-                    if not dropdown_options:
-                        st.info("📭 Không có bài viết nào thuộc nhóm lọc này. Hãy chọn Tất cả để xem lại.")
-                    else:
-                        if len(dropdown_options) == 1:
-                            sel_label = st.selectbox("CHỌN BÀI:", dropdown_options, label_visibility="collapsed")
-                        else:
-                            sel_label = st.selectbox("CHỌN BÀI:", ["-- Chọn bài viết --"] + dropdown_options, label_visibility="collapsed")
-                        
-                        if sel_label and sel_label != "-- Chọn bài viết --":
-                            sel_product = prod_mapping[sel_label]
-                            unique_prods_list = list(valid_products)
-                            p_idx = unique_prods_list.index(sel_product)
-                            
-                            group_df = df_context_st[df_context_st['NỘI DUNG_GROUP'] == sel_product]
-                            first_row_idx = group_df.index[0]
-                            first_row_data = group_df.iloc[0]
-                            
-                            src_start = min(group_df.index) + 5
-                            src_end = max(group_df.index) + 6
-                            
-                            st.markdown("🔄 **SẮP XẾP LẠI THỨ TỰ BÀI NÀY TRÊN SHEET**")
-                            c_m1, c_m2, c_m3, c_m4 = st.columns([1, 1, 1, 3])
-                            
-                            if c_m1.button("⏫ Lên Đầu", disabled=(p_idx == 0), use_container_width=True):
-                                with st.spinner("Đang đẩy bài lên đầu..."):
-                                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                    wks_today = sh_trucso.worksheet(tab_name_current)
-                                    move_group_in_sheet(wks_today, src_start, src_end, 5)
-                                    clear_trucso_cache()
-                                    st.success("Đã đẩy lên đầu!"); time.sleep(1); st.rerun()
-                                    
-                            if c_m2.button("🔼 Lên 1 bậc", disabled=(p_idx == 0), use_container_width=True):
-                                with st.spinner("Đang đẩy lên..."):
-                                    prev_prod = unique_prods_list[p_idx - 1]
-                                    prev_group_df = df_context_st[df_context_st['NỘI DUNG_GROUP'] == prev_prod]
-                                    dest_index = min(prev_group_df.index) + 5
-                                    
-                                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                    wks_today = sh_trucso.worksheet(tab_name_current)
-                                    move_group_in_sheet(wks_today, src_start, src_end, dest_index)
-                                    clear_trucso_cache()
-                                    st.success("Đã đẩy lên 1 bậc!"); time.sleep(1); st.rerun()
-                                    
-                            if c_m3.button("🔽 Xuống 1 bậc", disabled=(p_idx == len(unique_prods_list) - 1), use_container_width=True):
-                                with st.spinner("Đang kéo xuống..."):
-                                    next_prod = unique_prods_list[p_idx + 1]
-                                    next_group_df = df_context_st[df_context_st['NỘI DUNG_GROUP'] == next_prod]
-                                    dest_index = max(next_group_df.index) + 6
-                                    
-                                    sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                    wks_today = sh_trucso.worksheet(tab_name_current)
-                                    move_group_in_sheet(wks_today, src_start, src_end, dest_index)
-                                    clear_trucso_cache()
-                                    st.success("Đã kéo xuống 1 bậc!"); time.sleep(1); st.rerun()
-                                    
-                            st.write("---")
-                            
-                            link_duyet_vals = [str(x) for x in group_df['LINK DUYỆT'].tolist() if str(x).strip() and str(x).lower() not in ['nan', '<na>', 'none']]
-                            raw_link_duyet = "\n\n".join(link_duyet_vals)
-                            current_text, current_link = split_text_link(raw_link_duyet)
-                            
-                            current_status_val = get_smart_status(group_df)
-                            is_already_done = any(s in current_status_val.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"])
-                            
-                            st.markdown("🤖 **AI CẢNH BÁO RỦI RO**")
-                            with st.container(border=True):
-                                st.info("Hệ thống tự động rà soát lỗi chính tả, ngữ pháp và một số lỗi rủi ro có khả năng xảy ra.")
-                                
-                                c_ai1, c_ai2 = st.columns([1, 1])
-                                auto_scan = c_ai1.checkbox("🔄 Tự động hiển thị kết quả quét", value=True)
-                                btn_scan = c_ai2.button("⚡ RÀ SOÁT LẠI BẰNG AI")
-                                
-                                if not current_text or len(current_text.strip()) < 10:
-                                    st.warning("Chưa có đủ nội dung văn bản (Text bài đăng) để rà soát.")
-                                elif is_already_done and not btn_scan:
-                                    st.success("✅ Bài viết này đã được phê duyệt hoặc đã đăng. (Bỏ qua rà soát AI để tiết kiệm tài nguyên).")
-                                else:
-                                    text_hash = hashlib.md5(current_text.encode('utf-8')).hexdigest()
-                                    cache_key = f"ai_res_{text_hash}"
-                                    
-                                    if btn_scan or (auto_scan and cache_key not in st.session_state):
-                                        with st.spinner("🤖 AI đang phân tích văn bản để đưa ra gợi ý, cảnh báo..."):
-                                            ans = _call_api(current_text, get_ai_api_key(), str(st.secrets.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))).strip(), get_vn_time().strftime("%d/%m/%Y"))
-                                            st.session_state[cache_key] = ans
-                                    
-                                    if cache_key in st.session_state:
-                                        ans = st.session_state[cache_key]
-                                        if "⚠️" in ans or "⚪" in ans:
-                                            st.warning(ans)
-                                        elif "nội dung an toàn" in ans.lower() or "đủ điều kiện" in ans.lower() or "ít rủi ro" in ans.lower():
-                                            st.success("✅ " + ans)
-                                        else:
-                                            st.error("🚨 HỆ THỐNG PHÁT HIỆN CÓ RỦI RO HOẶC SAI SÓT TRONG BÀI VIẾT NÀY!")
-                                            with st.container(height=350):
-                                                st.markdown(ans)
-                            
-                            with st.expander("🗑️ QUẢN LÝ XÓA BÀI VIẾT / NỀN TẢNG", expanded=False):
-                                st.warning("Hành động này sẽ xóa dữ liệu trực tiếp trên Google Sheets. Hãy cẩn trọng!")
-                                c_del_1, c_del_2 = st.columns(2)
-                                
-                                with c_del_1:
-                                    if st.button("🗑️ XÓA TOÀN BỘ BÀI VIẾT NÀY", type="primary", use_container_width=True):
-                                        with st.spinner("Đang xóa an toàn..."):
-                                            sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                            wks_today = sh_trucso.worksheet(tab_name_current)
-                                            min_idx = min(group_df.index)
-                                            max_idx = max(group_df.index)
-                                            start_row = int(min_idx) + 5
-                                            end_row = int(max_idx) + 5 + 1
-                                            del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": end_row}}}
-                                            wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                            clear_trucso_cache()
-                                            st.success("Đã xóa bài viết thành công!"); time.sleep(1); st.rerun()
+# Tách dữ liệu Seeding để dùng cho bảng Seeding bên dưới
+                _, df_seeding_st = get_realtime_summary(tab_name_current)
 
-                                with c_del_2:
-                                    for i, r in group_df.iterrows():
-                                        nentang = r['NỀN TẢNG']
-                                        if st.button(f"❌ Xóa nền tảng: {nentang}", key=f"del_out_{i}", use_container_width=True):
-                                            with st.spinner(f"Đang xóa {nentang}..."):
-                                                sh_trucso = ket_noi_sheet(LINK_VO_TRUC_SO)
-                                                wks_today = sh_trucso.worksheet(tab_name_current)
-                                                
-                                                if len(group_df) == 1:
-                                                    start_row = int(i) + 5
-                                                    del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": start_row, "endIndex": start_row + 1}}}
-                                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                                else:
-                                                    if i == min(group_df.index):
-                                                        next_idx = i + 1
-                                                        sheet_r_next = int(next_idx) + 6 
-                                                        cells_to_rescue = [
-                                                            gspread.Cell(sheet_r_next, 2, str(first_row_data.get('NỘI DUNG_GROUP', ''))),
-                                                            gspread.Cell(sheet_r_next, 6, str(first_row_data.get('CHECK', ''))),
-                                                            gspread.Cell(sheet_r_next, 7, str(first_row_data.get('NGUỒN', ''))),
-                                                            gspread.Cell(sheet_r_next, 8, str(first_row_data.get('NHÂN SỰ', ''))),
-                                                            gspread.Cell(sheet_r_next, 9, str(first_row_data.get('TCSX', ''))),
-                                                            gspread.Cell(sheet_r_next, 10, str(first_row_data.get('LĐP', ''))),
-                                                            gspread.Cell(sheet_r_next, 11, str(first_row_data.get('GIỜ ĐĂNG', ''))),
-                                                            gspread.Cell(sheet_r_next, 12, str(first_row_data.get('NGÀY ĐĂNG', ''))),
-                                                            gspread.Cell(sheet_r_next, 13, str(first_row_data.get('LINK SẢN PHẨM', ''))),
-                                                            gspread.Cell(sheet_r_next, 14, str(first_row_data.get('LINK DUYỆT', ''))),
-                                                        ]
-                                                        wks_today.update_cells(cells_to_rescue)
-                                                    
-                                                    row_0_based = int(i) + 5
-                                                    del_req = {"deleteDimension": {"range": {"sheetId": wks_today.id, "dimension": "ROWS", "startIndex": row_0_based, "endIndex": row_0_based + 1}}}
-                                                    wks_today.spreadsheet.batch_update({"requests": [del_req]})
-                                                clear_trucso_cache()
-                                                st.success("Đã xóa nền tảng thành công!"); time.sleep(1); st.rerun()
-
-                            with st.form("edit_group_form"):
-                                col_left, col_right = st.columns([1.2, 1])
-                                
-                                with col_left:
-                                    st.markdown("**:blue[1. NỘI DUNG BÀI VIẾT]**")
-                                    e_nd = st.text_area("Tên bài / Tiêu đề", value=first_row_data['NỘI DUNG_GROUP'], height=68)
-                                    
-                                    c_ns, c_nguon = st.columns(2)
-                                    e_ns = c_ns.text_input("BTV Thực hiện", value=first_row_data['NHÂN SỰ'])
-                                    e_ng = c_nguon.text_input("Nguồn", value=first_row_data.get('NGUỒN', ''))
-                                    
-                                    st.markdown("---")
-                                    if current_link: st.link_button("▶️ MỞ LINK GOOGLE DRIVE TRONG TAB MỚI", current_link, type="secondary")
-                                    e_texttin = st.text_area("Nội dung Text bài đăng (Caption, Hashtag...)", value=current_text, height=150)
-                                    e_ld = st.text_input("Cập nhật/Sửa Link Drive", value=current_link)
-                                    
-                                    st.markdown("---")
-                                    st.markdown("**:green[2. KHU VỰC NHẬN XÉT, CHỈ ĐẠO & THẨM ĐỊNH]**")
-                                    
-                                    all_old_tcsx = "\n".join(group_df['TCSX'].replace('', pd.NA).dropna().astype(str).tolist())
-                                    all_old_ldp = "\n".join(group_df['LĐP'].replace('', pd.NA).dropna().astype(str).tolist())
-                                    all_old_td = "\n".join(group_df['THẨM ĐỊNH'].replace('', pd.NA).dropna().astype(str).tolist()) if 'THẨM ĐỊNH' in group_df.columns else ""
-                                    
-                                    c_tcsx, c_ldp, c_td = st.columns(3)
-                                    with c_tcsx:
-                                        st.caption("TỔ CHỨC SẢN XUẤT:")
-                                        if all_old_tcsx: st.info(all_old_tcsx)
-                                        else: st.caption("*Chưa có nhận xét*")
-                                        
-                                        e_tcsx_new = st.text_input("TCSX Nhập góp ý:", key=f"in_tcsx_{date_str_display.replace('/', '')}") if is_shift_tcsx else ""
-                                        e_tcsx_ok = st.checkbox("✅ TCSX CHỐT", key=f"chk_tcsx_{date_str_display.replace('/', '')}") if is_shift_tcsx else False
-                                    
-                                    with c_ldp:
-                                        st.caption("LÃNH ĐẠO PHÒNG:")
-                                        if all_old_ldp: st.success(all_old_ldp)
-                                        else: st.caption("*Chưa có nhận xét*")
-                                        
-                                        e_ldp_new = st.text_input("LĐP Nhập chỉ đạo:", key=f"in_ldp_{date_str_display.replace('/', '')}") if is_shift_ldp else ""
-                                        e_ldp_ok = st.checkbox("🚀 LĐP CHỐT", key=f"chk_ldp_{date_str_display.replace('/', '')}") if is_shift_ldp else False
-
-                                    with c_td:
-                                        st.caption("THẨM ĐỊNH:")
-                                        if all_old_td: st.warning(all_old_td)
-                                        else: st.caption("*Chưa có thẩm định*")
-                                        
-                                        e_td_new = st.text_input("Nhập ý kiến Thẩm định:", key=f"in_td_{date_str_display.replace('/', '')}")
-                                        e_td_ok = st.checkbox("🛡️ THẨM ĐỊNH OK", key=f"chk_td_{date_str_display.replace('/', '')}")
-
-                                with col_right:
-                                    st.markdown("**:orange[3. TRẠNG THÁI TỪNG NỀN TẢNG]**")
-                                    st.caption("Cập nhật trạng thái, giờ lên bài hoặc link sản phẩm.")
-                                    
-                                    platform_updates = {}
-                                    fallback_group_time = _parse_post_time(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''))
-                                    fallback_group_date = _parse_post_date(first_row_data.get('THỜI GIAN ĐĂNG BÀI', ''), target_date)
-                                    fallback_group_lsp = str(first_row_data.get('LINK SẢN PHẨM', '')).strip()
-                                    for i, r in group_df.iterrows():
-                                        nentang = r['NỀN TẢNG']
-                                        
-                                        with st.expander(f"🔹 {nentang} (Status: {r['STATUS']})", expanded=False):
-                                            try: idx_st = OPTS_STATUS_TRUCSO.index(r['STATUS'])
-                                            except: idx_st = 0
-                                            st_val = st.selectbox(f"Trạng thái", OPTS_STATUS_TRUCSO, index=idx_st, key=f"st_{i}_{date_str_display.replace('/', '')}")
-                                            
-                                            c_t, c_d = st.columns(2)
-                                            val_time = _parse_post_time(r.get('THỜI GIAN ĐĂNG BÀI', '')) or fallback_group_time
-                                            time_val = c_t.time_input("Giờ xuất bản", value=val_time, step=timedelta(minutes=15), key=f"ti_{i}_{date_str_display.replace('/', '')}")
-                                            
-                                            curr_d_val = _parse_post_date(r.get('THỜI GIAN ĐĂNG BÀI', ''), fallback_group_date)
-                                            date_val = c_d.date_input("Ngày", value=curr_d_val, format="DD/MM/YYYY", key=f"da_{i}_{date_str_display.replace('/', '')}")
-                                            
-                                            lsp_val = st.text_input("Link Sản phẩm đã lên", value=r.get('LINK SẢN PHẨM', '') or fallback_group_lsp, key=f"lsp_{i}_{date_str_display.replace('/', '')}")
-                                            
-                                            platform_updates[i] = {
-                                                'STATUS': st_val, 'TIME': time_val, 'DATE': date_val, 'LINK_SP': lsp_val
-                                            }
-
-                                st.markdown("<br>", unsafe_allow_html=True)
-                                submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
-                                with submit_col2:
-                                    if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", use_container_width=True, type="primary"):
-                                        merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
-                                        final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
-                                        final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
-                                        final_td = build_appended_comment(all_old_td, e_td_new, e_td_ok)
-                                        
-                                        AI_ENGINE["executor"].submit(bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns, final_tcsx, final_ldp, final_td, merged_link_duyet_update, platform_updates)
-                                        
-                                        st.success("✅ Đã ghi nhận! Hệ thống đang tự động đồng bộ ngầm.")
-                                        time.sleep(0.5)
-                                        clear_cache_and_rerun()
-                
-                st.divider()
-
-                # ================= FRAGMENT 2: BẢNG THỐNG KÊ CHI TIẾT =================
+                # ================= BẢNG THỐNG KÊ TIN BÀI TƯƠNG TÁC (CLICK MỞ POPUP) =================
                 @st.fragment(run_every="20s")
                 def render_bottom_tables(current_filter):
                     df_summary, df_seeding = get_realtime_summary(tab_name_current)
-                    if not df_summary.empty:
-                        st.markdown("##### 📋 BẢNG THỐNG KÊ TIN BÀI")
-                        df_show = df_summary.copy()
-                        if current_filter != "Tất cả": df_show = df_show[df_show["Tiến độ"] == current_filter]
-                        
-                        st.dataframe(
-                            df_show, 
-                            use_container_width=True, 
-                            hide_index=True,
-                            column_config={
-                                "Sản phẩm": st.column_config.TextColumn("Sản phẩm", width="large"),
-                                "BTV": st.column_config.TextColumn("BTV", width="medium"),
-                                "Tiến độ": st.column_config.TextColumn("Tiến độ", width="medium"),
-                                "Nền tảng": st.column_config.TextColumn("Nền tảng", width="medium"),
-                                "Giờ đăng": st.column_config.TextColumn("Giờ đăng", width="small"),
-                                "Ngày đăng": st.column_config.TextColumn("Ngày đăng", width="small"),
-                            }
-                        )
+                    if df_summary.empty:
+                        st.info("📭 Chưa có bài viết nào trong Vỏ trực số ngày hôm nay.")
+                        return
+
+                    # Cảnh báo nổi bật trên đầu bảng nếu có bài còn < 1 tiếng đến giờ đăng mà chưa duyệt
+                    df_urgent = df_summary[df_summary["Is_Urgent"] == True]
+                    if not df_urgent.empty:
+                        with st.container(border=True):
+                            st.error(f"⏰ **CẢNH BÁO KHẨN CẤP: CÓ {len(df_urgent)} BÀI SẮP ĐẾN GIỜ ĐĂNG (< 1 TIẾNG) HOẶC QUÁ GIỜ NHƯNG CHƯA DUYỆT XONG!**")
+                            for _, u_row in df_urgent.iterrows():
+                                st.markdown(
+                                    f"- **{u_row['Urgent_Msg']}** | Bài: **{u_row['Sản phẩm'][:70]}** "
+                                    f"*(BTV: {u_row['BTV']} — Giờ đăng: `{u_row['Thời gian đăng bài']}` — Trạng thái: {u_row['Tiến độ']})*"
+                                )
+
+                    st.markdown("##### 📋 BẢNG ĐIỀU PHỐI & THỐNG KÊ TIN BÀI (BẤM VÀO TỪNG DÒNG ĐỂ DUYỆT / SỬA)")
+                    df_show = df_summary.copy()
+                    if current_filter == "🔥 Sắp đến giờ (<1h) chưa xong":
+                        df_show = df_show[df_show["Is_Urgent"] == True]
+                    elif current_filter == "⏳ Chờ TCSX/LĐP chưa duyệt":
+                        df_show = df_show[df_show["Tiến độ"] != "✅ Đã duyệt"]
+                    elif current_filter and current_filter != "Tất cả":
+                        df_show = df_show[df_show["Tiến độ"] == current_filter]
+
+                    if df_show.empty:
+                        st.info("📭 Không có bài viết nào trong bộ lọc này.")
+                    else:
+                        # Mặc định giữ nguyên thứ tự chuẩn như trên Google Sheet
+                        for idx_row, row_item in df_show.iterrows():
+                            prod_title = row_item["Sản phẩm"]
+                            is_urg = bool(row_item.get("Is_Urgent", False))
+                            is_app = (row_item["Tiến độ"] == "✅ Đã duyệt")
+                            card_cls = "post-card-row urgent" if is_urg else ("post-card-row approved" if is_app else "post-card-row")
+
+                            # Tạo badge nền tảng màu sắc giống bảng lịch giờ đăng
+                            plat_html_list = []
+                            for p_raw in str(row_item.get("Nền tảng", "")).split(","):
+                                p_clean = _canonical_platform(p_raw.strip())
+                                if p_clean:
+                                    p_lbl, p_col = PLATFORM_BADGE_STYLE.get(p_clean, (p_clean, "#1877f2"))
+                                    plat_html_list.append(f'<span class="plat-chip" style="background:{p_col};">{html_lib.escape(p_lbl)}</span>')
+                            plats_html = "".join(plat_html_list) or '<span style="color:#888;font-size:11px;">Chưa chọn nền tảng</span>'
+
+                            urg_html = f'<div class="urgent-badge">{html_lib.escape(row_item["Urgent_Msg"])}</div>' if is_urg else ""
+                            ai_txt = row_item.get("AI_Badge", "")
+                            ai_bg = "#d1fae5;color:#065f46;" if "Ít rủi ro" in ai_txt else ("#fee2e2;color:#991b1b;" if "góp ý" in ai_txt else "#f3f4f6;color:#374151;")
+                            ai_html = f'<span class="ai-mini-badge" style="background:{ai_bg}">{html_lib.escape(ai_txt)}</span>' if ai_txt else ""
+
+                            safe_title = html_lib.escape(prod_title)
+                            safe_btv = html_lib.escape(row_item["BTV"])
+                            safe_tg = html_lib.escape(row_item["Thời gian đăng bài"])
+                            safe_st = html_lib.escape(row_item["Tiến độ"])
+                            safe_fmt = html_lib.escape(row_item.get("Định dạng", "") or "Tin bài")
+                            safe_src = html_lib.escape(row_item.get("Nguồn", "") or "--")
+
+                            c_card, c_links, c_action = st.columns([5.2, 1.3, 1.1])
+                            with c_card:
+                                st.markdown(
+                                    f'<div class="{card_cls}">'
+                                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">'
+                                    f'<div style="flex:1;min-width:240px;">'
+                                    f'<div style="font-size:13.5px;font-weight:700;color:#1c1e21;line-height:1.35;margin-bottom:4px;">'
+                                    f'<span style="color:#1877f2;">#{row_item.get("STT", idx_row+1)}</span> — {safe_title}</div>'
+                                    f'<div>{plats_html} <span style="font-size:11.5px;color:#65676b;">🎬 {safe_fmt} | 📂 Nguồn: <b>{safe_src}</b></span></div>'
+                                    f'</div>'
+                                    f'<div style="text-align:right;min-width:190px;">'
+                                    f'<div style="font-size:12.5px;font-weight:700;">{safe_st}</div>'
+                                    f'<div style="font-size:12px;color:#4b4f56;margin-top:2px;">👤 <b>{safe_btv}</b> | 🕒 <b>{safe_tg}</b></div>'
+                                    f'{ai_html} {urg_html}'
+                                    f'</div>'
+                                    f'</div>'
+                                    f'</div>',
+                                    unsafe_allow_html=True
+                                )
+                            with c_links:
+                                l_duyet = str(row_item.get("Link duyệt", "")).strip()
+                                l_sp = str(row_item.get("Link SP", "")).strip()
+                                if l_duyet:
+                                    full_d = l_duyet if l_duyet.startswith("http") else f"https://{l_duyet}"
+                                    st.link_button("▶️ Link Duyệt", full_d, use_container_width=True)
+                                if l_sp:
+                                    full_s = l_sp if l_sp.startswith("http") else f"https://{l_sp}"
+                                    st.link_button("🌐 Link Đã Đăng", full_s, use_container_width=True)
+                                if not l_duyet and not l_sp:
+                                    st.caption("*(Chưa gắn link)*")
+                            with c_action:
+                                if st.button("⚡ Duyệt / Sửa", key=f"open_mdl_{idx_row}_{tab_name_current}", type="primary" if is_urg else "secondary", use_container_width=True):
+                                    open_post_popup(prod_title, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp)
 
                     seeding_clean = []
                     if not df_seeding.empty:
@@ -3456,12 +3630,10 @@ else:
                         st.markdown("---")
                         st.markdown("##### 🚀 DANH SÁCH NHIỆM VỤ SEEDING & QUẢNG BÁ (CẬP NHẬT TRỰC TIẾP TỪ SHEET)")
                         st.dataframe(
-                            pd.DataFrame(seeding_clean), 
-                            use_container_width=True, 
+                            pd.DataFrame(seeding_clean),
+                            use_container_width=True,
                             hide_index=True,
-                            column_config={
-                                "Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large"),
-                            }
+                            column_config={"Nhiệm vụ": st.column_config.TextColumn("Nhiệm vụ", width="large")}
                         )
 
                 # ================= FORM THÊM BÀI MỚI (BỔ SUNG GIỜ ĐĂNG & NGÀY ĐĂNG) =================
