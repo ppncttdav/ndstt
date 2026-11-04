@@ -32,6 +32,137 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
 st.markdown("""
 <style>
+/* CSS cho Bảng cuộn Timeline & Meta Planner */
+    .meta-planner-wrap {
+        border: 1px solid #dfe3e8;
+        border-radius: 12px;
+        background: #f8f9fa;
+        max-height: 640px;
+        overflow: auto;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+    .meta-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+    }
+    .meta-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: #ffffff;
+        color: #1c1e21;
+        font-weight: 700;
+        padding: 12px 10px;
+        border-bottom: 2px solid #e4e6eb;
+        border-right: 1px solid #eef0f3;
+        text-align: center;
+        min-width: 195px;
+    }
+    .meta-table thead th.time-col-hdr {
+        position: sticky;
+        left: 0;
+        z-index: 30;
+        min-width: 92px;
+        max-width: 92px;
+        background: #f0f2f5;
+    }
+    .meta-table tbody td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #ebedf0;
+        border-right: 1px solid #eef0f3;
+        vertical-align: top;
+        background: #ffffff;
+    }
+    .meta-table tbody tr.slot-busy td {
+        background: #fbfcfe;
+    }
+    .meta-table tbody td.time-cell {
+        position: sticky;
+        left: 0;
+        z-index: 10;
+        background: #f7f8fa;
+        font-weight: 700;
+        color: #4b4f56;
+        text-align: center;
+        vertical-align: middle;
+        border-right: 2px solid #dfe3e8;
+        font-size: 12.5px;
+    }
+    .meta-card {
+        background: #ffffff;
+        border: 1px solid #d8dfea;
+        border-left: 4px solid #1877f2;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        text-align: left;
+    }
+    .meta-card.conflict {
+        border: 1.5px solid #dc3545 !important;
+        border-left: 5px solid #dc3545 !important;
+        background: #fff5f5 !important;
+    }
+    .meta-card.cross-warn {
+        border: 1.5px solid #fd7e14 !important;
+        border-left: 5px solid #fd7e14 !important;
+        background: #fff9f2 !important;
+    }
+    .meta-card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+        font-size: 11.5px;
+        font-weight: 700;
+    }
+    .meta-time-badge {
+        background: #e7f3ff;
+        color: #1877f2;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 700;
+    }
+    .meta-time-badge.conflict-badge {
+        background: #dc3545;
+        color: #ffffff;
+    }
+    .meta-card-title {
+        font-weight: 600;
+        color: #1c1e21;
+        font-size: 12.5px;
+        line-height: 1.35;
+        margin-bottom: 4px;
+        word-break: break-word;
+    }
+    .meta-card-sub {
+        font-size: 11px;
+        color: #65676b;
+        display: flex;
+        justify-content: space-between;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+    .slot-empty-pill {
+        color: #b0b3b8;
+        font-size: 11px;
+        text-align: center;
+        padding: 6px 2px;
+        border: 1px dashed #e4e6eb;
+        border-radius: 6px;
+    }
+    .slot-cooldown-pill {
+        color: #d97706;
+        background: #fffbeb;
+        font-size: 11px;
+        text-align: center;
+        padding: 5px 4px;
+        border: 1px dashed #fcd34d;
+        border-radius: 6px;
+    }
 /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
 [data-stale="true"], div[data-stale="true"] {
     opacity: 1 !important;
