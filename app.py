@@ -83,147 +83,75 @@ st.markdown("""
         font-weight: 600;
         margin-top: 3px;
     }
-    <style>
-    /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
-    [data-stale="true"], div[data-stale="true"] {
-        opacity: 1 !important;
-        filter: none !important;
-        transition: none !important;
-        pointer-events: auto !important;
-    }
-    /* CSS cho Bảng cuộn Timeline & Meta Planner */
-    .meta-planner-wrap {
-        border: 1px solid #dfe3e8;
-        border-radius: 12px;
-        background: #f8f9fa;
-        max-height: 640px;
-        overflow: auto;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
-    }
-    .meta-table {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 13px;
-    }
-    .meta-table thead th {
-        position: sticky;
-        top: 0;
-        z-index: 20;
-        background: #ffffff;
-        color: #1c1e21;
-        font-weight: 700;
-        padding: 12px 10px;
-        border-bottom: 2px solid #e4e6eb;
-        border-right: 1px solid #eef0f3;
-        text-align: center;
-        min-width: 195px;
-    }
-    .meta-table thead th.time-col-hdr {
-        position: sticky;
-        left: 0;
-        z-index: 30;
-        min-width: 92px;
-        max-width: 92px;
-        background: #f0f2f5;
-    }
-    .meta-table tbody td {
-        padding: 6px 8px;
-        border-bottom: 1px solid #ebedf0;
-        border-right: 1px solid #eef0f3;
-        vertical-align: top;
-        background: #ffffff;
-    }
-    .meta-table tbody tr.slot-busy td {
-        background: #fbfcfe;
-    }
-    .meta-table tbody td.time-cell {
-        position: sticky;
-        left: 0;
-        z-index: 10;
-        background: #f7f8fa;
-        font-weight: 700;
-        color: #4b4f56;
-        text-align: center;
-        vertical-align: middle;
-        border-right: 2px solid #dfe3e8;
-        font-size: 12.5px;
-    }
-    .meta-card {
-        background: #ffffff;
-        border: 1px solid #d8dfea;
-        border-left: 4px solid #1877f2;
-        border-radius: 8px;
-        padding: 8px 10px;
-        margin-bottom: 6px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-        text-align: left;
-    }
-    .meta-card.conflict {
-        border: 1.5px solid #dc3545 !important;
-        border-left: 5px solid #dc3545 !important;
-        background: #fff5f5 !important;
-    }
-    .meta-card.cross-warn {
-        border: 1.5px solid #fd7e14 !important;
-        border-left: 5px solid #fd7e14 !important;
-        background: #fff9f2 !important;
-    }
-    .meta-card-top {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 4px;
-        font-size: 11.5px;
-        font-weight: 700;
-    }
-    .meta-time-badge {
-        background: #e7f3ff;
-        color: #1877f2;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-weight: 700;
-    }
-    .meta-time-badge.conflict-badge {
-        background: #dc3545;
-        color: #ffffff;
-    }
-    .meta-card-title {
-        font-weight: 600;
-        color: #1c1e21;
-        font-size: 12.5px;
-        line-height: 1.35;
-        margin-bottom: 4px;
-        word-break: break-word;
-    }
-    .meta-card-sub {
-        font-size: 11px;
-        color: #65676b;
-        display: flex;
-        justify-content: space-between;
-        gap: 4px;
-        flex-wrap: wrap;
-    }
-    .slot-empty-pill {
-        color: #b0b3b8;
-        font-size: 11px;
-        text-align: center;
-        padding: 6px 2px;
-        border: 1px dashed #e4e6eb;
-        border-radius: 6px;
-    }
-    .slot-cooldown-pill {
-        color: #d97706;
-        background: #fffbeb;
-        font-size: 11px;
-        text-align: center;
-        padding: 5px 4px;
-        border: 1px dashed #fcd34d;
-        border-radius: 6px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+    # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
+st.html("""
+<style>
+/* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
+[data-stale="true"], div[data-stale="true"] {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
+    pointer-events: auto !important;
+}
+/* CSS cho Bảng Thống Kê Tin Bài Tương Tác (Khung cuộn cố định) */
+.post-list-container {
+    max-height: 600px;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+.post-card-row {
+    background: #ffffff;
+    border: 1px solid #dfe3e8;
+    border-left: 5px solid #1877f2;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    transition: all 0.15s ease-in-out;
+}
+.post-card-row:hover {
+    box-shadow: 0 4px 10px rgba(24,119,242,0.1);
+    border-color: #b0c4de;
+}
+.post-card-row.urgent {
+    border: 1px solid #dc3545 !important;
+    border-left: 5px solid #dc3545 !important;
+    background: #fff5f5 !important;
+}
+.post-card-row.approved {
+    border-left: 5px solid #28a745 !important;
+    background: #f9fffb !important;
+}
+.urgent-badge {
+    display: inline-block;
+    background: #dc3545;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+.plat-chip {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-right: 4px;
+    margin-bottom: 2px;
+}
+.ai-mini-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 3px;
+}
+</style>
+""")
 
 SHEET_MAIN = str(st.secrets.get("sheet_main", os.getenv("SHEET_MAIN", "HeThongQuanLy"))).strip()
 SHEET_TRUCSO = "VoTrucSo"
@@ -346,11 +274,19 @@ def _bg_task(text, api_key, model_name, today_str, text_hash):
     finally:
         if text_hash in AI_ENGINE["queue"]: AI_ENGINE["queue"].remove(text_hash)
 
-def queue_bg_scan(text, smart_status=""):
-    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled"]): return
+def queue_bg_scan(text, smart_status="", post_date_str=""):
+    # 1. Bỏ qua nếu đã duyệt/đã đăng hoặc hủy
+    if any(s in smart_status.lower() for s in ["đã duyệt", "đã đăng", "posted", "scheduled", "hủy"]): return
     if not text or len(text.strip()) < 10: return
-    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
     
+    # 2. Bỏ qua nếu là bài của ngày hôm qua trở về trước
+    if post_date_str:
+        try:
+            d_obj = datetime.strptime(post_date_str, "%d/%m/%Y").date()
+            if d_obj < get_vn_today(): return
+        except Exception: pass
+
+    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
     if text_hash in AI_ENGINE["cache"] or text_hash in AI_ENGINE["queue"]: return
     
     api_key = get_ai_api_key()
@@ -2394,15 +2330,55 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
                         ["Chỉ nền tảng đang chọn", "Tất cả nền tảng của bài này"],
                         key=f"{key_prefix}_qscope"
                     )
-                    if st.form_submit_button("💾 CẬP NHẬT LỊCH ĐĂNG NGAY", type="primary"):
-                        chosen_p = options_map[sel_post_lbl]
-                        target_rows = [chosen_p["row_idx"]] if apply_scope == "Chỉ nền tảng đang chọn" else chosen_p["group_indices"]
-                        t_str_formatted = new_q_time.strftime("%H:%M:%S") if new_q_time else ""
-                        d_str_formatted = new_q_date.strftime("%d/%m/%Y")
-                        AI_ENGINE["executor"].submit(bg_quick_reschedule, chosen_p["tab_source"], target_rows, t_str_formatted, d_str_formatted)
-                        st.success(f"✅ Đã xếp lịch '{chosen_p['title']}' vào lúc {new_q_time.strftime('%H:%M')} ngày {d_str_formatted}!")
-                        time.sleep(0.6)
-                        clear_cache_and_rerun()
+                    st.markdown("---")
+    if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", type="primary", use_container_width=True):
+        merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
+        
+        # Nếu BTV cập nhật text thì gọi AI quét ngầm luôn
+        if e_texttin and len(e_texttin.strip()) >= 10:
+            queue_bg_scan(e_texttin.strip(), "", post_date_str=date_str_display)
+
+        # ================= LOGIC TỰ ĐỘNG ĐỔI TRẠNG THÁI (SMART AUTO-STATUS) =================
+        ok_keywords = ["ok", "duyệt", "done", "nhất trí", "tốt", "được", "triển khai", "lên đi", "oke", "okie"]
+        
+        has_tcsx_cmt = bool(e_tcsx_new.strip())
+        has_ldp_cmt = bool(e_ldp_new.strip())
+        
+        tcsx_is_ok = e_tcsx_ok or any(w in e_tcsx_new.lower() for w in ok_keywords)
+        ldp_is_ok = e_ldp_ok or any(w in e_ldp_new.lower() for w in ok_keywords)
+
+        for idx, st_val in platform_updates.items():
+            curr_st = st_val['STATUS']
+            # Không ghi đè nếu bài đã hoàn thành hoặc người dùng cố tình tự chọn trạng thái Đã đăng
+            if curr_st in ["✅ Đã duyệt", "✅ Đã đăng", "Posted", "Scheduled", "Hủy"]:
+                continue
+                
+            # Rule 4: LĐP OK hoặc tick duyệt -> Chờ đăng
+            if ldp_is_ok:
+                st_val['STATUS'] = "Đã duyệt/Chờ đăng"
+            # Rule 2: Nhận xét nhưng không có chữ OK -> Yêu cầu sửa
+            elif has_ldp_cmt and not ldp_is_ok:
+                st_val['STATUS'] = "Yêu cầu sửa (LĐP)"
+            elif has_tcsx_cmt and not tcsx_is_ok:
+                st_val['STATUS'] = "Yêu cầu sửa (TCSX)"
+            # Rule 3: TCSX OK -> Gửi LĐP
+            elif tcsx_is_ok:
+                st_val['STATUS'] = "Gửi duyệt LĐP"
+            # Rule 1: Mới dán link Drive mà chưa ai nhận xét -> Gửi TCSX
+            elif e_ld.strip() and curr_st in ["Chờ xử lý", "Đang biên tập", "📝 BTV đang hoàn thiện"]:
+                st_val['STATUS'] = "Gửi duyệt TCSX"
+
+        final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
+        final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
+        final_td = build_appended_comment(all_old_td, e_td_new, e_td_ok)
+
+        AI_ENGINE["executor"].submit(
+            bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns,
+            final_tcsx, final_ldp, final_td, merged_link_duyet_update, platform_updates
+        )
+        st.success("✅ Đã lưu! Phân tích ngôn ngữ báo trạng thái đã tự động cập nhật.")
+        time.sleep(0.4)
+        clear_cache_and_rerun()
 
     else:
         # CHẾ ĐỘ XEM LỊCH TUẦN (7 NGÀY KIỂU META PLANNER)
@@ -3551,14 +3527,14 @@ else:
                     if df_show.empty:
                         st.info("📭 Không có bài viết nào trong bộ lọc này.")
                     else:
-                        # Mặc định giữ nguyên thứ tự chuẩn như trên Google Sheet
+                        # Bọc toàn bộ danh sách thẻ vào thẻ div scroll
+                        st.markdown('<div class="post-list-container">', unsafe_allow_html=True)
                         for idx_row, row_item in df_show.iterrows():
                             prod_title = row_item["Sản phẩm"]
                             is_urg = bool(row_item.get("Is_Urgent", False))
                             is_app = (row_item["Tiến độ"] == "✅ Đã duyệt")
                             card_cls = "post-card-row urgent" if is_urg else ("post-card-row approved" if is_app else "post-card-row")
 
-                            # Tạo badge nền tảng màu sắc giống bảng lịch giờ đăng
                             plat_html_list = []
                             for p_raw in str(row_item.get("Nền tảng", "")).split(","):
                                 p_clean = _canonical_platform(p_raw.strip())
@@ -3576,7 +3552,6 @@ else:
                             safe_btv = html_lib.escape(row_item["BTV"])
                             safe_tg = html_lib.escape(row_item["Thời gian đăng bài"])
                             safe_st = html_lib.escape(row_item["Tiến độ"])
-                            safe_fmt = html_lib.escape(row_item.get("Định dạng", "") or "Tin bài")
                             safe_src = html_lib.escape(row_item.get("Nguồn", "") or "--")
 
                             c_card, c_links, c_action = st.columns([5.2, 1.3, 1.1])
@@ -3587,7 +3562,7 @@ else:
                                     f'<div style="flex:1;min-width:240px;">'
                                     f'<div style="font-size:13.5px;font-weight:700;color:#1c1e21;line-height:1.35;margin-bottom:4px;">'
                                     f'<span style="color:#1877f2;">#{row_item.get("STT", idx_row+1)}</span> — {safe_title}</div>'
-                                    f'<div>{plats_html} <span style="font-size:11.5px;color:#65676b;">🎬 {safe_fmt} | 📂 Nguồn: <b>{safe_src}</b></span></div>'
+                                    f'<div>{plats_html} <span style="font-size:11.5px;color:#65676b;">📂 Nguồn: <b>{safe_src}</b></span></div>'
                                     f'</div>'
                                     f'<div style="text-align:right;min-width:190px;">'
                                     f'<div style="font-size:12.5px;font-weight:700;">{safe_st}</div>'
@@ -3598,6 +3573,21 @@ else:
                                     f'</div>',
                                     unsafe_allow_html=True
                                 )
+                            with c_links:
+                                l_duyet = str(row_item.get("Link duyệt", "")).strip()
+                                l_sp = str(row_item.get("Link SP", "")).strip()
+                                if l_duyet:
+                                    full_d = l_duyet if l_duyet.startswith("http") else f"https://{l_duyet}"
+                                    st.link_button("▶️ Mở Nháp", full_d, use_container_width=True)
+                                if l_sp:
+                                    full_s = l_sp if l_sp.startswith("http") else f"https://{l_sp}"
+                                    st.link_button("🌐 Đã Đăng", full_s, use_container_width=True)
+                                if not l_duyet and not l_sp:
+                                    st.caption("*(Chưa gắn link)*")
+                            with c_action:
+                                if st.button("⚡ Duyệt / Sửa", key=f"open_mdl_{idx_row}_{tab_name_current}", type="primary" if is_urg else "secondary", use_container_width=True):
+                                    open_post_popup(prod_title, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp)
+                        st.markdown('</div>', unsafe_allow_html=True)
                             with c_links:
                                 l_duyet = str(row_item.get("Link duyệt", "")).strip()
                                 l_sp = str(row_item.get("Link SP", "")).strip()
