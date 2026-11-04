@@ -3533,7 +3533,7 @@ else:
                             with c_action:
                                 if st.button("⚡ Duyệt / Sửa", key=f"open_mdl_{idx_row}_{tab_name_current}", type="primary" if is_urg else "secondary", use_container_width=True):
                                     open_post_popup(prod_title, tab_name_current, target_date, list_nv, curr_name, is_shift_tcsx, is_shift_ldp)
-                        st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                             with c_links:
                                 l_duyet = str(row_item.get("Link duyệt", "")).strip()
                                 l_sp = str(row_item.get("Link SP", "")).strip()
