@@ -84,7 +84,8 @@ st.markdown("""
         margin-top: 3px;
     }
     # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
-st.html("""
+# --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
+st.markdown("""
 <style>
 /* Ép Streamlit không được làm mờ khối dữ liệu khi Reload */
 [data-stale="true"], div[data-stale="true"] {
@@ -151,7 +152,7 @@ st.html("""
     margin-top: 3px;
 }
 </style>
-""")
+""", unsafe_allow_html=True)
 
 SHEET_MAIN = str(st.secrets.get("sheet_main", os.getenv("SHEET_MAIN", "HeThongQuanLy"))).strip()
 SHEET_TRUCSO = "VoTrucSo"
