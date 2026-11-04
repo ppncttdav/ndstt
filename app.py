@@ -2852,7 +2852,7 @@ else:
                             idx = i + 4
                             if idx < len(roster_names_current): cols_2[i].markdown(f"<p style='color:gray; font-size:12px; margin-bottom:0px;'>{r_roles_current[idx]}</p><b>{roster_names_current[idx]}</b>", unsafe_allow_html=True)
                     except: pass
-
+                filter_opt = st.pills("Bộ lọc", ["Tất cả", "🚨 Cảnh báo rủi ro", "🔴 Cần sửa", "🔄 BTV đã sửa", "👀 Chờ TCSX duyệt", "⏳ Chờ LĐP duyệt", "✅ Đã duyệt"], default="Tất cả", label_visibility="collapsed", key=f"filter_opt_{date_key}")
                 # ================= KHỐI HÀM XỬ LÝ DỮ LIỆU CHUNG =================
                 def get_realtime_summary(tab_name):
                     _, df_content, _, _ = fetch_vo_truc_so(tab_name)
