@@ -31,58 +31,6 @@ st.set_page_config(page_title="PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG", page_i
 
 # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
 st.markdown("""
-    /* CSS cho Bảng Thống Kê Tin Bài Tương Tác (Phong cách Meta Planner) */
-    .post-card-row {
-        background: #ffffff;
-        border: 1px solid #dfe3e8;
-        border-left: 5px solid #1877f2;
-        border-radius: 10px;
-        padding: 10px 14px;
-        margin-bottom: 4px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.03);
-        transition: all 0.15s ease-in-out;
-    }
-    .post-card-row:hover {
-        box-shadow: 0 4px 12px rgba(24,119,242,0.12);
-        border-color: #b0c4de;
-    }
-    .post-card-row.urgent {
-        border: 1.5px solid #dc3545 !important;
-        border-left: 6px solid #dc3545 !important;
-        background: #fff5f5 !important;
-    }
-    .post-card-row.approved {
-        border-left: 5px solid #28a745 !important;
-        background: #f9fffb !important;
-    }
-    .urgent-badge {
-        display: inline-block;
-        background: #dc3545;
-        color: #ffffff;
-        font-size: 11.5px;
-        font-weight: 700;
-        padding: 2px 8px;
-        border-radius: 5px;
-        margin-top: 4px;
-    }
-    .plat-chip {
-        display: inline-block;
-        padding: 2px 7px;
-        border-radius: 5px;
-        font-size: 11px;
-        font-weight: 600;
-        color: #ffffff;
-        margin-right: 4px;
-        margin-bottom: 3px;
-    }
-    .ai-mini-badge {
-        display: inline-block;
-        padding: 2px 7px;
-        border-radius: 5px;
-        font-size: 11px;
-        font-weight: 600;
-        margin-top: 3px;
-    }
     # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
 # --- MÃ CSS TÀNG HÌNH CHỐNG CHỚP/MỜ MÀN HÌNH & GIAO DIỆN META PLANNER ---
 st.markdown("""
