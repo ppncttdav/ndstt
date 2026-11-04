@@ -2277,7 +2277,7 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
                         key=f"{key_prefix}_qscope"
                     )
                     st.markdown("---")
-    if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", type="primary", use_container_width=True):
+                    if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", type="primary", use_container_width=True):
         merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
         
         # Nếu BTV cập nhật text thì gọi AI quét ngầm luôn
