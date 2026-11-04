@@ -2277,54 +2277,51 @@ def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_p
                         key=f"{key_prefix}_qscope"
                     )
                     st.markdown("---")
+                    
+                    # BẮT ĐẦU KHỐI LỆNH TRONG FORM: Tất cả các dòng dưới đây phải thụt lề VÀO TRONG (cùng một mức lề)
                     if st.form_submit_button("💾 LƯU PHÊ DUYỆT & CẬP NHẬT TRÊN SHEET", type="primary", use_container_width=True):
-        merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
-        
-        # Nếu BTV cập nhật text thì gọi AI quét ngầm luôn
-        if e_texttin and len(e_texttin.strip()) >= 10:
-            queue_bg_scan(e_texttin.strip(), "", post_date_str=date_str_display)
+                        merged_link_duyet_update = merge_text_link(e_texttin, e_ld)
+                        
+                        # Nếu BTV cập nhật text thì gọi AI quét ngầm luôn
+                        if e_texttin and len(e_texttin.strip()) >= 10:
+                            queue_bg_scan(e_texttin.strip(), "", post_date_str=date_str_display)
 
-        # ================= LOGIC TỰ ĐỘNG ĐỔI TRẠNG THÁI (SMART AUTO-STATUS) =================
-        ok_keywords = ["ok", "duyệt", "done", "nhất trí", "tốt", "được", "triển khai", "lên đi", "oke", "okie"]
-        
-        has_tcsx_cmt = bool(e_tcsx_new.strip())
-        has_ldp_cmt = bool(e_ldp_new.strip())
-        
-        tcsx_is_ok = e_tcsx_ok or any(w in e_tcsx_new.lower() for w in ok_keywords)
-        ldp_is_ok = e_ldp_ok or any(w in e_ldp_new.lower() for w in ok_keywords)
+                        # ================= LOGIC TỰ ĐỘNG ĐỔI TRẠNG THÁI (SMART AUTO-STATUS) =================
+                        ok_keywords = ["ok", "duyệt", "done", "nhất trí", "tốt", "được", "triển khai", "lên đi", "oke", "okie"]
+                        
+                        has_tcsx_cmt = bool(e_tcsx_new.strip())
+                        has_ldp_cmt = bool(e_ldp_new.strip())
+                        
+                        tcsx_is_ok = e_tcsx_ok or any(w in e_tcsx_new.lower() for w in ok_keywords)
+                        ldp_is_ok = e_ldp_ok or any(w in e_ldp_new.lower() for w in ok_keywords)
 
-        for idx, st_val in platform_updates.items():
-            curr_st = st_val['STATUS']
-            # Không ghi đè nếu bài đã hoàn thành hoặc người dùng cố tình tự chọn trạng thái Đã đăng
-            if curr_st in ["✅ Đã duyệt", "✅ Đã đăng", "Posted", "Scheduled", "Hủy"]:
-                continue
-                
-            # Rule 4: LĐP OK hoặc tick duyệt -> Chờ đăng
-            if ldp_is_ok:
-                st_val['STATUS'] = "Đã duyệt/Chờ đăng"
-            # Rule 2: Nhận xét nhưng không có chữ OK -> Yêu cầu sửa
-            elif has_ldp_cmt and not ldp_is_ok:
-                st_val['STATUS'] = "Yêu cầu sửa (LĐP)"
-            elif has_tcsx_cmt and not tcsx_is_ok:
-                st_val['STATUS'] = "Yêu cầu sửa (TCSX)"
-            # Rule 3: TCSX OK -> Gửi LĐP
-            elif tcsx_is_ok:
-                st_val['STATUS'] = "Gửi duyệt LĐP"
-            # Rule 1: Mới dán link Drive mà chưa ai nhận xét -> Gửi TCSX
-            elif e_ld.strip() and curr_st in ["Chờ xử lý", "Đang biên tập", "📝 BTV đang hoàn thiện"]:
-                st_val['STATUS'] = "Gửi duyệt TCSX"
+                        for idx, st_val in platform_updates.items():
+                            curr_st = st_val['STATUS']
+                            if curr_st in ["✅ Đã duyệt", "✅ Đã đăng", "Posted", "Scheduled", "Hủy"]:
+                                continue
+                                
+                            if ldp_is_ok:
+                                st_val['STATUS'] = "Đã duyệt/Chờ đăng"
+                            elif has_ldp_cmt and not ldp_is_ok:
+                                st_val['STATUS'] = "Yêu cầu sửa (LĐP)"
+                            elif has_tcsx_cmt and not tcsx_is_ok:
+                                st_val['STATUS'] = "Yêu cầu sửa (TCSX)"
+                            elif tcsx_is_ok:
+                                st_val['STATUS'] = "Gửi duyệt LĐP"
+                            elif e_ld.strip() and curr_st in ["Chờ xử lý", "Đang biên tập", "📝 BTV đang hoàn thiện"]:
+                                st_val['STATUS'] = "Gửi duyệt TCSX"
 
-        final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
-        final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
-        final_td = build_appended_comment(all_old_td, e_td_new, e_td_ok)
+                        final_tcsx = build_appended_comment(all_old_tcsx, e_tcsx_new, e_tcsx_ok) if is_shift_tcsx else all_old_tcsx
+                        final_ldp = build_appended_comment(all_old_ldp, e_ldp_new, e_ldp_ok) if is_shift_ldp else all_old_ldp
+                        final_td = build_appended_comment(all_old_td, e_td_new, e_td_ok)
 
-        AI_ENGINE["executor"].submit(
-            bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns,
-            final_tcsx, final_ldp, final_td, merged_link_duyet_update, platform_updates
-        )
-        st.success("✅ Đã lưu! Phân tích ngôn ngữ báo trạng thái đã tự động cập nhật.")
-        time.sleep(0.4)
-        clear_cache_and_rerun()
+                        AI_ENGINE["executor"].submit(
+                            bg_update_post, tab_name_current, first_row_idx, e_nd, e_ng, e_ns,
+                            final_tcsx, final_ldp, final_td, merged_link_duyet_update, platform_updates
+                        )
+                        st.success("✅ Đã lưu! Phân tích ngôn ngữ báo trạng thái đã tự động cập nhật.")
+                        time.sleep(0.4)
+                        clear_cache_and_rerun()
 
     else:
         # CHẾ ĐỘ XEM LỊCH TUẦN (7 NGÀY KIỂU META PLANNER)
