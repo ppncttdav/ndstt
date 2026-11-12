@@ -2168,7 +2168,7 @@ def collect_planner_posts(target_dates, list_nv, extra_source_tabs=None):
                     all_posts.append(item)
     return all_posts
 
-@st.fragment(run_every="30s")
+@st.fragment(run_every="65s")
 def render_meta_planner_section(default_date, current_trucso_tab, list_nv, key_prefix="main_planner"):
     c_hdr_plan, c_btn_plan = st.columns([4.2, 0.8])
     with c_hdr_plan:
