@@ -818,7 +818,7 @@ PLATFORM_BADGE_STYLE = {
 }
 
 OPTS_STATUS_TRUCSO = [
-    "Gửi duyệt TCSX", "Gửi duyệt LĐP", "Scheduled", "Đã đăng", "Posted",
+    "Gửi duyệt TCSX", "Gửi duyệt LĐP + Thẩm định", "Scheduled", "Đã đăng", "Posted",
     "Chờ xử lý", "Đang biên tập", "Cảnh báo rủi ro", 
     "Yêu cầu sửa (TCSX)", "Yêu cầu sửa (LĐP)", "Đã duyệt/Chờ đăng", "Hủy"
 ]
@@ -1438,7 +1438,7 @@ def safe_read_records_with_row(wks, retries=3, delay=0.5):
                 time.sleep(delay * (attempt + 1))
     return pd.DataFrame()
 
-@st.cache_data(ttl=20, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def _fetch_vo_truc_so_cached(tab_name):
     sh = ket_noi_sheet(LINK_VO_TRUC_SO)
     if not sh:
@@ -3458,7 +3458,7 @@ else:
                     return df_summary, df_seeding
 
                 # ================= FRAGMENT 1: CHỈ TẢI LẠI BIỂU ĐỒ TRÊN CÙNG =================
-                @st.fragment(run_every="20s")
+                @st.fragment(run_every="40s")
                 def render_top_dashboard(current_filter):
                     df_summary, _ = get_realtime_summary(tab_name_current)
                     if not df_summary.empty:
@@ -3570,7 +3570,7 @@ else:
                     df_urgent = df_summary[df_summary["Is_Urgent"] == True]
                     if not df_urgent.empty:
                         with st.container(border=True):
-                            st.error(f"⏰ **CẢNH BÁO KHẨN CẤP: CÓ {len(df_urgent)} BÀI SẮP ĐẾN GIỜ ĐĂNG (< 1 TIẾNG) HOẶC QUÁ GIỜ NHƯNG CHƯA DUYỆT XONG!**")
+                            st.error(f"⏰ **CẢNH BÁO: CÓ {len(df_urgent)} BÀI SẮP ĐẾN GIỜ ĐĂNG (< 1 TIẾNG) HOẶC QUÁ GIỜ NHƯNG CHƯA DUYỆT XONG!**")
                             for _, u_row in df_urgent.iterrows():
                                 st.markdown(
                                     f"- **{u_row['Urgent_Msg']}** | Bài: **{u_row['Sản phẩm'][:70]}** "
