@@ -1438,7 +1438,7 @@ def safe_read_records_with_row(wks, retries=3, delay=0.5):
                 time.sleep(delay * (attempt + 1))
     return pd.DataFrame()
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=65, show_spinner=False)
 def _fetch_vo_truc_so_cached(tab_name):
     sh = ket_noi_sheet(LINK_VO_TRUC_SO)
     if not sh:
