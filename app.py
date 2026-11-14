@@ -4157,7 +4157,7 @@ else:
 # =========================================================================
 # TAB: TODAY IN 2 (GIAO DIỆN SPLIT-SCREEN CHUYÊN NGHIỆP)
 # =========================================================================
-if "📺 TODAY IN 2" in tab_dict:
+    if "📺 TODAY IN 2" in tab_dict:
     with tab_dict["📺 TODAY IN 2"]:
         # 1. HÀM TẢI DỮ LIỆU TỪ GOOGLE SHEET
         @st.cache_data(ttl=120, show_spinner=False)
