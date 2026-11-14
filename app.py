@@ -227,6 +227,11 @@ st.markdown("""
     font-weight: 600;
     margin-top: 3px;
 }
+.selected-item {
+        border: 2px solid #ff4b4b !important;
+        background-color: #fff4f4 !important;
+        box-shadow: 0 4px 10px rgba(255, 75, 75, 0.2);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -3164,7 +3169,7 @@ else:
 
     st.title("🏢 PHÒNG NỘI DUNG SỐ & TRUYỀN THÔNG")
     
-    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ LỊCH BÀI ĐĂNG", "📺 TẠO LPS"]
+    list_tabs = ["📝 VỎ TRỰC SỐ", "🗓️ LỊCH BÀI ĐĂNG", "📺 TẠO LPS", "📺 TODAY IN 2"]
     if role == 'LanhDao': 
         list_tabs.extend(["✅ CHECKLIST", "📋 CÔNG VIỆC", "🗂️ DỰ ÁN", "📅 LỊCH", "📧 EMAIL", "📊 DASHBOARD", "📜 NHẬT KÝ"])
         
