@@ -4164,9 +4164,10 @@ else:
             @st.cache_data(ttl=120, show_spinner=False)
             def fetch_today_in_2(date_str):
                 try:
-                    # GỌI HÀM ket_noi_sheet CỦA HỆ THỐNG
-                    sh_t2 = ket_noi_sheet("https://docs.google.com/spreadsheets/d/1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q/edit")
-                    wks = sh.worksheet(date_str)
+                    client = get_gspread_client_cached()
+                    if not client: return False, [], None
+                    sh_t2 = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                    wks = sh_t2.worksheet(date_str)
                     all_vals = wks.get_all_values()
                     return True, all_vals, wks.id
                 except Exception as e:
@@ -4243,11 +4244,10 @@ else:
                             
                             st.success(f"✅ Đã tạo thành công Vỏ bản tin {date_str_t2}!")
                             time.sleep(1.5)
-                            # Bắt buộc phải dùng hàm clear riêng biệt của hàm fetch_today_in_2 để xóa sạch bộ nhớ tạm
-                            try:
-                                fetch_today_in_2.clear()
-                            except Exception:
-                                pass
+                            
+                            # Làm sạch cả bộ nhớ tạm của hàm này VÀ toàn bộ hệ thống
+                            fetch_today_in_2.clear()
+                            clear_app_caches()
                             st.cache_data.clear()
                             st.rerun()
                             
