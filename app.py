@@ -3048,7 +3048,7 @@ if not st.session_state['authenticated']:
 if not st.session_state['authenticated']:
     if st.session_state.pop('_clear_cookie', False):
         _sync_browser_cookie("", 0)
-    st.markdown("## 🔐 CỔNG ĐĂNG NHẬP")
+    st.markdown("## 🔐 ĐĂNG NHẬP")
     with st.form("login"):
         user = st.text_input("Tên đăng nhập")
         pwd = st.text_input("Mật khẩu", type="password")
