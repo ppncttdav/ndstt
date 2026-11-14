@@ -4165,7 +4165,7 @@ else:
             def fetch_today_in_2(date_str):
                 try:
                     # GỌI HÀM ket_noi_sheet CỦA HỆ THỐNG
-                    sh = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                    sh_t2 = ket_noi_sheet("https://docs.google.com/spreadsheets/d/1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q/edit")
                     wks = sh.worksheet(date_str)
                     all_vals = wks.get_all_values()
                     return True, all_vals, wks.id
