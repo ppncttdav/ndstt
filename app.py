@@ -4155,68 +4155,68 @@ else:
         with tab_dict["📜 NHẬT KÝ"]:
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
 # =========================================================================
-# TAB: TODAY IN 2 (GIAO DIỆN SPLIT-SCREEN CHUYÊN NGHIỆP)
 # =========================================================================
+    # TAB: TODAY IN 2 (GIAO DIỆN SPLIT-SCREEN CHUYÊN NGHIỆP)
+    # =========================================================================
     if "📺 TODAY IN 2" in tab_dict:
-    with tab_dict["📺 TODAY IN 2"]:
-        # 1. HÀM TẢI DỮ LIỆU TỪ GOOGLE SHEET
-        @st.cache_data(ttl=120, show_spinner=False)
-        def fetch_today_in_2(date_str):
-            try:
-                sh = gc.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
-                wks = sh.worksheet(date_str)
-                all_vals = wks.get_all_values()
-                return True, all_vals, wks.id
-            except Exception as e:
-                return False, [], None
+        with tab_dict["📺 TODAY IN 2"]:
+            # 1. HÀM TẢI DỮ LIỆU TỪ GOOGLE SHEET
+            @st.cache_data(ttl=120, show_spinner=False)
+            def fetch_today_in_2(date_str):
+                try:
+                    # GỌI HÀM ket_noi_sheet CỦA HỆ THỐNG
+                    sh = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                    wks = sh.worksheet(date_str)
+                    all_vals = wks.get_all_values()
+                    return True, all_vals, wks.id
+                except Exception as e:
+                    return False, [], None
 
-        c_nav1, c_nav2 = st.columns([1.5, 4])
-        with c_nav1:
-            target_date_t2 = st.date_input("📅 CHỌN NGÀY BẢN TIN:", value=get_vn_time().date(), format="DD/MM/YYYY", key="date_t2")
-            date_str_t2 = target_date_t2.strftime("%d/%m/%Y")
+            c_nav1, c_nav2 = st.columns([1.5, 4])
+            with c_nav1:
+                target_date_t2 = st.date_input("📅 CHỌN NGÀY BẢN TIN:", value=get_vn_time().date(), format="DD/MM/YYYY", key="date_t2")
+                date_str_t2 = target_date_t2.strftime("%d/%m/%Y")
+                
+            with c_nav2:
+                c_title, c_reload = st.columns([4, 1])
+                c_title.header(f"📰 BẢN TIN TODAY IN 2: {date_str_t2}")
+                if c_reload.button("🔄 Làm mới dữ liệu", use_container_width=True, key="reload_t2"):
+                    st.cache_data.clear()
+                    st.rerun()
+
+            # 2. XỬ LÝ DỮ LIỆU & NÚT TẠO BẢNG
+            tab_exists, raw_data_t2, wks_id = fetch_today_in_2(date_str_t2)
             
-        with c_nav2:
-            c_title, c_reload = st.columns([4, 1])
-            c_title.header(f"📰 BẢN TIN TODAY IN 2: {date_str_t2}")
-            if c_reload.button("🔄 Làm mới dữ liệu", use_container_width=True, key="reload_t2"):
-                st.cache_data.clear()
-                st.rerun()
-
-        # 2. XỬ LÝ DỮ LIỆU
-        tab_exists, raw_data_t2, wks_id = fetch_today_in_2(date_str_t2)
-        
-        if not tab_exists:
-            st.warning(f"Chưa có Vỏ bản tin Today in 2 cho ngày {date_str_t2}.")
             if not tab_exists:
                 st.warning(f"Chưa có Vỏ bản tin Today in 2 cho ngày {date_str_t2}.")
                 if st.button("Tạo vỏ bản tin mới", type="primary"):
                     with st.spinner("⏳ Đang khởi tạo Vỏ bản tin mới trên Google Sheet..."):
                         try:
-                            # 1. Kết nối Google Sheet Today in 2
-                            sh_t2 = gc.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                            # SỬ DỤNG HÀM KẾT NỐI CHUẨN KÉO TỪ HỆ THỐNG GỐC
+                            sh_t2 = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
                             
-                            # 2. Tạo tab mới với tên là ngày được chọn
+                            # Tạo tab mới với tên là ngày được chọn
                             new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=12)
                             
-                            # 3. Chuẩn bị khung dữ liệu chuẩn
+                            # Chuẩn bị khung dữ liệu chuẩn
                             header_roles = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ']
                             blank_roles = ["", "", "", "", "", ""]
                             header_content = ['STT', 'THỜI LƯỢNG', 'ĐẦU TIN', 'NỘI DUNG\n(kèm link duyệt)', 'English/TO PROOFREAD', 'TCSX', 'LĐP', 'Kịch bản sau góp ý', 'Anh Thắng', 'PROOFREAD', 'NGƯỜI THỰC HIỆN', 'Caption']
                             row_intro = ["", "", "Intro", "", "", "", "", "", "", "", "", ""]
                             row_outro = ["", "", "Outro", "", "", "", "", "", "", "", "", ""]
                             
-                            # 4. Bơm dữ liệu vào Sheet mới
+                            # Bơm dữ liệu vào Sheet mới
                             new_wks.update('A1:L5', [header_roles, blank_roles, header_content, row_intro, row_outro])
                             
-                            # 5. Định dạng làm đẹp (In đậm, đổ nền xám, căn giữa)
-                            requests = [
+                            # Định dạng làm đẹp
+                            requests_fmt = [
                                 {
                                     "repeatCell": {
                                         "range": {"sheetId": new_wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 6},
                                         "cell": {"userEnteredFormat": {
                                             "textFormat": {"bold": True, "fontFamily": "Times New Roman"}, 
                                             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", 
-                                            "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.98} # Nền xanh nhạt cho Kíp trực
+                                            "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.98}
                                         }},
                                         "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)"
                                     }
@@ -4227,15 +4227,14 @@ else:
                                         "cell": {"userEnteredFormat": {
                                             "textFormat": {"bold": True, "fontFamily": "Times New Roman"}, 
                                             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
-                                            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9} # Nền xám cho Tiêu đề
+                                            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
                                         }},
                                         "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,backgroundColor)"
                                     }
                                 }
                             ]
-                            sh_t2.batch_update({"requests": requests})
+                            sh_t2.batch_update({"requests": requests_fmt})
                             
-                            # 6. Thông báo và làm mới web
                             st.success(f"✅ Đã tạo thành công Vỏ bản tin {date_str_t2}!")
                             time.sleep(1.5)
                             st.cache_data.clear()
@@ -4243,144 +4242,161 @@ else:
                             
                         except Exception as e:
                             st.error(f"Lỗi khi tạo sheet: {e}")
-        else:
-            # --- Bóc tách dữ liệu ---
-            roster_data = [""] * 6
-            content_start_idx = -1
-            header_cols = []
-            
-            for i, row in enumerate(raw_data_t2):
-                if "Lãnh đạo Ban" in row or "Lãnh đạo phòng" in row:
-                    try: roster_data = raw_data_t2[i+1][:6]
-                    except: pass
-                if "STT" in row and "ĐẦU TIN" in row:
-                    content_start_idx = i
-                    header_cols = row
-            
-            # --- Hiển thị Kíp trực ---
-            st.markdown("### 👥 KÍP TRỰC BẢN TIN")
-            cols_k = st.columns(6)
-            labels = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ']
-            for idx, col in enumerate(cols_k):
-                val = roster_data[idx] if idx < len(roster_data) else ""
-                col.selectbox(labels[idx], [val] + list_nv if val else list_nv, index=0, key=f"k_{idx}_{date_str_t2}")
-            
-            st.divider()
+            else:
+                # --- Bóc tách dữ liệu ---
+                roster_data = [""] * 6
+                content_start_idx = -1
+                header_cols = []
+                
+                for i, row in enumerate(raw_data_t2):
+                    if "Lãnh đạo Ban" in row or "Lãnh đạo phòng" in row:
+                        try: roster_data = raw_data_t2[i+1][:6]
+                        except: pass
+                    if "STT" in row and "ĐẦU TIN" in row:
+                        content_start_idx = i
+                        header_cols = row
+                
+                # --- Hiển thị Kíp trực ---
+                st.markdown("### 👥 KÍP TRỰC BẢN TIN")
+                cols_k = st.columns(6)
+                labels = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ']
+                
+                # Biến list_nv chứa danh sách nhân viên từ các hàm trước đó
+                safe_list_nv = list_nv if 'list_nv' in locals() or 'list_nv' in globals() else ["Nguyễn Phương Hà", "Vương Ngọc Bích", "Trần Việt", "Khánh Vân"]
+                
+                for idx, col in enumerate(cols_k):
+                    val = roster_data[idx] if idx < len(roster_data) else ""
+                    opts = [val] + safe_list_nv if val and val not in safe_list_nv else safe_list_nv
+                    col.selectbox(labels[idx], opts, index=0, key=f"k_{idx}_{date_str_t2}")
+                
+                st.divider()
 
-            # 3. GIAO DIỆN SPLIT-SCREEN CHÍNH
-            if content_start_idx != -1:
-                # Trích xuất danh sách các tin bài
-                list_tin_bai = []
-                for r_idx in range(content_start_idx + 1, len(raw_data_t2)):
-                    if any(raw_data_t2[r_idx]):
-                        row_dict = {header_cols[c]: (raw_data_t2[r_idx][c] if c < len(raw_data_t2[r_idx]) else "") for c in range(len(header_cols))}
-                        row_dict["_row_idx"] = r_idx
-                        list_tin_bai.append(row_dict)
+                # 3. GIAO DIỆN SPLIT-SCREEN CHÍNH
+                if content_start_idx != -1:
+                    # Trích xuất danh sách các tin bài
+                    list_tin_bai = []
+                    for r_idx in range(content_start_idx + 1, len(raw_data_t2)):
+                        if any(raw_data_t2[r_idx]):
+                            row_dict = {header_cols[c]: (raw_data_t2[r_idx][c] if c < len(raw_data_t2[r_idx]) else "") for c in range(len(header_cols))}
+                            row_dict["_row_idx"] = r_idx
+                            list_tin_bai.append(row_dict)
 
-                if not list_tin_bai:
-                    st.info("Chưa có kịch bản nào được thêm vào.")
-                else:
-                    # Chia đôi màn hình: Cột trái (Danh sách), Cột phải (Chi tiết & Duyệt)
-                    col_list, col_detail = st.columns([1.2, 2.8])
-                    
-                    with col_list:
-                        st.markdown("#### 📑 DANH SÁCH ĐẦU TIN")
-                        # State lưu trữ bài viết đang được chọn
-                        if "selected_t2_idx" not in st.session_state:
-                            st.session_state["selected_t2_idx"] = list_tin_bai[0]["_row_idx"]
-
-                        # Cấu trúc HTML dạng thanh menu dọc để bấm
-                        st.markdown('<div class="post-list-container" style="max-height: 800px; overflow-y: auto;">', unsafe_allow_html=True)
-                        for item in list_tin_bai:
-                            dau_tin = item.get("ĐẦU TIN", "Tin bài")
-                            nguoi_lam = item.get("NGƯỜI THỰC HIỆN", "")
-                            
-                            is_proofread = len(item.get("PROOFREAD", "").strip()) > 5
-                            tcsx_col = "TCSX" if "TCSX" in item else "Thẩm định duyệt"
-                            is_tcsx_cmt = len(item.get(tcsx_col, "").strip()) > 5
-                            
-                            # Tô màu dựa trên trạng thái
-                            card_cls = "post-card-row approved" if is_proofread else ("post-card-row urgent" if is_tcsx_cmt else "post-card-row")
-                            
-                            # Nếu đang được chọn, làm nổi bật viền
-                            if st.session_state["selected_t2_idx"] == item["_row_idx"]:
-                                card_cls += " selected-item"
-                                
-                            with st.container():
-                                st.markdown(
-                                    f'<div class="{card_cls}" style="margin-bottom: 5px;">'
-                                    f'<div><b>{dau_tin}</b></div>'
-                                    f'<div style="color:gray; font-size: 12px; margin-top:2px;">👤 {nguoi_lam}</div>'
-                                    f'</div>', 
-                                    unsafe_allow_html=True
-                                )
-                                # Nút trong suốt đè lên card để click được
-                                if st.button("Mở 👉", key=f"btn_nav_{item['_row_idx']}", use_container_width=True):
-                                    st.session_state["selected_t2_idx"] = item["_row_idx"]
-                                    st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-
-                    # --- CỘT CHI TIẾT (FULL TEXT & NHẬN XÉT) ---
-                    with col_detail:
-                        # Lấy data của bài đang được chọn
-                        selected_item = next((x for x in list_tin_bai if x["_row_idx"] == st.session_state["selected_t2_idx"]), None)
+                    if not list_tin_bai:
+                        st.info("Chưa có kịch bản nào được thêm vào.")
+                    else:
+                        # Chia đôi màn hình: Cột trái (Danh sách), Cột phải (Chi tiết & Duyệt)
+                        col_list, col_detail = st.columns([1.2, 2.8])
                         
-                        if selected_item:
-                            st.markdown(f"#### 📖 NỘI DUNG: {selected_item.get('ĐẦU TIN', '')}")
-                            st.caption(f"👤 Thực hiện: {selected_item.get('NGƯỜI THỰC HIỆN', 'Chưa phân công')}")
-                            
-                            st.markdown("---")
-                            
-                            # Cột full text & Tiếng Anh
-                            text_vn = selected_item.get("NỘI DUNG\n(kèm link duyệt)", selected_item.get("NỘI DUNG", ""))
-                            text_en = selected_item.get("English/TO PROOFREAD", "")
-                            
-                            st.markdown("**🇻🇳 TIẾNG VIỆT (Kèm Link):**")
-                            st.info(text_vn)
-                            
-                            st.markdown("**🇬🇧 BẢN DỊCH THÔ (English):**")
-                            st.warning(text_en)
-                            
-                            # Cơ chế AI Tự động kiểm tra (như Vỏ trực số)
-                            text_to_scan = text_en if text_en else text_vn
-                            if text_to_scan and len(text_to_scan.strip()) > 20:
-                                st.markdown("🤖 **GỢI Ý AI (Tự động rà soát):**")
-                                # Tận dụng hàm background scan có sẵn
-                                text_hash = hashlib.md5(text_to_scan.encode('utf-8')).hexdigest()
-                                cached_ans = AI_ENGINE["cache"].get(text_hash) or st.session_state.get(f"ai_res_{text_hash}")
-                                
-                                if cached_ans:
-                                    st.success(cached_ans) if "an toàn" in cached_ans.lower() else st.error(cached_ans)
-                                else:
-                                    st.caption("⏳ Hệ thống đang kiểm tra tự động...")
-                                    queue_bg_scan(text_to_scan, "Đang xử lý") # Bắn vào hàng đợi ngầm
+                        with col_list:
+                            st.markdown("#### 📑 DANH SÁCH ĐẦU TIN")
+                            # State lưu trữ bài viết đang được chọn
+                            if "selected_t2_idx" not in st.session_state:
+                                st.session_state["selected_t2_idx"] = list_tin_bai[0]["_row_idx"]
 
-                            st.markdown("---")
+                            # Cấu trúc HTML dạng thanh menu dọc để bấm
+                            st.markdown('<div class="post-list-container" style="max-height: 800px; overflow-y: auto;">', unsafe_allow_html=True)
+                            for item in list_tin_bai:
+                                dau_tin = item.get("ĐẦU TIN", "Tin bài")
+                                nguoi_lam = item.get("NGƯỜI THỰC HIỆN", "")
+                                
+                                is_proofread = len(item.get("PROOFREAD", "").strip()) > 5
+                                tcsx_col = "TCSX" if "TCSX" in item else "Thẩm định duyệt"
+                                is_tcsx_cmt = len(item.get(tcsx_col, "").strip()) > 5
+                                
+                                # Tô màu dựa trên trạng thái
+                                card_cls = "post-card-row approved" if is_proofread else ("post-card-row urgent" if is_tcsx_cmt else "post-card-row")
+                                
+                                # Nếu đang được chọn, làm nổi bật viền
+                                if st.session_state["selected_t2_idx"] == item["_row_idx"]:
+                                    card_cls += " selected-item"
+                                    
+                                with st.container():
+                                    st.markdown(
+                                        f'<div class="{card_cls}" style="margin-bottom: 5px;">'
+                                        f'<div><b>{dau_tin}</b></div>'
+                                        f'<div style="color:gray; font-size: 12px; margin-top:2px;">👤 {nguoi_lam}</div>'
+                                        f'</div>', 
+                                        unsafe_allow_html=True
+                                    )
+                                    # Nút trong suốt đè lên card để click được
+                                    if st.button("Mở 👉", key=f"btn_nav_{item['_row_idx']}", use_container_width=True):
+                                        st.session_state["selected_t2_idx"] = item["_row_idx"]
+                                        st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+                        # --- CỘT CHI TIẾT (FULL TEXT & NHẬN XÉT) ---
+                        with col_detail:
+                            # Lấy data của bài đang được chọn
+                            selected_item = next((x for x in list_tin_bai if x["_row_idx"] == st.session_state["selected_t2_idx"]), None)
                             
-                            # Cột nhận xét & Chốt
-                            st.markdown("#### ✍️ GÓP Ý & DUYỆT")
-                            tcsx_col = "TCSX" if "TCSX" in selected_item else "Thẩm định duyệt"
-                            
-                            c_cm1, c_cm2 = st.columns(2)
-                            e_tcsx = c_cm1.text_area("Góp ý của TCSX:", value=selected_item.get(tcsx_col, ""), key=f"tcsx_{selected_item['_row_idx']}", height=100)
-                            e_ldp = c_cm2.text_area("Góp ý của LĐP:", value=selected_item.get("LĐP", ""), key=f"ldp_{selected_item['_row_idx']}", height=100)
-                            
-                            e_sua = st.text_area("Kịch bản sau góp ý (BTV sửa lại):", value=selected_item.get("Kịch bản sau góp ý", ""), key=f"sua_{selected_item['_row_idx']}", height=120)
-                            
-                            st.markdown("---")
-                            st.markdown("#### 🏁 CHỐT BẢN CUỐI & CAPTION")
-                            c_thang, c_final = st.columns(2)
-                            e_thang = c_thang.text_area("Anh Thắng góp ý:", value=selected_item.get("Anh Thắng", ""), height=150, key=f"thang_{selected_item['_row_idx']}")
-                            e_proof = c_final.text_area("✅ PROOFREAD (Bản chốt):", value=selected_item.get("PROOFREAD", ""), height=150, key=f"proof_{selected_item['_row_idx']}")
-                            
-                            e_cap = st.text_area("📝 Caption Đăng MXH:", value=selected_item.get("Caption", ""), height=100, key=f"cap_{selected_item['_row_idx']}")
-                            
-                            # Nút Lưu
-                            if st.button("💾 LƯU THAY ĐỔI VÀO SHEET", type="primary", use_container_width=True, key=f"save_{selected_item['_row_idx']}"):
-                                with st.spinner("Đang lưu lên hệ thống..."):
-                                    # Logic update gspread vào dòng selected_item['_row_idx']
-                                    pass
-                                st.success("Lưu thành công!")
-                                time.sleep(0.5)
-                                st.cache_data.clear()
-                                st.rerun()
+                            if selected_item:
+                                st.markdown(f"#### 📖 NỘI DUNG: {selected_item.get('ĐẦU TIN', '')}")
+                                st.caption(f"👤 Thực hiện: {selected_item.get('NGƯỜI THỰC HIỆN', 'Chưa phân công')}")
+                                
+                                st.markdown("---")
+                                
+                                # Cột full text & Tiếng Anh
+                                text_vn = selected_item.get("NỘI DUNG\n(kèm link duyệt)", selected_item.get("NỘI DUNG", ""))
+                                text_en = selected_item.get("English/TO PROOFREAD", "")
+                                
+                                st.markdown("**🇻🇳 TIẾNG VIỆT (Kèm Link):**")
+                                st.info(text_vn)
+                                
+                                st.markdown("**🇬🇧 BẢN DỊCH THÔ (English):**")
+                                st.warning(text_en)
+                                
+                                st.markdown("---")
+                                
+                                # Cột nhận xét & Chốt
+                                st.markdown("#### ✍️ GÓP Ý & DUYỆT")
+                                tcsx_col = "TCSX" if "TCSX" in selected_item else "Thẩm định duyệt"
+                                
+                                c_cm1, c_cm2 = st.columns(2)
+                                e_tcsx = c_cm1.text_area("Góp ý của TCSX:", value=selected_item.get(tcsx_col, ""), key=f"tcsx_{selected_item['_row_idx']}", height=100)
+                                e_ldp = c_cm2.text_area("Góp ý của LĐP:", value=selected_item.get("LĐP", ""), key=f"ldp_{selected_item['_row_idx']}", height=100)
+                                
+                                e_sua = st.text_area("Kịch bản sau góp ý (BTV sửa lại):", value=selected_item.get("Kịch bản sau góp ý", ""), key=f"sua_{selected_item['_row_idx']}", height=120)
+                                
+                                st.markdown("---")
+                                st.markdown("#### 🏁 CHỐT BẢN CUỐI & CAPTION")
+                                c_thang, c_final = st.columns(2)
+                                e_thang = c_thang.text_area("Anh Thắng góp ý:", value=selected_item.get("Anh Thắng", ""), height=150, key=f"thang_{selected_item['_row_idx']}")
+                                e_proof = c_final.text_area("✅ PROOFREAD (Bản chốt):", value=selected_item.get("PROOFREAD", ""), height=150, key=f"proof_{selected_item['_row_idx']}")
+                                
+                                e_cap = st.text_area("📝 Caption Đăng MXH:", value=selected_item.get("Caption", ""), height=100, key=f"cap_{selected_item['_row_idx']}")
+                                
+                                # Nút Lưu
+                                if st.button("💾 LƯU THAY ĐỔI VÀO SHEET", type="primary", use_container_width=True, key=f"save_{selected_item['_row_idx']}"):
+                                    with st.spinner("Đang lưu lên hệ thống..."):
+                                        try:
+                                            # Ghi dữ liệu vào sheet
+                                            sh_t2_update = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                                            wks_update = sh_t2_update.worksheet(date_str_t2)
+                                            
+                                            # Lấy index cột
+                                            idx_tcsx = header_cols.index(tcsx_col) + 1
+                                            idx_ldp = header_cols.index("LĐP") + 1
+                                            idx_sua = header_cols.index("Kịch bản sau góp ý") + 1
+                                            idx_thang = header_cols.index("Anh Thắng") + 1
+                                            idx_proof = header_cols.index("PROOFREAD") + 1
+                                            idx_cap = header_cols.index("Caption") + 1
+                                            
+                                            r = selected_item["_row_idx"] + 1
+                                            
+                                            # Tạo mảng cells để update hàng loạt
+                                            cells_to_update = [
+                                                gspread.Cell(r, idx_tcsx, e_tcsx),
+                                                gspread.Cell(r, idx_ldp, e_ldp),
+                                                gspread.Cell(r, idx_sua, e_sua),
+                                                gspread.Cell(r, idx_thang, e_thang),
+                                                gspread.Cell(r, idx_proof, e_proof),
+                                                gspread.Cell(r, idx_cap, e_cap)
+                                            ]
+                                            wks_update.update_cells(cells_to_update)
+                                            
+                                            st.success("Lưu thành công!")
+                                            time.sleep(0.5)
+                                            st.cache_data.clear()
+                                            st.rerun()
+                                        except Exception as update_err:
+                                            st.error(f"Lỗi khi lưu dữ liệu: {update_err}")
