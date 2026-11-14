@@ -4187,8 +4187,62 @@ if "📺 TODAY IN 2" in tab_dict:
         
         if not tab_exists:
             st.warning(f"Chưa có Vỏ bản tin Today in 2 cho ngày {date_str_t2}.")
-            if st.button("Tạo vỏ bản tin mới", type="primary"):
-                pass # Lắp hàm tạo Worksheet của bạn vào đây
+            if not tab_exists:
+                st.warning(f"Chưa có Vỏ bản tin Today in 2 cho ngày {date_str_t2}.")
+                if st.button("Tạo vỏ bản tin mới", type="primary"):
+                    with st.spinner("⏳ Đang khởi tạo Vỏ bản tin mới trên Google Sheet..."):
+                        try:
+                            # 1. Kết nối Google Sheet Today in 2
+                            sh_t2 = gc.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                            
+                            # 2. Tạo tab mới với tên là ngày được chọn
+                            new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=12)
+                            
+                            # 3. Chuẩn bị khung dữ liệu chuẩn
+                            header_roles = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ']
+                            blank_roles = ["", "", "", "", "", ""]
+                            header_content = ['STT', 'THỜI LƯỢNG', 'ĐẦU TIN', 'NỘI DUNG\n(kèm link duyệt)', 'English/TO PROOFREAD', 'TCSX', 'LĐP', 'Kịch bản sau góp ý', 'Anh Thắng', 'PROOFREAD', 'NGƯỜI THỰC HIỆN', 'Caption']
+                            row_intro = ["", "", "Intro", "", "", "", "", "", "", "", "", ""]
+                            row_outro = ["", "", "Outro", "", "", "", "", "", "", "", "", ""]
+                            
+                            # 4. Bơm dữ liệu vào Sheet mới
+                            new_wks.update('A1:L5', [header_roles, blank_roles, header_content, row_intro, row_outro])
+                            
+                            # 5. Định dạng làm đẹp (In đậm, đổ nền xám, căn giữa)
+                            requests = [
+                                {
+                                    "repeatCell": {
+                                        "range": {"sheetId": new_wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 6},
+                                        "cell": {"userEnteredFormat": {
+                                            "textFormat": {"bold": True, "fontFamily": "Times New Roman"}, 
+                                            "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", 
+                                            "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.98} # Nền xanh nhạt cho Kíp trực
+                                        }},
+                                        "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)"
+                                    }
+                                },
+                                {
+                                    "repeatCell": {
+                                        "range": {"sheetId": new_wks.id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 12},
+                                        "cell": {"userEnteredFormat": {
+                                            "textFormat": {"bold": True, "fontFamily": "Times New Roman"}, 
+                                            "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
+                                            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9} # Nền xám cho Tiêu đề
+                                        }},
+                                        "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,backgroundColor)"
+                                    }
+                                }
+                            ]
+                            sh_t2.batch_update({"requests": requests})
+                            
+                            # 6. Thông báo và làm mới web
+                            st.success(f"✅ Đã tạo thành công Vỏ bản tin {date_str_t2}!")
+                            time.sleep(1.5)
+                            st.cache_data.clear()
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Lỗi khi tạo sheet: {e}")
         else:
             # --- Bóc tách dữ liệu ---
             roster_data = [""] * 6
