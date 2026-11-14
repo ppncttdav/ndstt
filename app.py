@@ -1541,7 +1541,7 @@ def fetch_vo_truc_so(tab_name):
 
 fetch_vo_truc_so.clear = _fetch_vo_truc_so_cached.clear
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=18000, show_spinner=False)
 def _fetch_tai_khoan_cached():
     sh = ket_noi_sheet(SHEET_MAIN)
     if not sh:
