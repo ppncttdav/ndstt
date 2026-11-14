@@ -4243,6 +4243,11 @@ else:
                             
                             st.success(f"✅ Đã tạo thành công Vỏ bản tin {date_str_t2}!")
                             time.sleep(1.5)
+                            # Bắt buộc phải dùng hàm clear riêng biệt của hàm fetch_today_in_2 để xóa sạch bộ nhớ tạm
+                            try:
+                                fetch_today_in_2.clear()
+                            except Exception:
+                                pass
                             st.cache_data.clear()
                             st.rerun()
                             
