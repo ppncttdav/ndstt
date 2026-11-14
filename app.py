@@ -4453,7 +4453,10 @@ else:
                                 cached_ans = AI_ENGINE["cache"].get(text_hash) or st.session_state.get(f"ai_res_{text_hash}")
                                 
                                 if cached_ans:
-                                    st.success(cached_ans) if "an toàn" in cached_ans.lower() else st.error(cached_ans)
+                                    if "an toàn" in cached_ans.lower() or "ít rủi ro" in cached_ans.lower():
+                                        st.success(cached_ans)
+                                    else:
+                                        st.error(cached_ans)
                                 else:
                                     st.caption("⏳ Hệ thống đang kiểm tra tự động...")
                                     queue_bg_scan(text_to_scan, "Đang xử lý")
