@@ -4155,19 +4155,21 @@ else:
         with tab_dict["📜 NHẬT KÝ"]:
             if not df_log.empty: st.dataframe(df_log.iloc[::-1].rename(columns=VN_COLS_LOG), use_container_width=True)
 # =========================================================================
-    # TAB: TODAY IN 2 (GIAO DIỆN TỐI ƯU HÓA)
+# =========================================================================
+    # TAB: TODAY IN 2 (GIAO DIỆN CHUẨN VỎ TRỰC SỐ)
     # =========================================================================
     if "📺 TODAY IN 2" in tab_dict:
         with tab_dict["📺 TODAY IN 2"]:
-            # --- HÀM HỖ TRỢ TÌM BT1, BT2 TỪ LỊCH ---
+            # --- HÀM TÌM NHÂN SỰ ĐẶC THÙ CHO BẢN TIN (TÌM CHỮ BT1, BT2) ---
             def get_today_in_2_bt_from_df(df, target_date_obj, list_nv):
                 res_tcsx, res_bt1, res_bt2 = "", "", ""
                 if df is None or df.empty: return res_tcsx, res_bt1, res_bt2
                 d = target_date_obj.day
                 m = target_date_obj.month
                 y = target_date_obj.year
-                target_col = -1
-                header_row = -1
+                target_col, header_row = -1, -1
+                
+                # Tìm cột ngày
                 for r in range(len(df)):
                     for c in range(len(df.columns)):
                         val = str(df.iloc[r, c]).strip().lower()
@@ -4186,17 +4188,21 @@ else:
                         if target_col != -1: break
                 
                 if target_col != -1:
+                    # Bắt đầu dò xuống các dòng tên nhân sự
                     for r in range(header_row + 1, min(header_row + 200, len(df))):
                         val = str(df.iloc[r, target_col]).lower().strip()
                         if not val or val == 'nan': continue
+                        
                         name = ""
                         for c in range(min(5, len(df.columns))):
                             n = str(df.iloc[r, c]).strip()
                             if n and n.lower() != 'nan' and not n.isdigit() and len(n) > 2 and "stt" not in n.lower() and "tên" not in n.lower():
                                 name = n; break
+                        
                         if name:
                             matched = match_nv(name, list_nv)
                             if matched:
+                                # Nhận diện chính xác chữ TCSX, BT1, BT2
                                 if "tcsx" in val: res_tcsx = matched
                                 elif "bt1" in val or "bt 1" in val: res_bt1 = matched
                                 elif "bt2" in val or "bt 2" in val: res_bt2 = matched
@@ -4212,13 +4218,13 @@ else:
                     return True, wks.get_all_values(), wks.id
                 except Exception: return False, [], None
 
-            c_nav1, c_nav2 = st.columns([1.5, 4])
+            c_nav1, c_nav2 = st.columns([1, 4])
             with c_nav1:
-                target_date_t2 = st.date_input("📅 CHỌN NGÀY BẢN TIN:", value=get_vn_time().date(), format="DD/MM/YYYY", key="date_t2")
+                target_date_t2 = st.date_input("📅 CHỌN NGÀY LÀM VIỆC:", value=get_vn_time().date(), format="DD/MM/YYYY", key="date_t2")
                 date_str_t2 = target_date_t2.strftime("%d/%m/%Y")
                 
             with c_nav2:
-                c_title, c_reload = st.columns([4, 1])
+                c_title, c_reload = st.columns([3.5, 1.5])
                 c_title.header(f"📰 BẢN TIN TODAY IN 2: {date_str_t2}")
                 if c_reload.button("🔄 Làm mới dữ liệu", use_container_width=True, key="reload_t2"):
                     fetch_today_in_2.clear()
@@ -4227,102 +4233,123 @@ else:
 
             # --- KIỂM TRA & HIỂN THỊ DỮ LIỆU ---
             tab_exists, raw_data_t2, wks_id = fetch_today_in_2(date_str_t2)
+            safe_list_nv = list_nv if 'list_nv' in locals() else []
             
             if not tab_exists:
-                st.warning(f"Chưa có Vỏ bản tin Today in 2 cho ngày {date_str_t2}.")
-                if st.button("Tạo vỏ bản tin mới", type="primary"):
-                    with st.spinner("⏳ Đang quét Lịch phân công và khởi tạo Vỏ mới..."):
-                        try:
-                            # 1. Tự động tìm nhân sự (LĐP, TCSX, BT1, BT2)
-                            dfs = fetch_and_parse_schedules(LINK_LICH_LDP, LINK_LICH_BTV_TCSX)
-                            auto_ldp = get_ldp_from_df(dfs.get("LDP"), target_date_t2, list_nv)
-                            auto_tcsx, auto_bt1, auto_bt2 = get_today_in_2_bt_from_df(dfs.get("BTV"), target_date_t2, list_nv)
-                            
-                            client = get_gspread_client_cached()
-                            if not client:
-                                st.error("❌ Mất kết nối tới Hệ thống. Vui lòng tải lại trang.")
-                                st.stop()
+                st.warning(f"ChƯa có Vỏ bản tin Today in 2 cho ngày {date_str_t2}.")
+                with st.container(border=True):
+                    st.markdown("#### KHỞI TẠO VỎ MỚI")
+                    st.caption("Hệ thống sẽ tự động quét Lịch phân công LĐP, TCSX, BT1, BT2 để điền tên.")
+                    if st.button("🚀 TẠO VỎ BẢN TIN MỚI", type="primary"):
+                        with st.spinner("⏳ Đang quét Lịch phân công và khởi tạo Vỏ mới..."):
+                            try:
+                                # 1. Auto-connect Lịch LĐP & BTV/TCSX
+                                dfs = fetch_and_parse_schedules(LINK_LICH_LDP, LINK_LICH_BTV_TCSX)
+                                auto_ldp = get_ldp_from_df(dfs.get("LDP"), target_date_t2, safe_list_nv)
+                                auto_tcsx, auto_bt1, auto_bt2 = get_today_in_2_bt_from_df(dfs.get("BTV"), target_date_t2, safe_list_nv)
                                 
-                            sh_t2 = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                                client = get_gspread_client_cached()
+                                if not client:
+                                    st.error("❌ Mất kết nối tới Hệ thống. Vui lòng tải lại trang.")
+                                    st.stop()
+                                    
+                                sh_t2 = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
 
-                            # 2. Tạo tab mới (BẮT BUỘC index=0 để chèn lên đầu cùng)
-                            new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=8, index=0)
-                            
-                            # 3. Chuẩn bị Format mới (8 Cột)
-                            header_roles = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ', 'Người hiệu đính', 'Người thẩm định']
-                            
-                            def_roles = ["--"] * 8
-                            def_roles[0] = match_nv(get_lanh_dao_ban(target_date_t2), list_nv) or "--"
-                            def_roles[1] = auto_ldp if auto_ldp else "--"
-                            def_roles[2] = auto_tcsx if auto_tcsx else "--"
-                            def_roles[3] = auto_bt1 if auto_bt1 else "--"
-                            def_roles[4] = auto_bt2 if auto_bt2 else "--"
+                                # 2. Tạo tab mới (BẮT BUỘC index=0 để chèn lên đầu cùng bên trái)
+                                new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=8, index=0)
+                                
+                                # 3. Format 8 Cột Mới Nhất
+                                header_roles = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ', 'Người hiệu đính', 'Người thẩm định']
+                                
+                                def_roles = ["--"] * 8
+                                def_roles[0] = match_nv(get_lanh_dao_ban(target_date_t2), safe_list_nv) or "--"
+                                def_roles[1] = auto_ldp if auto_ldp else "--"
+                                def_roles[2] = auto_tcsx if auto_tcsx else "--"
+                                def_roles[3] = auto_bt1 if auto_bt1 else "--"
+                                def_roles[4] = auto_bt2 if auto_bt2 else "--"
 
-                            header_content = ['ĐẦU TIN', 'NGƯỜI THỰC HIỆN', 'NỘI DUNG\n(Tiếng Việt)', 'BẢN DỊCH\n(English)', 'TCSX', 'LĐP', 'PROOFREAD', 'Caption MXH']
-                            row_intro = ["Intro", "", "", "", "", "", "", ""]
-                            row_outro = ["Outro", "", "", "", "", "", "", ""]
-                            
-                            new_wks.update('A1:H5', [header_roles, def_roles, header_content, row_intro, row_outro])
-                            
-                            # Căn chỉnh chiều rộng cột cho đẹp
-                            col_widths = [150, 150, 350, 350, 150, 150, 200, 200]
-                            reqs = []
-                            for idx_c, w in enumerate(col_widths):
-                                reqs.append({"updateDimensionProperties": {"range": {"sheetId": new_wks.id, "dimension": "COLUMNS", "startIndex": idx_c, "endIndex": idx_c+1}, "properties": {"pixelSize": w}, "fields": "pixelSize"}})
+                                header_content = ['ĐẦU TIN', 'NGƯỜI THỰC HIỆN', 'NỘI DUNG\n(Tiếng Việt)', 'BẢN DỊCH\n(English)', 'TCSX', 'LĐP', 'PROOFREAD', 'Caption MXH']
+                                row_intro = ["Intro", "", "", "", "", "", "", ""]
+                                row_outro = ["Outro", "", "", "", "", "", "", ""]
+                                
+                                new_wks.update('A1:H5', [header_roles, def_roles, header_content, row_intro, row_outro])
+                                
+                                # Căn chỉnh chiều rộng cột cho đẹp
+                                col_widths = [150, 150, 350, 350, 150, 150, 200, 200]
+                                reqs = []
+                                for idx_c, w in enumerate(col_widths):
+                                    reqs.append({"updateDimensionProperties": {"range": {"sheetId": new_wks.id, "dimension": "COLUMNS", "startIndex": idx_c, "endIndex": idx_c+1}, "properties": {"pixelSize": w}, "fields": "pixelSize"}})
 
-                            # Định dạng in đậm & bôi màu header
-                            reqs.extend([
-                                {
-                                    "repeatCell": {
-                                        "range": {"sheetId": new_wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 8},
-                                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.98}}},
-                                        "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)"
+                                # Định dạng in đậm & bôi màu header
+                                reqs.extend([
+                                    {
+                                        "repeatCell": {
+                                            "range": {"sheetId": new_wks.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 8},
+                                            "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.98}}},
+                                            "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)"
+                                        }
+                                    },
+                                    {
+                                        "repeatCell": {
+                                            "range": {"sheetId": new_wks.id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 8},
+                                            "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP", "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}}},
+                                            "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,backgroundColor)"
+                                        }
                                     }
-                                },
-                                {
-                                    "repeatCell": {
-                                        "range": {"sheetId": new_wks.id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 0, "endColumnIndex": 8},
-                                        "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontFamily": "Times New Roman"}, "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP", "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}}},
-                                        "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy,backgroundColor)"
-                                    }
-                                }
-                            ])
-                            sh_t2.batch_update({"requests": reqs})
-                            
-                            st.success(f"✅ Đã tạo thành công Vỏ bản tin {date_str_t2} & Lấy nhân sự chuẩn!")
-                            time.sleep(1)
-                            fetch_today_in_2.clear()
-                            st.cache_data.clear()
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"Lỗi khi tạo sheet: {e}")
+                                ])
+                                sh_t2.batch_update({"requests": reqs})
+                                
+                                st.success(f"✅ Đã tạo thành công Vỏ bản tin {date_str_t2} & Lấy nhân sự chuẩn!")
+                                time.sleep(1)
+                                try: fetch_today_in_2.clear()
+                                except: pass
+                                st.cache_data.clear()
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Lỗi khi tạo sheet: {e}")
             else:
-                # --- GIAO DIỆN CHÍNH KHI ĐÃ CÓ BẢNG ---
-                roster_data = [""] * 8
+                # ================= GIAO DIỆN CHÍNH KHI ĐÃ CÓ BẢNG =================
+                roster_data = ["--"] * 8
                 content_start_idx = -1
                 header_cols = []
                 
+                # Quét Sheet để tìm thông tin
                 for i, row in enumerate(raw_data_t2):
                     if "Lãnh đạo Ban" in row or "Lãnh đạo phòng" in row:
-                        roster_data = (raw_data_t2[i+1] + [""] * 8)[:8]
+                        try:
+                            pulled = raw_data_t2[i+1]
+                            # Nếu cell trống, gán "--"
+                            roster_data = [(val.strip() if val.strip() else "--") for val in (pulled + [""] * 8)[:8]]
+                        except: pass
                     if "ĐẦU TIN" in row and "NGƯỜI THỰC HIỆN" in row:
                         content_start_idx = i
                         header_cols = row
                 
-                st.markdown("### 👥 KÍP TRỰC BẢN TIN")
-                c_r1, c_r2, c_r3, c_r4, c_r5, c_r6, c_r7, c_r8 = st.columns(8)
-                cols_k = [c_r1, c_r2, c_r3, c_r4, c_r5, c_r6, c_r7, c_r8]
-                labels = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ', 'Người hiệu đính', 'Người thẩm định']
-                
-                safe_list_nv = list_nv if 'list_nv' in locals() else ["--"]
-                for idx, col in enumerate(cols_k):
-                    val = roster_data[idx]
-                    opts = [val] + safe_list_nv if val and val not in safe_list_nv else safe_list_nv
-                    col.selectbox(labels[idx], opts, index=0, key=f"k_{idx}_{date_str_t2}")
-                
-                st.divider()
+                # --- KHU VỰC THÔNG TIN KÍP TRỰC BẢN TIN (THIẾT KẾ GIỐNG VỎ TRỰC SỐ) ---
+                with st.expander("👥 THÔNG TIN KÍP TRỰC BẢN TIN", expanded=False):
+                    labels = ['Lãnh đạo Ban', 'Lãnh đạo phòng', 'TCSX', 'BT1/MC', 'BT2', 'Hỗ trợ', 'Người hiệu đính', 'Người thẩm định']
+                    
+                    # Dòng 1: 4 Vị trí đầu
+                    c1, c2, c3, c4 = st.columns(4)
+                    cols_row1 = [c1, c2, c3, c4]
+                    for i in range(4):
+                        val = roster_data[i]
+                        opts = ["--"] + safe_list_nv
+                        if val not in opts: opts.append(val)
+                        cols_row1[i].selectbox(labels[i], opts, index=opts.index(val), key=f"k_{i}_{date_str_t2}")
+                    
+                    st.write("---")
+                    # Dòng 2: 4 Vị trí sau
+                    c5, c6, c7, c8 = st.columns(4)
+                    cols_row2 = [c5, c6, c7, c8]
+                    for i in range(4, 8):
+                        val = roster_data[i]
+                        opts = ["--"] + safe_list_nv
+                        if val not in opts: opts.append(val)
+                        cols_row2[i-4].selectbox(labels[i], opts, index=opts.index(val), key=f"k_{i}_{date_str_t2}")
 
+                # --- LẤY DANH SÁCH BÀI VIẾT TỪ GOOGLE SHEET ---
                 if content_start_idx != -1:
                     list_tin_bai = []
                     for r_idx in range(content_start_idx + 1, len(raw_data_t2)):
@@ -4331,40 +4358,46 @@ else:
                             row_dict["_row_idx"] = r_idx
                             list_tin_bai.append(row_dict)
 
-                    # --- FORM THÊM TIN MỚI VÀO BẢN TIN ---
-                    with st.expander("➕ THÊM TIN MỚI VÀO KỊCH BẢN", expanded=False):
-                        with st.form("form_add_tin_t2", clear_on_submit=True):
-                            c_new1, c_new2 = st.columns([3, 1])
-                            new_dau_tin = c_new1.text_input("Tên tin (Đầu tin)", placeholder="VD: Khai mạc sự kiện X...")
-                            new_btv = c_new2.selectbox("Người thực hiện", [""] + safe_list_nv)
-                            
-                            new_viet = st.text_area("Nội dung (Tiếng Việt)", height=150)
-                            new_anh = st.text_area("Bản dịch thô (Tiếng Anh)", height=150)
-                            
-                            if st.form_submit_button("LƯU TIN MỚI VÀO SHEET", type="primary"):
-                                if not new_dau_tin:
-                                    st.warning("Vui lòng nhập Tên đầu tin!")
-                                else:
-                                    with st.spinner("Đang lưu tin mới..."):
-                                        client = get_gspread_client_cached()
-                                        wks = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q").worksheet(date_str_t2)
-                                        # Xác định vị trí lưu: Lưu ngay TRƯỚC dòng Outro
-                                        outro_idx = len(raw_data_t2)
-                                        for r in reversed(raw_data_t2):
-                                            if "Outro" in str(r).strip():
-                                                break
-                                            outro_idx -= 1
-                                            
-                                        row_to_add = [new_dau_tin, new_btv, new_viet, new_anh, "", "", "", ""]
-                                        wks.insert_row(row_to_add, index=outro_idx)
+                    # --- FORM THÊM TIN MỚI (LÔI RA NGOÀI ĐỂ RÕ RÀNG NHẤT) ---
+                    st.markdown("#### ➕ THÊM TIN MỚI VÀO BẢN TIN")
+                    with st.form("form_add_tin_t2", clear_on_submit=True):
+                        c_new1, c_new2 = st.columns([3, 1])
+                        new_dau_tin = c_new1.text_input("Tên tin (Đầu tin)", placeholder="VD: Khai mạc sự kiện X...")
+                        new_btv = c_new2.selectbox("Người thực hiện", ["--"] + safe_list_nv)
+                        
+                        c_new_v, c_new_e = st.columns(2)
+                        new_viet = c_new_v.text_area("Nội dung (Tiếng Việt)", height=150)
+                        new_anh = c_new_e.text_area("Bản dịch thô (Tiếng Anh)", height=150)
+                        
+                        if st.form_submit_button("🚀 THÊM VÀO KỊCH BẢN (CHÈN TRƯỚC OUTRO)", type="primary"):
+                            if not new_dau_tin:
+                                st.warning("Vui lòng nhập Tên đầu tin!")
+                            else:
+                                with st.spinner("Đang lưu tin mới..."):
+                                    client = get_gspread_client_cached()
+                                    wks = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q").worksheet(date_str_t2)
+                                    
+                                    # Xác định vị trí lưu: Lưu ngay TRƯỚC dòng Outro
+                                    outro_idx = len(raw_data_t2)
+                                    for r in reversed(raw_data_t2):
+                                        if "Outro" in str(r).strip():
+                                            break
+                                        outro_idx -= 1
                                         
-                                        st.success("Đã thêm thành công!")
-                                        time.sleep(0.5)
-                                        fetch_today_in_2.clear()
-                                        st.cache_data.clear()
-                                        st.rerun()
+                                    btv_clean = new_btv if new_btv != "--" else ""
+                                    row_to_add = [new_dau_tin, btv_clean, new_viet, new_anh, "", "", "", ""]
+                                    wks.insert_row(row_to_add, index=outro_idx)
+                                    
+                                    st.success("Đã thêm thành công!")
+                                    time.sleep(1)
+                                    try: fetch_today_in_2.clear()
+                                    except: pass
+                                    st.cache_data.clear()
+                                    st.rerun()
 
-                    st.write("")
+                    st.divider()
+
+                    # --- GIAO DIỆN DANH SÁCH BÀI VÀ DUYỆT BÀI ---
                     col_list, col_detail = st.columns([1.2, 2.8])
                     
                     with col_list:
@@ -4387,11 +4420,11 @@ else:
                                 st.markdown(
                                     f'<div class="{card_cls}" style="margin-bottom: 5px;">'
                                     f'<div><b>{dau_tin}</b></div>'
-                                    f'<div style="color:gray; font-size: 12px; margin-top:2px;">👤 {nguoi_lam}</div>'
+                                    f'<div style="color:gray; font-size: 12px; margin-top:2px;">👤 BTV: {nguoi_lam if nguoi_lam else "--"}</div>'
                                     f'</div>', 
                                     unsafe_allow_html=True
                                 )
-                                if st.button("Mở 👉", key=f"btn_nav_{item['_row_idx']}", use_container_width=True):
+                                if st.button("Mở / Sửa 👉", key=f"btn_nav_{item['_row_idx']}", use_container_width=True):
                                     st.session_state["selected_t2_idx"] = item["_row_idx"]
                                     st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -4405,13 +4438,14 @@ else:
                             text_vn = selected_item.get("NỘI DUNG\n(Tiếng Việt)", selected_item.get("NỘI DUNG\n(kèm link duyệt)", ""))
                             text_en = selected_item.get("BẢN DỊCH\n(English)", selected_item.get("English/TO PROOFREAD", ""))
                             
-                            st.markdown("**🇻🇳 TIẾNG VIỆT (Kèm Link):**")
-                            e_vn = st.text_area("Chỉnh sửa nội dung Việt", value=text_vn, height=300, key=f"e_vn_{selected_item['_row_idx']}", label_visibility="collapsed")
+                            c_txt1, c_txt2 = st.columns(2)
+                            c_txt1.markdown("**🇻🇳 TIẾNG VIỆT (Kèm Link):**")
+                            e_vn = c_txt1.text_area("Chỉnh sửa nội dung Việt", value=text_vn, height=450, key=f"e_vn_{selected_item['_row_idx']}", label_visibility="collapsed")
                             
-                            st.markdown("**🇬🇧 BẢN DỊCH THÔ (English):**")
-                            e_en = st.text_area("Chỉnh sửa bản dịch", value=text_en, height=300, key=f"e_en_{selected_item['_row_idx']}", label_visibility="collapsed")
+                            c_txt2.markdown("**🇬🇧 BẢN DỊCH THÔ (English):**")
+                            e_en = c_txt2.text_area("Chỉnh sửa bản dịch", value=text_en, height=450, key=f"e_en_{selected_item['_row_idx']}", label_visibility="collapsed")
                             
-                            # Cơ chế AI Tự động
+                            # Cảnh báo AI (Vẫn hoạt động tự động 100%)
                             text_to_scan = e_en if e_en else e_vn
                             if text_to_scan and len(text_to_scan.strip()) > 20:
                                 st.markdown("🤖 **GỢI Ý AI (Tự động rà soát):**")
@@ -4428,11 +4462,11 @@ else:
                             st.markdown("#### ✍️ GÓP Ý & CHỐT BẢN")
                             
                             c_cm1, c_cm2 = st.columns(2)
-                            e_tcsx = c_cm1.text_area("Góp ý của TCSX:", value=selected_item.get("TCSX", ""), height=120)
-                            e_ldp = c_cm2.text_area("Góp ý của LĐP:", value=selected_item.get("LĐP", ""), height=120)
+                            e_tcsx = c_cm1.text_area("Góp ý của TCSX:", value=selected_item.get("TCSX", ""), height=150)
+                            e_ldp = c_cm2.text_area("Góp ý của LĐP:", value=selected_item.get("LĐP", ""), height=150)
                             
                             c_proof, c_cap = st.columns(2)
-                            e_proof = c_proof.text_area("✅ BẢN CHỐT (PROOFREAD):", value=selected_item.get("PROOFREAD", ""), height=200)
+                            e_proof = c_proof.text_area("✅ BẢN CHỐT CUỐI (PROOFREAD):", value=selected_item.get("PROOFREAD", ""), height=200)
                             e_cap = c_cap.text_area("📝 Caption Đăng MXH:", value=selected_item.get("Caption MXH", selected_item.get("Caption", "")), height=200)
                             
                             if st.button("💾 LƯU THAY ĐỔI VÀO SHEET", type="primary", use_container_width=True):
@@ -4441,7 +4475,6 @@ else:
                                         client = get_gspread_client_cached()
                                         wks_update = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q").worksheet(date_str_t2)
                                         
-                                        # Hỗ trợ update linh hoạt theo cả header mới (8 cột) và cũ (12 cột) nếu còn tồn đọng
                                         idx_nd = header_cols.index(next((h for h in header_cols if "NỘI DUNG" in h), header_cols[2])) + 1
                                         idx_eng = header_cols.index(next((h for h in header_cols if "English" in h or "BẢN DỊCH" in h), header_cols[3])) + 1
                                         idx_tcsx = header_cols.index("TCSX") + 1
@@ -4462,7 +4495,8 @@ else:
                                         
                                         st.success("Lưu thành công!")
                                         time.sleep(0.5)
-                                        fetch_today_in_2.clear()
+                                        try: fetch_today_in_2.clear()
+                                        except: pass
                                         st.cache_data.clear()
                                         st.rerun()
                                     except Exception as update_err:
