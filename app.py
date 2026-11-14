@@ -4192,13 +4192,14 @@ else:
                 if st.button("Tạo vỏ bản tin mới", type="primary"):
                     with st.spinner("⏳ Đang khởi tạo Vỏ bản tin mới trên Google Sheet..."):
                         try:
-                            # SỬ DỤNG HÀM KẾT NỐI CHUẨN KÉO TỪ HỆ THỐNG GỐC, TRÁNH LỖI 'GC'
-                            sh_t2 = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
-                            
-                            # Kiểm tra xem kết nối có thành công không trước khi chạy tiếp
-                            if sh_t2 is None:
-                                st.error("❌ Không thể kết nối tới Google Sheet (Lỗi mạng hoặc hết hạn Token). Vui lòng tải lại trang hoặc thử lại sau vài giây.")
-                                st.stop() # Dùng st.stop() thay vì return để dừng Streamlit an toàn
+                            # SỬ DỤNG LẠI CHÍNH HÀM KẾT NỐI BẢN GỐC CỦA BẠN NHƯNG CÓ CƠ CHẾ BẢO VỆ
+                            client = get_gspread_client_cached()
+                            if not client:
+                                st.error("❌ Mất kết nối tới Service Account. Vui lòng tải lại trang.")
+                                st.stop()
+                                
+                            # Mở trực tiếp bằng ID (cách mà web bạn vẫn đang làm với Vỏ trực số)
+                            sh_t2 = client.open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
 
                             # Tạo tab mới với tên là ngày được chọn
                             new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=12)
@@ -4375,7 +4376,7 @@ else:
                                     with st.spinner("Đang lưu lên hệ thống..."):
                                         try:
                                             # Ghi dữ liệu vào sheet
-                                            sh_t2_update = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
+                                            sh_t2_update = get_gspread_client_cached().open_by_key("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
                                             wks_update = sh_t2_update.worksheet(date_str_t2)
                                             
                                             # Lấy index cột
