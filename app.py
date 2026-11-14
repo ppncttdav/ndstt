@@ -4192,9 +4192,14 @@ else:
                 if st.button("Tạo vỏ bản tin mới", type="primary"):
                     with st.spinner("⏳ Đang khởi tạo Vỏ bản tin mới trên Google Sheet..."):
                         try:
-                            # SỬ DỤNG HÀM KẾT NỐI CHUẨN KÉO TỪ HỆ THỐNG GỐC
+                            # SỬ DỤNG HÀM KẾT NỐI CHUẨN KÉO TỪ HỆ THỐNG GỐC, TRÁNH LỖI 'GC'
                             sh_t2 = ket_noi_sheet("1B1i5H0mfAwFiN6oPxUd6uiJxWW_PjGdhkPb7wbvzh9Q")
                             
+                            # Kiểm tra xem kết nối có thành công không trước khi chạy tiếp
+                            if sh_t2 is None:
+                                st.error("❌ Không thể kết nối tới Google Sheet (Lỗi mạng hoặc hết hạn Token). Vui lòng tải lại trang hoặc thử lại sau vài giây.")
+                                return # Dừng hàm tại đây để không bị lỗi 'NoneType'
+
                             # Tạo tab mới với tên là ngày được chọn
                             new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=12)
                             
