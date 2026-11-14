@@ -4198,7 +4198,7 @@ else:
                             # Kiểm tra xem kết nối có thành công không trước khi chạy tiếp
                             if sh_t2 is None:
                                 st.error("❌ Không thể kết nối tới Google Sheet (Lỗi mạng hoặc hết hạn Token). Vui lòng tải lại trang hoặc thử lại sau vài giây.")
-                                return # Dừng hàm tại đây để không bị lỗi 'NoneType'
+                                st.stop() # Dùng st.stop() thay vì return để dừng Streamlit an toàn
 
                             # Tạo tab mới với tên là ngày được chọn
                             new_wks = sh_t2.add_worksheet(title=date_str_t2, rows=100, cols=12)
